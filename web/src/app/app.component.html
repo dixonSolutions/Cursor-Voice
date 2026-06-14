@@ -1,0 +1,135 @@
+<!-- ── Token setup dialog (shown until credentials are saved) ─────────────── -->
+<p-dialog
+  [visible]="!bridge.hasCredentials()"
+  [modal]="true"
+  [closable]="false"
+  [draggable]="false"
+  [resizable]="false"
+  header="🎙 Cursor Voice"
+  styleClass="cv-setup-dialog"
+  [style]="{ width: '92vw', maxWidth: '400px' }">
+
+  <p class="cv-setup-desc">
+    Enter the app token from your bridge's <code>.env</code> file.
+    It stays on this device only and is never sent to any third party.
+  </p>
+
+  <div class="cv-field">
+    <label class="cv-field-label" for="token-input">App Token</label>
+    <p-password
+      inputId="token-input"
+      [(ngModel)]="tokenInput"
+      placeholder="Paste token here…"
+      [feedback]="false"
+      [toggleMask]="true"
+      styleClass="w-full"
+      (keydown.enter)="onSaveToken()" />
+  </div>
+
+  <div class="cv-field">
+    <label class="cv-field-label" for="bridge-url">Bridge URL <span style="opacity:.55">(optional)</span></label>
+    <input
+      pInputText
+      id="bridge-url"
+      type="text"
+      [(ngModel)]="bridgeUrlInput"
+      placeholder="https://machine.ts.net"
+      style="width:100%"
+      (keydown.enter)="onSaveToken()" />
+    <span class="cv-field-hint">Leave blank to use the current origin.</span>
+  </div>
+
+  <p-button
+    label="Save &amp; Connect"
+    icon="pi pi-check"
+    [fluid]="true"
+    (onClick)="onSaveToken()" />
+</p-dialog>
+
+<!-- ── Main app (shown once credentials are saved) ─────────────────────── -->
+@if (bridge.hasCredentials()) {
+  <div class="cv-root">
+
+    <!-- Header: logo + connection status -->
+    <header class="cv-header">
+      <div class="cv-logo">
+        <span class="cv-logo-icon"><i class="pi pi-microphone"></i></span>
+        Cursor Voice
+      </div>
+
+      <div class="cv-status" [class]="statusClass()">
+        <span class="cv-status-dot"></span>
+        <span>{{ statusLabel() }}</span>
+      </div>
+    </header>
+
+    <!-- Project + PTT card -->
+    <div class="cv-card">
+
+      <!-- Project dropdown -->
+      <div>
+        <label class="cv-field-label" for="project-select">Active Project</label>
+        <p-select
+          inputId="project-select"
+          [options]="projectOptions()"
+          [(ngModel)]="selectedProject"
+          optionLabel="label"
+          optionValue="value"
+          placeholder="Select a project…"
+          [disabled]="projectOptions().length === 0"
+          (onChange)="onProjectChange(selectedProject)" />
+      </div>
+
+      <!-- Push-to-talk button -->
+      <div class="cv-ptt-wrap">
+        <button
+          class="cv-ptt-btn"
+          [class.listening]="appState.state() === 'listening'"
+          [class.working]="appState.state() === 'working'"
+          [disabled]="appState.state() === 'working' || bridge.wsStatus() !== 'connected'"
+          (click)="handlePtt()"
+          aria-label="Push to talk">
+          <i
+            class="cv-ptt-icon"
+            [class.pi]="true"
+            [class.pi-microphone]="appState.state() !== 'working'"
+            [class.pi-spin]="appState.state() === 'working'"
+            [class.pi-spinner]="appState.state() === 'working'">
+          </i>
+          <span class="cv-ptt-label">{{ appState.pttLabel() }}</span>
+        </button>
+
+        <p class="cv-ptt-hint">
+          Tap once to start &mdash; tap again to stop<br />
+          Say <em>"Cursor…"</em> to begin a command
+        </p>
+      </div>
+    </div>
+
+    <!-- Transcript log (last 50 entries) -->
+    <div class="cv-transcript-wrap">
+      <p-scroll-panel styleClass="cv-transcript-scroll" [style]="{ width: '100%', maxHeight: '280px' }">
+        <div class="cv-transcript">
+          @for (entry of voiceSession.transcript(); track entry.id) {
+            <div class="cv-transcript-entry" [class]="entry.role">
+              {{ entry.text }}
+            </div>
+          }
+          <div #transcriptBottom></div>
+        </div>
+      </p-scroll-panel>
+    </div>
+
+    <!-- Footer: settings -->
+    <footer class="cv-footer">
+      <p-button
+        label="Settings"
+        icon="pi pi-cog"
+        severity="secondary"
+        [text]="true"
+        size="small"
+        (onClick)="onClearCredentials()" />
+    </footer>
+
+  </div>
+}

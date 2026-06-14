@@ -1,0 +1,344 @@
+/* ── PrimeIcons ──────────────────────────────────────────────────────────── */
+@import 'primeicons/primeicons.css';
+
+/* ── Global reset + base ─────────────────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+  /* Prevent accidental zoom on iOS during push-to-talk */
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  font-family: var(--p-font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif);
+  background: #0f172a; /* slate-900 — filled before theme paints */
+  color: var(--p-text-color);
+  min-height: 100dvh;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── App layout shell ────────────────────────────────────────────────────── */
+.cv-root {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  min-height: 100dvh;
+  padding: 1.5rem 1rem;
+  gap: 1.25rem;
+  background: var(--p-surface-950, #020617);
+}
+
+/* ── Header ──────────────────────────────────────────────────────────────── */
+.cv-header {
+  width: 100%;
+  max-width: 420px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+
+.cv-logo {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--p-text-color);
+  user-select: none;
+
+  .cv-logo-icon {
+    width: 30px;
+    height: 30px;
+    border-radius: 7px;
+    background: var(--p-primary-500);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 15px;
+    flex-shrink: 0;
+  }
+}
+
+/* ── Status chip overrides ───────────────────────────────────────────────── */
+.cv-status {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.73rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+
+  .cv-status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--p-surface-500);
+    transition: background 150ms ease;
+    flex-shrink: 0;
+  }
+
+  &.connected  .cv-status-dot { background: var(--p-green-500); }
+  &.connected  { color: var(--p-green-400); }
+  &.error      .cv-status-dot { background: var(--p-red-500); }
+  &.error      { color: var(--p-red-400); }
+  &.working    .cv-status-dot {
+    background: var(--p-amber-500);
+    animation: cv-pulse 1s infinite;
+  }
+  &.working    { color: var(--p-amber-400); }
+  &.connecting { color: var(--p-surface-400); }
+}
+
+@keyframes cv-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.35; }
+}
+
+/* ── Main card ───────────────────────────────────────────────────────────── */
+.cv-card {
+  width: 100%;
+  max-width: 420px;
+  background: var(--p-surface-900);
+  border: 1px solid var(--p-surface-700);
+  border-radius: var(--p-border-radius-xl, 1rem);
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.cv-field-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--p-text-muted-color);
+  margin-bottom: 0.4rem;
+  display: block;
+}
+
+/* ── Push-to-talk button ─────────────────────────────────────────────────── */
+/* Fitts's Law: large, centred, high contrast active state (Von Restorff) */
+.cv-ptt-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 0 0.25rem;
+}
+
+.cv-ptt-btn {
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  border: 3px solid var(--p-primary-500);
+  background: transparent;
+  color: var(--p-text-color);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  transition:
+    background 150ms ease,
+    border-color 150ms ease,
+    transform 80ms ease,
+    box-shadow 150ms ease;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+
+  .cv-ptt-icon {
+    font-size: 2.2rem;
+    line-height: 1;
+  }
+
+  .cv-ptt-label {
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    opacity: 0.75;
+  }
+
+  &:active {
+    transform: scale(0.95);
+  }
+
+  &.listening {
+    background: var(--p-primary-500);
+    color: #fff;
+    border-color: var(--p-primary-400);
+    box-shadow:
+      0 0 0 12px rgba(99, 102, 241, 0.15),
+      0 0 0 24px rgba(99, 102, 241, 0.07);
+    animation: cv-ring 2s infinite;
+
+    .cv-ptt-label { opacity: 1; }
+  }
+
+  &.working {
+    border-color: var(--p-amber-500);
+    color: var(--p-amber-400);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+@keyframes cv-ring {
+  0%, 100% {
+    box-shadow:
+      0 0 0 12px rgba(99, 102, 241, 0.15),
+      0 0 0 24px rgba(99, 102, 241, 0.07);
+  }
+  50% {
+    box-shadow:
+      0 0 0 16px rgba(99, 102, 241, 0.22),
+      0 0 0 32px rgba(99, 102, 241, 0.05);
+  }
+}
+
+.cv-ptt-hint {
+  font-size: 0.72rem;
+  color: var(--p-text-muted-color);
+  text-align: center;
+  line-height: 1.5;
+
+  em {
+    color: var(--p-primary-400);
+    font-style: normal;
+    font-weight: 600;
+  }
+}
+
+/* ── Transcript ──────────────────────────────────────────────────────────── */
+.cv-transcript-wrap {
+  width: 100%;
+  max-width: 420px;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.cv-transcript {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+}
+
+.cv-transcript-entry {
+  font-size: 0.82rem;
+  line-height: 1.55;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  border-left: 3px solid transparent;
+  animation: cv-fade-in 200ms ease;
+
+  &.user {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: var(--p-surface-600);
+    color: var(--p-text-muted-color);
+  }
+
+  &.assistant {
+    background: rgba(99, 102, 241, 0.08);
+    border-color: var(--p-primary-500);
+    color: var(--p-text-color);
+  }
+
+  &.system {
+    background: rgba(34, 197, 94, 0.07);
+    border-color: var(--p-green-500);
+    color: var(--p-green-300);
+    font-style: italic;
+  }
+
+  &.error {
+    background: rgba(239, 68, 68, 0.08);
+    border-color: var(--p-red-500);
+    color: var(--p-red-300);
+  }
+}
+
+@keyframes cv-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Footer ──────────────────────────────────────────────────────────────── */
+.cv-footer {
+  width: 100%;
+  max-width: 420px;
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 0.25rem;
+  flex-shrink: 0;
+}
+
+/* ── Setup dialog overrides ──────────────────────────────────────────────── */
+.cv-setup-dialog {
+  .p-dialog-header {
+    padding: 1.5rem 1.5rem 0.5rem;
+    font-size: 1.2rem;
+    font-weight: 700;
+  }
+
+  .p-dialog-content {
+    padding: 0.5rem 1.5rem 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+  }
+}
+
+.cv-setup-desc {
+  font-size: 0.84rem;
+  color: var(--p-text-muted-color);
+  line-height: 1.6;
+}
+
+.cv-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+
+  .cv-field-hint {
+    font-size: 0.7rem;
+    color: var(--p-text-muted-color);
+  }
+}
+
+/* ── PrimeNG component overrides ─────────────────────────────────────────── */
+
+/* Make Select match card background */
+.p-select {
+  width: 100%;
+}
+
+/* ScrollPanel height in transcript area */
+.cv-transcript-scroll {
+  .p-scrollpanel-content {
+    padding: 0.25rem 0.5rem 0.25rem 0;
+  }
+}

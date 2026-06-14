@@ -1,0 +1,15 @@
+/* Component-scoped overrides — global styles live in styles.scss */
+
+:host {
+  display: contents; /* transparent host — layout is in .cv-root */
+}
+
+/* Ensure password input fills its container */
+::ng-deep .cv-setup-dialog p-password,
+::ng-deep .cv-setup-dialog .p-password {
+  width: 100%;
+
+  input {
+    width: 100%;
+  }
+}
