@@ -1,5 +1,6 @@
-import { ApplicationConfig } from '@angular/core';
+import type { ApplicationConfig } from '@angular/core';
 import { provideAnimationsAsync } from '@angular/platform-browser/animations/async';
+import { MessageService } from 'primeng/api';
 import { providePrimeNG } from 'primeng/config';
 import { definePreset } from '@primeuix/themes';
 import Aura from '@primeuix/themes/aura';
@@ -53,6 +54,7 @@ const CursorVoicePreset = definePreset(Aura, {
 export const appConfig: ApplicationConfig = {
   providers: [
     provideAnimationsAsync(),
+    MessageService,
     providePrimeNG({
       theme: {
         preset: CursorVoicePreset,

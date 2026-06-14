@@ -67,11 +67,15 @@
             }
           },
           "options": {
-            "proxyConfig": "web/proxy.conf.json"
+            "proxyConfig": "web/proxy.conf.json",
+            "port": 4200
           },
           "defaultConfiguration": "development"
         }
       }
     }
+  },
+  "cli": {
+    "analytics": false
   }
 }

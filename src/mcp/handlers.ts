@@ -24,6 +24,7 @@ import { childLogger } from '../log.js';
 import { handleListProjects, handleSetProject } from './tools/project.js';
 import { handleListModels, handleSetModel } from './tools/model.js';
 import { handleCursorSubmit, handleCursorAsk } from './tools/execute.js';
+import { handleCursorRecallAnswer } from './tools/recall.js';
 import { handleCursorStatus, handleCursorStop } from './tools/job.js';
 import { handleNewSession, handleSessionInfo } from './tools/session.js';
 import { handleCursorDiff, handleCursorRevert } from './tools/gitTools.js';
@@ -119,10 +120,12 @@ async function route(
       return handleCursorSubmit(a, sessionKey, activeProject);
     case 'cursor_ask':
       return handleCursorAsk(a, sessionKey, activeProject);
+    case 'cursor_recall_answer':
+      return handleCursorRecallAnswer(a, sessionKey);
     case 'cursor_status':
-      return handleCursorStatus(a);
+      return handleCursorStatus(a, sessionKey);
     case 'cursor_stop':
-      return handleCursorStop(a);
+      return handleCursorStop(a, sessionKey);
     case 'cursor_new_session':
       return handleNewSession(a, activeProject);
     case 'cursor_session_info':

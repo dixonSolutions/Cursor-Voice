@@ -1,0 +1,73 @@
+<p-card header="Bridge connection">
+  <p-fluid>
+    <div class="cv-connection-status">
+      <span>Status</span>
+      <p-tag [value]="wsStatusLabel()" [severity]="wsStatusSeverity()" />
+      @if (bridge.apiStatus() === 'error') {
+        <p-tag value="API blocked" severity="warn" />
+      }
+    </div>
+
+    <p-message
+      severity="secondary"
+      variant="simple"
+      text="The app token authenticates this device with your home bridge. It is stored locally and never sent to voice providers." />
+
+    <p-iftalabel>
+      <p-password
+        inputId="conn-token"
+        [(ngModel)]="tokenInput"
+        placeholder="Paste new token to replace…"
+        [feedback]="false"
+        [toggleMask]="true"
+        [fluid]="true" />
+      <label for="conn-token">App token</label>
+    </p-iftalabel>
+
+    <p-iftalabel>
+      <input
+        pInputText
+        id="conn-bridge-url"
+        type="text"
+        [(ngModel)]="bridgeUrlInput"
+        placeholder="https://machine.ts.net" />
+      <label for="conn-bridge-url">Bridge URL (optional)</label>
+    </p-iftalabel>
+
+    <p-message
+      severity="secondary"
+      variant="simple"
+      text="In test mode, leave Bridge URL blank so requests go through the Angular proxy." />
+
+    <p-button
+      label="Save credentials"
+      icon="pi pi-check"
+      [fluid]="true"
+      (onClick)="onSaveCredentials()" />
+
+    @if (bridge.wsStatus() === 'connected') {
+      <p-button
+        label="Disconnect"
+        icon="pi pi-sign-out"
+        severity="secondary"
+        [outlined]="true"
+        [fluid]="true"
+        (onClick)="onDisconnect()" />
+    } @else if (bridge.hasCredentials()) {
+      <p-button
+        label="Connect"
+        icon="pi pi-link"
+        [loading]="bridge.wsStatus() === 'connecting' || bridge.wsStatus() === 'error'"
+        [fluid]="true"
+        (onClick)="onConnect()" />
+    }
+
+    <p-button
+      label="Clear app token"
+      icon="pi pi-trash"
+      severity="danger"
+      [outlined]="true"
+      [fluid]="true"
+      (onClick)="onClearAppCredentials()" />
+  </p-fluid>
+</p-card>

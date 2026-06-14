@@ -24,10 +24,13 @@ import {
   getSessionState,
 } from './state/registry.js';
 import { getConfig } from './config.js';
+import { getRunModeInfo } from './runMode.js';
 import { childLogger } from './log.js';
 import { dispatchTool } from './mcp/handlers.js';
-import { mintToken } from './realtime/token.js';
+import { mintToken, hasViableVoiceProvider } from './realtime/token.js';
 import { getNarrator, PhoneRelaySession } from './executor/narrator.js';
+import { registerVoiceProviderRoutes } from './routes/voiceProviders.js';
+import { registerBedrockVoiceWebSocket } from './realtime/bedrock/ws.js';
 
 const execFileAsync = promisify(execFile);
 const log = childLogger('server');
@@ -50,6 +53,31 @@ async function getCursorAgentVersion(): Promise<string | null> {
 
 export async function buildServer(): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
+  const { settings } = getConfig();
+  const run = getRunModeInfo(settings);
+
+  // Test mode: allow cross-origin API calls when the PWA uses an explicit Bridge URL
+  // (e.g. http://127.0.0.1:8000 from http://localhost:4200). WebSocket auth is unaffected.
+  if (run.useDevWebServer) {
+    const devOrigins = new Set([
+      run.webUrl,
+      `http://127.0.0.1:${run.webPort}`,
+      `http://localhost:${run.webPort}`,
+    ]);
+
+    app.addHook('onRequest', async (req, reply) => {
+      const origin = req.headers.origin;
+      if (origin && devOrigins.has(origin)) {
+        reply.header('Access-Control-Allow-Origin', origin);
+        reply.header('Vary', 'Origin');
+        reply.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+        reply.header('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+      }
+      if (req.method === 'OPTIONS') {
+        await reply.code(204).send();
+      }
+    });
+  }
 
   await app.register(fastifyWebsocket);
 
@@ -68,11 +96,18 @@ export async function buildServer(): Promise<FastifyInstance> {
     const db = getDb();
     const projects = listProjects();
     const cliVersion = await getCursorAgentVersion();
+    const { settings } = getConfig();
+    const run = getRunModeInfo(settings);
     return {
       status: db.open ? 'ok' : 'degraded',
       db: db.open ? 'ok' : 'error',
       projects: projects.length,
       cliVersion,
+      runMode: run.runMode,
+      backendUrl: run.backendUrl,
+      webUrl: run.webUrl,
+      publicBaseUrl: run.publicBaseUrl ?? null,
+      useDevWebServer: run.useDevWebServer,
       ts: new Date().toISOString(),
     };
   });
@@ -80,6 +115,7 @@ export async function buildServer(): Promise<FastifyInstance> {
   // ── Auth gate for all /api/* ───────────────────────────────────────────
 
   app.addHook('preHandler', async (req, reply) => {
+    if (req.method === 'OPTIONS') return;
     if (req.url.startsWith('/api/')) {
       await requireAuth(req, reply);
     }
@@ -140,10 +176,10 @@ export async function buildServer(): Promise<FastifyInstance> {
    * Body: { voice?: string }
    */
   app.post<{ Body?: { voice?: string } }>('/api/realtime/token', async (req, reply) => {
-    const { env } = getConfig();
-    if (!env.OPENAI_API_KEY && !env.GEMINI_API_KEY) {
+    if (!hasViableVoiceProvider()) {
       return reply.code(503).send({
-        error: 'No voice provider API key configured. Set OPENAI_API_KEY in .env.',
+        error:
+          'No viable voice provider configured. Register a provider and set API keys in Settings.',
       });
     }
 
@@ -159,12 +195,21 @@ export async function buildServer(): Promise<FastifyInstance> {
     }
   });
 
+  await registerVoiceProviderRoutes(app);
+
   /** GET /api/settings — non-secret operational settings. */
   app.get('/api/settings', async () => {
     const { settings: s } = getConfig();
+    const run = getRunModeInfo(s);
     return {
-      voiceProvider: s.voiceProvider,
-      realtimeModel: s.realtimeModel,
+      runMode: run.runMode,
+      backendUrl: run.backendUrl,
+      webUrl: run.webUrl,
+      publicBaseUrl: run.publicBaseUrl ?? null,
+      useDevWebServer: run.useDevWebServer,
+      defaultVoiceProvider: s.voice.defaultProvider,
+      defaultVoiceModel: s.voice.providers[s.voice.defaultProvider]?.defaultModel ?? null,
+      wakeWords: s.voice.wakeWords,
       defaultMode: s.defaultMode,
       maxConcurrentJobs: s.maxConcurrentJobs,
       planFirst: s.planFirst,
@@ -282,6 +327,8 @@ export async function buildServer(): Promise<FastifyInstance> {
     });
   });
 
+  registerBedrockVoiceWebSocket(app);
+
   app.setErrorHandler((err, req, reply) => {
     log.error({ err, url: req.url }, 'unhandled route error');
     reply.code(500).send({ error: 'Internal server error' });
@@ -295,10 +342,19 @@ export async function buildServer(): Promise<FastifyInstance> {
   return app;
 }
 
-/** Start listening on 127.0.0.1 (Tailscale proxies externally). */
+/** Start listening on 127.0.0.1 (Tailscale proxies externally in serve mode). */
 export async function startServer(app: FastifyInstance): Promise<string> {
-  const { env } = getConfig();
-  const address = await app.listen({ port: env.PORT, host: '127.0.0.1' });
-  log.info({ address }, 'bridge listening');
+  const { settings } = getConfig();
+  const run = getRunModeInfo(settings);
+  const address = await app.listen({ port: run.backendPort, host: '127.0.0.1' });
+  log.info(
+    {
+      address,
+      runMode: run.runMode,
+      webUrl: run.webUrl,
+      useDevWebServer: run.useDevWebServer,
+    },
+    'bridge listening',
+  );
   return address;
 }

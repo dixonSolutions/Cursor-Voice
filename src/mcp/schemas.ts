@@ -47,24 +47,31 @@ export const CursorSetModelSchema = z.object({
 // ── Group: Execute ────────────────────────────────────────────────────────
 
 export const CursorSubmitSchema = z.object({
-  prompt: promptString.describe('Task description for cursor-agent'),
+  prompt: promptString.describe("The user's intent — relay with minimal editing"),
   project: optionalProject.describe('Target project (defaults to active project)'),
   mode: z.enum(['agent', 'plan']).optional().describe('Execution mode (default: agent)'),
 });
 
 export const CursorAskSchema = z.object({
-  question: promptString.describe('Read-only question about the repo/codebase'),
+  question: promptString.describe("The user's question, verbatim"),
   project: optionalProject.describe('Target project (defaults to active project)'),
+});
+
+export const CursorRecallAnswerSchema = z.object({
+  format: z
+    .enum(['brief', 'full'])
+    .optional()
+    .describe('brief (default) for voice; full for complete text'),
 });
 
 // ── Group: Job ────────────────────────────────────────────────────────────
 
 export const CursorStatusSchema = z.object({
-  job_id: z.string().uuid('job_id must be a UUID'),
+  job_id: z.string().uuid('job_id must be a UUID').optional().describe('Defaults to active job'),
 });
 
 export const CursorStopSchema = z.object({
-  job_id: z.string().uuid('job_id must be a UUID'),
+  job_id: z.string().uuid('job_id must be a UUID').optional().describe('Defaults to active job'),
 });
 
 // ── Group: Session ────────────────────────────────────────────────────────
@@ -116,6 +123,7 @@ export const TOOL_SCHEMAS = {
   cursor_set_model: CursorSetModelSchema,
   cursor_submit: CursorSubmitSchema,
   cursor_ask: CursorAskSchema,
+  cursor_recall_answer: CursorRecallAnswerSchema,
   cursor_status: CursorStatusSchema,
   cursor_stop: CursorStopSchema,
   cursor_new_session: CursorNewSessionSchema,

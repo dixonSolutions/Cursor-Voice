@@ -23,6 +23,7 @@ export type JobEventKind =
   | 'progress_tick'
   | 'job_done'
   | 'job_error'
+  | 'ghost_killed'
   | 'system_init'
   | 'raw';
 

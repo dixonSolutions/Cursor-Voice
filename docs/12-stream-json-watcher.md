@@ -64,6 +64,22 @@ spawn cursor-agent
 | `progress_tick` | Every 15 s if still running | "Still working — just finished reading 4 files." |
 | `job_done` | On `result` | "Done — Cursor changed 3 files. Want to see the diff?" |
 | `job_error` | On `error` or non-zero exit | "Something went wrong. Cursor said: …" |
+| `ghost_killed` | Task/subagent tool detected | "Stopped — Cursor tried to spawn extra agents …" |
+
+### Ghost agent protection
+
+When `settings.ghostKillEnabled` is `true` (default), the watcher inspects every
+`tool_use_start` event. If the tool call looks like a **Task**, **subagent**, or
+**explore** spawn (the pattern that created dozens of parallel CLI sessions), the
+bridge:
+
+1. Emits a `ghost_killed` narration event (Dad hears what happened).
+2. Sends SIGTERM → SIGKILL to the cursor-agent process.
+3. Marks the job `error` with a budget-protection message.
+
+The cursor-agent prompt also includes anti-subagent guardrails via
+`src/executor/agentPrompt.ts` (replaces the old "make reasonable assumptions"
+preamble that encouraged parallel exploration).
 
 ### Rolling `JobSummary` (accumulated, not per-event)
 
@@ -184,3 +200,4 @@ Dad: "Yes, show me the diff"
 | `narratorCadenceMs` | `15000` | Min ms between `progress_tick` injections |
 | `narratorEnabled` | `true` | Disable to silence mid-run narration |
 | `narratorMaxBufferEvents` | `50` | Max narration events buffered when no session active |
+| `ghostKillEnabled` | `true` | Kill cursor-agent if it spawns Task/subagent tools |

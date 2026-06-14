@@ -9,7 +9,12 @@
  */
 
 import { submitJob, askQuestion } from '../../executor/jobManager.js';
+import { childLogger } from '../../log.js';
 import { resolveProjectOrThrow } from './project.js';
+import { looksLikeReadOnlyQuestion, looksLikeMutationRequest } from './questionDetect.js';
+import { setLastAsk, truncateForVoice } from '../../state/lastAsk.js';
+
+const log = childLogger('tool:execute');
 
 // ── cursor_submit ─────────────────────────────────────────────────────────
 
@@ -20,11 +25,15 @@ export interface SubmitArgs {
 }
 
 export interface SubmitResult {
-  job_id: string;
-  status: 'running';
+  job_id?: string;
+  status?: 'running';
   project: string;
-  model: string;
+  model?: string;
   message: string;
+  /** Present when a question was misrouted to submit — answered via cursor_ask instead. */
+  routed?: 'ask';
+  answer?: string;
+  has_more?: boolean;
 }
 
 /**
@@ -37,8 +46,28 @@ export async function handleCursorSubmit(
   activeProject: string | null,
 ): Promise<SubmitResult> {
   const project = resolveProjectOrThrow(args.project, activeProject);
-  const mode = args.mode ?? 'agent';
 
+  if (looksLikeReadOnlyQuestion(args.prompt)) {
+    log.info(
+      { project: project.name, prompt: args.prompt.slice(0, 100) },
+      'cursor_submit redirected to cursor_ask (read-only question)',
+    );
+    const ask = await handleCursorAsk(
+      { question: args.prompt, project: args.project },
+      sessionKey,
+      activeProject,
+    );
+    return {
+      routed: 'ask',
+      answer: ask.answer,
+      has_more: ask.has_more,
+      project: ask.project,
+      message:
+        'Read-only question — answered via cursor_ask. Read the answer field to the user now.',
+    };
+  }
+
+  const mode = args.mode ?? 'agent';
   const result = await submitJob(project, sessionKey, args.prompt, mode);
 
   return {
@@ -46,7 +75,7 @@ export async function handleCursorSubmit(
     status: 'running',
     project: result.project,
     model: result.model,
-    message: `Job started on ${result.project}. Use cursor_status("${result.jobId}") to check progress.`,
+    message: `Job started (${result.jobId}). The user can ask what's happening anytime — use cursor_status without job_id.`,
   };
 }
 
@@ -60,6 +89,7 @@ export interface AskArgs {
 export interface AskResult {
   answer: string;
   project: string;
+  has_more: boolean;
 }
 
 /**
@@ -72,8 +102,26 @@ export async function handleCursorAsk(
   sessionKey: string,
   activeProject: string | null,
 ): Promise<AskResult> {
-  const project = resolveProjectOrThrow(args.question ? args.project : args.project, activeProject);
-  const answer = await askQuestion(project, sessionKey, args.question);
+  const project = resolveProjectOrThrow(args.project, activeProject);
 
-  return { answer, project: project.name };
+  if (looksLikeMutationRequest(args.question)) {
+    throw new Error(
+      'This request changes the repo (commit, PR, merge, implement, etc.) — use cursor_submit, not cursor_ask.',
+    );
+  }
+
+  const fullAnswer = await askQuestion(project, sessionKey, args.question);
+
+  setLastAsk(sessionKey, {
+    question: args.question,
+    answer: fullAnswer,
+    project: project.name,
+  });
+
+  const voiceAnswer = truncateForVoice(fullAnswer);
+  return {
+    answer: voiceAnswer,
+    project: project.name,
+    has_more: voiceAnswer.length < fullAnswer.length,
+  };
 }

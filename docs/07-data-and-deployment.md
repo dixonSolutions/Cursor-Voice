@@ -116,6 +116,31 @@ startup; invalid config fails fast with a clear error.
   session so the model can map natural speech to a canonical name; the server
   still re-resolves + validates every value (see `05` → Project selection).
 
+### Run mode (`test` vs `serve`)
+
+`settings.runMode` selects which row in `settings.runModes` controls ports and URLs:
+
+| Mode | Purpose | Backend | Web app |
+| --- | --- | --- | --- |
+| **`test`** | Local development | `127.0.0.1:8000` (default) | `http://localhost:4200` via `npm run dev:web` |
+| **`serve`** | Production / Tailscale | `127.0.0.1:8787` (default) | Same origin — bridge serves `web/dist` |
+
+```json
+"runMode": "test",
+"runModes": {
+  "test": { "backendPort": 8000, "webPort": 4200 },
+  "serve": {
+    "backendPort": 8787,
+    "publicBaseUrl": "https://your-machine.tailnet-name.ts.net"
+  }
+}
+```
+
+- **`test`:** run `npm run dev` (bridge) + `npm run dev:web` (Angular). Leave Bridge URL blank in the PWA — proxy forwards `/api` and `/ws` to port 8000.
+- **`serve`:** `npm run build && npm start`. Open `publicBaseUrl` (or `127.0.0.1:8787` locally). Set `runMode` to `"serve"` before deploying.
+
+`GET /healthz` returns `runMode`, `backendUrl`, `webUrl`, and `useDevWebServer` for quick sanity checks.
+
 ### Example `config.json`
 
 ```json

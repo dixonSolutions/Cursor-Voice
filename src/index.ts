@@ -15,10 +15,12 @@
 import 'dotenv/config';
 
 import { loadConfig } from './config.js';
+import { getRunModeInfo } from './runMode.js';
 import { initLogger, getLogger } from './log.js';
 import { getDb, closeDb } from './state/db.js';
 import { reconcileRegistry } from './state/registry.js';
 import { markOrphanedJobs } from './state/jobs.js';
+import { killActiveAgent } from './executor/agentSingleton.js';
 import { buildServer, startServer } from './server.js';
 
 async function main(): Promise<void> {
@@ -47,10 +49,15 @@ async function main(): Promise<void> {
   const app = await buildServer();
   await startServer(app);
 
+  const run = getRunModeInfo(config.settings);
+
   log.info(
     {
       projects: config.projects.filter((p) => p.enabled).length,
-      voiceProvider: config.settings.voiceProvider,
+      runMode: run.runMode,
+      backendUrl: run.backendUrl,
+      webUrl: run.webUrl,
+      defaultVoiceProvider: config.settings.voice.defaultProvider,
     },
     'cursor-voice bridge ready',
   );
@@ -59,6 +66,7 @@ async function main(): Promise<void> {
 
   async function shutdown(signal: string): Promise<void> {
     log.info({ signal }, 'shutdown signal received');
+    killActiveAgent('bridge shutdown');
     try {
       await app.close();
       closeDb();

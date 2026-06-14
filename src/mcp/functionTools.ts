@@ -39,7 +39,7 @@ export const FUNCTION_TOOLS: FunctionTool[] = [
     type: 'function',
     name: 'cursor_list_projects',
     description:
-      'List all available projects the user can work on. Optional query filters by name, alias, or description. Use to discover projects or when the user asks "what can I work on?".',
+      'Messenger only: list project names for routing when the user\'s project name is unclear. Do NOT use this to answer questions about what a project does — ask Cursor instead.',
     parameters: {
       type: 'object',
       properties: {
@@ -52,7 +52,7 @@ export const FUNCTION_TOOLS: FunctionTool[] = [
     type: 'function',
     name: 'cursor_set_project',
     description:
-      'Set the active project for the session. Read back the project name and description after setting to confirm with the user.',
+      'Route messages to a project by name. Confirm the name briefly — do not explain the project; Cursor knows the codebase.',
     parameters: {
       type: 'object',
       properties: {
@@ -67,7 +67,7 @@ export const FUNCTION_TOOLS: FunctionTool[] = [
     type: 'function',
     name: 'cursor_list_models',
     description:
-      'List available AI models. Optional query filters (e.g. "claude", "fast", "thinking"). Use when the user asks what models are available or wants to pick one.',
+      'List AI model IDs (Claude, GPT, etc.) for cursor-agent — NOT execution modes. agent/plan/ask are modes on cursor_submit, not models here.',
     parameters: {
       type: 'object',
       properties: {
@@ -80,11 +80,14 @@ export const FUNCTION_TOOLS: FunctionTool[] = [
     type: 'function',
     name: 'cursor_set_model',
     description:
-      'Set the active model for cursor-agent. Call cursor_list_models first to get valid IDs. The model is used for all subsequent cursor_submit calls.',
+      'Set the AI model (e.g. claude-opus, gpt-5, auto). NEVER pass agent/plan/ask — those are cursor_submit modes, not model IDs. Call cursor_list_models first.',
     parameters: {
       type: 'object',
       properties: {
-        model_id: { type: 'string', description: 'Exact model ID from cursor_list_models' },
+        model_id: {
+          type: 'string',
+          description: 'Exact AI model ID from cursor_list_models (e.g. auto, claude-...). NOT agent/plan/ask.',
+        },
       },
       required: ['model_id'],
     },
@@ -95,13 +98,13 @@ export const FUNCTION_TOOLS: FunctionTool[] = [
     type: 'function',
     name: 'cursor_submit',
     description:
-      'Submit a coding task to cursor-agent. Returns a job_id immediately — use cursor_status to track progress. Only call this when the task is clearly defined and the project is confirmed.',
+      'ONLY when the user wants to IMPLEMENT, BUILD, FIX, or CHANGE code (writes files). NEVER for questions — use cursor_ask. Do not use for "next steps", "what is", or "asking about".',
     parameters: {
       type: 'object',
       properties: {
         prompt: {
           type: 'string',
-          description: 'Concrete task description for cursor-agent. Be specific.',
+          description: "The user's exact request — do not rewrite or expand.",
         },
         project: {
           type: 'string',
@@ -110,7 +113,8 @@ export const FUNCTION_TOOLS: FunctionTool[] = [
         mode: {
           type: 'string',
           enum: ['agent', 'plan'],
-          description: 'agent = apply changes immediately; plan = propose a plan without applying',
+          description:
+            'Execution mode (NOT the AI model): agent = apply changes; plan = propose only. Default agent. Set AI model via cursor_set_model separately.',
         },
       },
       required: ['prompt'],
@@ -120,11 +124,11 @@ export const FUNCTION_TOOLS: FunctionTool[] = [
     type: 'function',
     name: 'cursor_ask',
     description:
-      'Read-only repo Q&A — ask cursor-agent a question about the codebase without making changes. Use BEFORE drafting cursor_submit when you need facts about the code.',
+      'DEFAULT for all questions: next steps, status, what is done, roadmap, explain, list. Read-only — no code changes. Call once, wait up to 2 minutes, read answer once.',
     parameters: {
       type: 'object',
       properties: {
-        question: { type: 'string', description: 'Question about the codebase' },
+        question: { type: 'string', description: "The user's question, verbatim" },
         project: {
           type: 'string',
           description: 'Target project (omit to use the active project)',
@@ -133,31 +137,55 @@ export const FUNCTION_TOOLS: FunctionTool[] = [
       required: ['question'],
     },
   },
+  {
+    type: 'function',
+    name: 'cursor_recall_answer',
+    description:
+      'Return the last cursor_ask answer without re-querying Cursor. Use when the user asks to summarize, repeat, or expand the previous answer.',
+    parameters: {
+      type: 'object',
+      properties: {
+        format: {
+          type: 'string',
+          enum: ['brief', 'full'],
+          description: 'brief for voice summary (default); full for complete text',
+        },
+      },
+      required: [],
+    },
+  },
 
   // ── Job ───────────────────────────────────────────────────────────────
   {
     type: 'function',
     name: 'cursor_status',
     description:
-      'Check the status and progress of a running or completed job. Returns status (running/done/error/stopped), summary, and progress events.',
+      'Ask the bridge what Cursor is doing right now. Use when the user asks about progress — never guess; always call this.',
     parameters: {
       type: 'object',
       properties: {
-        job_id: { type: 'string', description: 'Job ID from cursor_submit' },
+        job_id: {
+          type: 'string',
+          description: 'Job ID (optional — defaults to the active running job)',
+        },
       },
-      required: ['job_id'],
+      required: [],
     },
   },
   {
     type: 'function',
     name: 'cursor_stop',
-    description: 'Stop a running cursor-agent job. Use when the user asks to cancel or abort.',
+    description:
+      'Cancel a background WRITING job from cursor_submit only — never right after starting a job, never for wake phrase "cursor stop". User must explicitly say cancel the job/task.',
     parameters: {
       type: 'object',
       properties: {
-        job_id: { type: 'string', description: 'Job ID to stop' },
+        job_id: {
+          type: 'string',
+          description: 'Job ID (optional — defaults to the active running job)',
+        },
       },
-      required: ['job_id'],
+      required: [],
     },
   },
 
@@ -166,7 +194,7 @@ export const FUNCTION_TOOLS: FunctionTool[] = [
     type: 'function',
     name: 'cursor_new_session',
     description:
-      'Start a fresh cursor-agent conversation thread for a project. Use when the user wants to start over, change direction, or the previous context is stale.',
+      'Start a fresh cursor-agent thread for a project. Use when the user wants to start over — never while cursor_ask is pending or Cursor is busy.',
     parameters: {
       type: 'object',
       properties: {

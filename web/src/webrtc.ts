@@ -22,17 +22,35 @@
  *   → injectNarration() → conversation.item.create (data channel)
  *   → provider TTS plays it for Dad
  *
- * "cursor end" / "cursor stop":
- *   Detected in the user's speech transcript → onClosed() callback.
+ * "cursor listen" / "cursor stop":
+ *   Start phrase → onActivated (begin listening for commands).
+ *   Stop phrase → onDeactivated (stop listening; session and mic stay open).
+ *   End session entirely → PTT tap while inactive/listening.
  *
  * ## GA API notes (not the beta schema)
- * - SDP exchange: POST https://api.openai.com/v1/realtime?model=<model>
+ * - Token mint: POST https://api.openai.com/v1/realtime/client_secrets
+ * - SDP exchange: POST https://api.openai.com/v1/realtime/calls
  *   Authorization: Bearer <ephemeral-token>, Content-Type: application/sdp
  * - Do NOT send OpenAI-Beta: realtime=v1
  * - Event names: response.output_audio.delta / .done, response.done (function calls)
  */
 
 import { unlockAudioContext, createAudioElement } from './audio.js';
+import {
+  OPENAI_REALTIME_CALLS_URL,
+  OPENAI_ASSISTANT_TRANSCRIPT,
+  OPENAI_SPEAKING_END,
+  OPENAI_SPEAKING_START,
+  OPENAI_USER_TRANSCRIPT,
+  extractTranscript,
+  readHttpError,
+} from './openai-realtime.js';
+import {
+  DEFAULT_WAKE_WORDS,
+  isStartPhrase,
+  isStopPhrase,
+  type WakeWords,
+} from './wake-words.js';
 
 // ── Callbacks ─────────────────────────────────────────────────────────────
 
@@ -47,8 +65,12 @@ export interface SessionCallbacks {
   onSpeaking(speaking: boolean): void;
   /** A tool call is in-flight (true = show working state; false = done). */
   onWorking(active: boolean): void;
-  /** Session closed — e.g. PTT tap or "cursor end" / "cursor stop" detected. */
+  /** Session ended — PTT tap to hang up or WebSocket closed. */
   onClosed(reason?: string): void;
+  /** Start wake phrase heard — assistant is now active. */
+  onActivated?(phrase: string): void;
+  /** Stop wake phrase heard — stop listening; session stays open. */
+  onDeactivated?(phrase: string): void;
   /**
    * Relay a function call to the bridge control WebSocket.
    * Returns the tool result, or throws on tool error / WS disconnect.
@@ -62,6 +84,7 @@ export interface SessionCallbacks {
 interface TokenPayload {
   token: string;
   model: string;
+  wakeWords: WakeWords;
 }
 
 interface ProviderEvent {
@@ -84,6 +107,7 @@ export class WebRTCVoiceSession {
   private audioEl: HTMLAudioElement | null = null;
   private micStream: MediaStream | null = null;
   private isClosed = false;
+  private wakeWords: WakeWords = DEFAULT_WAKE_WORDS;
 
   constructor(
     private readonly bridgeBase: string,
@@ -103,7 +127,8 @@ export class WebRTCVoiceSession {
       this.cb.onState('connecting');
 
       // 1. Mint ephemeral token from bridge — API key never reaches the phone
-      const { token, model } = await this.mintToken();
+      const { token, model, wakeWords } = await this.mintToken();
+      this.wakeWords = wakeWords;
 
       // 2. Unlock AudioContext inside the gesture stack (iOS autoplay policy)
       await unlockAudioContext();
@@ -212,30 +237,31 @@ export class WebRTCVoiceSession {
       body: JSON.stringify({}),
     });
     if (!res.ok) {
-      throw new Error(`Token mint failed (${res.status} ${res.statusText})`);
+      throw new Error(`Token mint failed: ${await readHttpError(res)}`);
     }
-    return res.json() as Promise<TokenPayload>;
+    const data = (await res.json()) as TokenPayload & Partial<{ wakeWords: WakeWords }>;
+    return {
+      token: data.token,
+      model: data.model,
+      wakeWords: data.wakeWords ?? DEFAULT_WAKE_WORDS,
+    };
   }
 
   /**
    * POST the SDP offer to the provider and get the SDP answer.
-   * GA API: POST /v1/realtime?model=<model>
-   * No OpenAI-Beta header (GA, not beta).
+   * GA API: POST /v1/realtime/calls (model is bound in the client secret).
    */
-  private async exchangeSdp(token: string, model: string, offerSdp: string): Promise<string> {
-    const url = `https://api.openai.com/v1/realtime?model=${encodeURIComponent(model)}`;
-    const res = await fetch(url, {
+  private async exchangeSdp(token: string, _model: string, offerSdp: string): Promise<string> {
+    const res = await fetch(OPENAI_REALTIME_CALLS_URL, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/sdp',
-        // GA: do NOT include OpenAI-Beta: realtime=v1
       },
       body: offerSdp,
     });
     if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      throw new Error(`SDP exchange failed (${res.status}): ${text}`);
+      throw new Error(`SDP exchange failed: ${await readHttpError(res)}`);
     }
     return res.text();
   }
@@ -260,43 +286,8 @@ export class WebRTCVoiceSession {
 
     switch (t) {
       case 'session.created':
-        // Session live — state already set to 'connected' after SDP exchange
         break;
 
-      // ── TTS audio (track speaking state for narrator cadence) ──────────
-      case 'response.output_audio.delta':
-        this.cb.onSpeaking(true);
-        break;
-
-      case 'response.output_audio.done':
-        this.cb.onSpeaking(false);
-        break;
-
-      // ── User speech transcript ─────────────────────────────────────────
-      case 'conversation.item.input_audio_transcription.completed': {
-        const text = (event['transcript'] as string | undefined)?.trim() ?? '';
-        if (text) {
-          this.cb.onUserTranscript(text);
-          // Detect stop verbs — the system prompt also handles these, but
-          // detecting client-side gives instant mic release without a round-trip.
-          if (/\bcursor\s+(end|stop)\b/i.test(text) || /\bthat'?s\s+all\b/i.test(text)) {
-            this.cb.onClosed('cursor end');
-          }
-        }
-        break;
-      }
-
-      // ── Assistant transcript ───────────────────────────────────────────
-      case 'response.output_audio_transcript.done': {
-        const text = (event['transcript'] as string | undefined)?.trim() ?? '';
-        if (text) {
-          this.cb.onAssistantTranscript(text);
-        }
-        this.cb.onSpeaking(false);
-        break;
-      }
-
-      // ── Response complete — function calls surface here in GA ──────────
       case 'response.done': {
         const response = event['response'] as Record<string, unknown> | undefined;
         const output = (response?.['output'] as unknown[]) ?? [];
@@ -308,10 +299,8 @@ export class WebRTCVoiceSession {
 
         if (calls.length > 0) {
           this.cb.onWorking(true);
-          // Execute sequentially — voice model rarely issues parallel calls
           void this.executeToolCalls(calls);
         } else {
-          // Response without tool calls (conversational turn)
           this.cb.onWorking(false);
           this.cb.onSpeaking(false);
         }
@@ -327,6 +316,32 @@ export class WebRTCVoiceSession {
       }
 
       default:
+        if (OPENAI_SPEAKING_START.has(t)) {
+          this.cb.onSpeaking(true);
+          break;
+        }
+        if (OPENAI_SPEAKING_END.has(t)) {
+          this.cb.onSpeaking(false);
+          break;
+        }
+        if (OPENAI_USER_TRANSCRIPT.has(t)) {
+          const text = extractTranscript(event);
+          if (text) {
+            this.cb.onUserTranscript(text);
+            if (isStartPhrase(text, this.wakeWords.start)) {
+              this.cb.onActivated?.(this.wakeWords.start);
+            }
+            if (isStopPhrase(text, this.wakeWords.stop)) {
+              this.cb.onDeactivated?.(this.wakeWords.stop);
+            }
+          }
+          break;
+        }
+        if (OPENAI_ASSISTANT_TRANSCRIPT.has(t)) {
+          const text = extractTranscript(event);
+          if (text) this.cb.onAssistantTranscript(text);
+          this.cb.onSpeaking(false);
+        }
         break;
     }
   }

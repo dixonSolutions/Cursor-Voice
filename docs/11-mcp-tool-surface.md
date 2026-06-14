@@ -14,7 +14,7 @@ Verified against the live CLI (`cursor-agent 2026.06.04-5fd875e`, June 2026).
 | --- | --- | --- |
 | **Project** | `cursor_list_projects`, `cursor_set_project` | Custom (registry) |
 | **Model** | `cursor_list_models`, `cursor_set_model` | CLI: `cursor-agent models` |
-| **Execute** | `cursor_submit`, `cursor_ask` | CLI: `-p --output-format stream-json/json` |
+| **Execute** | `cursor_submit`, `cursor_ask`, `cursor_recall_answer` | CLI: `-p --output-format stream-json/json` |
 | **Job** | `cursor_status`, `cursor_stop` | Bridge state (DB) |
 | **Session** | `cursor_new_session`, `cursor_session_info` | CLI: `create-chat`, registry |
 | **Git** | `cursor_diff`, `cursor_revert` | `simple-git` |
@@ -105,11 +105,20 @@ cursor-agent -p --output-format stream-json
 ### `cursor_ask`
 ```
 args:  { question: string, project?: string }
-returns: { answer: string }
+returns: { answer: string, has_more: boolean }
 ```
 Read-only repo Q&A. Hard-coded `--mode ask` — cannot write or run mutating
 commands regardless of `preRunFlags`. One-shot (no `--resume`); does not pollute
-the work session. The voice model's **only** route to repo facts.
+the work session. The voice model's **only** route to repo facts. Long answers
+are truncated for voice; full text is cached for `cursor_recall_answer`.
+
+### `cursor_recall_answer`
+```
+args:  { format?: "brief" | "full" }
+returns: { question, answer, project, completed_at, has_more? }
+```
+Returns the last `cursor_ask` result without re-spawning cursor-agent. Use for
+summarize / repeat / expand follow-ups.
 
 CLI equivalent:
 ```
@@ -139,7 +148,9 @@ and final result retrieval.
 args:  { job_id: string }
 returns: { status: "stopped" }
 ```
-SIGTERM → SIGKILL the cursor-agent process for a job. Updates job status.
+SIGTERM → SIGKILL the cursor-agent process for a **cursor_submit** job only.
+Does not cancel in-flight `cursor_ask` questions — those must finish naturally.
+Updates job status.
 
 ---
 
@@ -284,6 +295,7 @@ executor MCP server. Informational; used for debugging.
 | 4 | `cursor_set_model` | Model | State (DB) |
 | 5 | `cursor_submit` | Execute | CLI: `-p --output-format stream-json` |
 | 6 | `cursor_ask` | Execute | CLI: `-p --output-format json --mode ask` |
+| 6b | `cursor_recall_answer` | Execute | Bridge cache (last ask) |
 | 7 | `cursor_status` | Job | DB (job rows + watcher events) |
 | 8 | `cursor_stop` | Job | `process.kill` → SIGTERM/SIGKILL |
 | 9 | `cursor_new_session` | Session | DB clear + CLI: `create-chat` |
@@ -295,7 +307,7 @@ executor MCP server. Informational; used for debugging.
 | 15 | `cursor_mcp_list` | MCP inspect | CLI: `mcp list` |
 | 16 | `cursor_mcp_tools` | MCP inspect | CLI: `mcp list-tools` |
 
-**16 tools total.** All defined from a single zod schema source; MCP and provider
+**17 tools total.** All defined from a single zod schema source; MCP and provider
 function-tool definitions are generated from that schema (DRY).
 
 ---
