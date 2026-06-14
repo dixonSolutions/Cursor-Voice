@@ -37,6 +37,8 @@ export class BridgeService {
 
   readonly hasCredentials = signal<boolean>(false);
   readonly wsStatus = signal<WsStatus>('disconnected');
+  /** Set when REST /api/* calls fail after WS auth (e.g. cross-origin without CORS). */
+  readonly apiStatus = signal<'ok' | 'error'>('ok');
   readonly projects = signal<Project[]>([]);
   readonly activeProject = signal<string | null>(null);
 
@@ -51,6 +53,7 @@ export class BridgeService {
   private _bridgeBase = '';
   private _ws: WebSocket | null = null;
   private _reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private _autoReconnect = true;
   private _pendingCalls = new Map<string, PendingCall>();
 
   // ── Credential management ──────────────────────────────────────────────
@@ -92,6 +95,7 @@ export class BridgeService {
   connect(): void {
     if (this._ws?.readyState === WebSocket.OPEN) return;
 
+    this._autoReconnect = true;
     this.wsStatus.set('connecting');
     const wsUrl = this._bridgeBase.replace(/^http/, 'ws') + '/ws/control';
     this._ws = new WebSocket(wsUrl);
@@ -105,16 +109,24 @@ export class BridgeService {
     });
 
     this._ws.addEventListener('close', (ev: CloseEvent) => {
-      this.wsStatus.set('error');
-      this._rejectAllPending('Bridge WebSocket disconnected');
+      this._ws = null;
 
       if (ev.code === 4001) {
-        // Bad token — clear and surface the setup dialog
+        this.wsStatus.set('error');
+        this._rejectAllPending('Bridge WebSocket disconnected');
         this.clearCredentials();
         return;
       }
-      // Auto-reconnect with a short back-off
-      this._reconnectTimer = setTimeout(() => this.connect(), 3000);
+
+      if (this._autoReconnect) {
+        this.wsStatus.set('error');
+        this._rejectAllPending('Bridge WebSocket disconnected');
+        this._reconnectTimer = setTimeout(() => this.connect(), 3000);
+        return;
+      }
+
+      this.wsStatus.set('disconnected');
+      this._rejectAllPending('Bridge disconnected');
     });
 
     this._ws.addEventListener('error', () => {
@@ -122,14 +134,19 @@ export class BridgeService {
     });
   }
 
+  /** Close the control WebSocket and stop auto-reconnect. Credentials are kept. */
   disconnect(): void {
+    this._autoReconnect = false;
     if (this._reconnectTimer) {
       clearTimeout(this._reconnectTimer);
       this._reconnectTimer = null;
     }
-    this._ws?.close();
-    this._ws = null;
+    if (this._ws) {
+      this._ws.close();
+      this._ws = null;
+    }
     this.wsStatus.set('disconnected');
+    this.apiStatus.set('ok');
     this._rejectAllPending('Bridge disconnected');
   }
 
@@ -137,8 +154,9 @@ export class BridgeService {
 
   async loadProjects(): Promise<void> {
     try {
-      const data = await this._fetch<{ projects: Project[] }>('/api/projects');
+      const data = await this.apiFetch<{ projects: Project[] }>('/api/projects');
       this.projects.set(data.projects);
+      this.apiStatus.set('ok');
 
       // Restore last selected project
       const saved = localStorage.getItem('cv_active_project');
@@ -148,12 +166,12 @@ export class BridgeService {
         this.activeProject.set(data.projects[0].name);
       }
     } catch {
-      // Projects unavailable — non-fatal; transcript will show an error
+      this.apiStatus.set('error');
     }
   }
 
   async setActiveProject(name: string): Promise<void> {
-    await this._fetch('/api/active-project', {
+    await this.apiFetch('/api/active-project', {
       method: 'POST',
       body: JSON.stringify({ project: name }),
     });
@@ -200,6 +218,7 @@ export class BridgeService {
     switch (msg['type']) {
       case 'auth_ok':
         this.wsStatus.set('connected');
+        this.apiStatus.set('ok');
         void this.loadProjects();
         break;
 
@@ -249,7 +268,8 @@ export class BridgeService {
     this._pendingCalls.clear();
   }
 
-  private async _fetch<T>(path: string, opts: RequestInit = {}): Promise<T> {
+  /** Authenticated fetch to the bridge API. */
+  async apiFetch<T>(path: string, opts: RequestInit = {}): Promise<T> {
     const res = await fetch(`${this._bridgeBase}${path}`, {
       ...opts,
       headers: {
@@ -258,7 +278,16 @@ export class BridgeService {
         ...(opts.headers as Record<string, string> | undefined),
       },
     });
-    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    if (!res.ok) {
+      let detail = `${res.status} ${res.statusText}`;
+      try {
+        const body = (await res.json()) as { error?: string };
+        if (body.error) detail = body.error;
+      } catch {
+        // ignore non-JSON error bodies
+      }
+      throw new Error(detail);
+    }
     return res.json() as Promise<T>;
   }
 }

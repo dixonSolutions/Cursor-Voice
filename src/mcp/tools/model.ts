@@ -11,6 +11,7 @@ import stripAnsi from 'strip-ansi';
 import { getCachedModels, setModelCache, filterModels, isValidModelId, type ModelEntry } from '../../state/models.js';
 import { setActiveModel } from '../../state/registry.js';
 import { childLogger } from '../../log.js';
+import { parseMisroutedExecutionMode } from './questionDetect.js';
 
 const execFileAsync = promisify(execFile);
 const log = childLogger('tool:model');
@@ -72,6 +73,21 @@ export async function handleSetModel(
   args: SetModelArgs,
   sessionKey: string,
 ): Promise<SetModelResult> {
+  const misroutedMode = parseMisroutedExecutionMode(args.model_id);
+  if (misroutedMode) {
+    if (misroutedMode === 'ask') {
+      throw new Error(
+        `"${args.model_id}" is read-only Q&A mode — use cursor_ask, not cursor_set_model. ` +
+          'For the AI model (Claude, GPT, etc.), use cursor_list_models or leave as "auto".',
+      );
+    }
+    throw new Error(
+      `"${args.model_id}" is an execution mode, not an AI model. ` +
+        `Use cursor_submit with mode: "${misroutedMode}" when the user wants that behavior. ` +
+        'For the AI model, use cursor_list_models — or leave as "auto".',
+    );
+  }
+
   let models = getCachedModels();
   if (!models) {
     models = await fetchAndCacheModels();

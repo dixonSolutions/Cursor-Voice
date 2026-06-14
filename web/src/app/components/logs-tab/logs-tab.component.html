@@ -1,0 +1,40 @@
+<p-card header="Logs">
+  <div class="cv-logs-toolbar">
+    <p-selectbutton
+      [options]="filterOptions"
+      [(ngModel)]="filter"
+      optionLabel="label"
+      optionValue="value"
+      [allowEmpty]="false" />
+    <p-button
+      label="Clear"
+      icon="pi pi-trash"
+      severity="secondary"
+      [text]="true"
+      [disabled]="logs.entries().length === 0"
+      (onClick)="clearLogs()" />
+  </div>
+
+  <p-scroll-panel [style]="{ width: '100%', height: 'min(28rem, 60dvh)' }">
+    @if (filteredEntries().length === 0) {
+      <p-message
+        severity="secondary"
+        variant="simple"
+        text="No log entries yet. Transcripts, bridge events, and errors appear here." />
+    }
+
+    @for (entry of filteredEntries(); track entry.id) {
+      <div class="cv-log-entry">
+        <div class="cv-log-meta">
+          <span class="cv-log-time">{{ formatTime(entry.at) }}</span>
+          <p-tag [value]="categoryLabel(entry.category)" severity="secondary" [rounded]="true" />
+          <p-tag [value]="entry.level" [severity]="tagSeverity(entry.level)" [rounded]="true" />
+        </div>
+        <p-message
+          [severity]="messageSeverity(entry.level)"
+          [text]="entry.detail ? entry.summary + ' — ' + entry.detail : entry.summary"
+          [style]="{ 'white-space': 'pre-wrap', 'margin-bottom': '0.5rem' }" />
+      </div>
+    }
+  </p-scroll-panel>
+</p-card>

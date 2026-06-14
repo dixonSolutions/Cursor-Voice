@@ -49,6 +49,8 @@ export interface NarratorSession {
    * Resolves when the injection has been sent (not when TTS completes).
    */
   injectText(text: string): Promise<void>;
+  /** Optional narration kind (job_started, job_done, ghost_killed, …). */
+  injectTextWithKind?(text: string, kind: string): Promise<void>;
 }
 
 // ── Narrator ──────────────────────────────────────────────────────────────
@@ -112,7 +114,11 @@ export class Narrator {
 
     try {
       log.debug({ kind: event.kind, text: event.text }, 'narrator: injecting');
-      await session.injectText(event.text);
+      if (session.injectTextWithKind) {
+        await session.injectTextWithKind(event.text, event.kind);
+      } else {
+        await session.injectText(event.text);
+      }
     } catch (err) {
       log.error({ err, kind: event.kind }, 'narrator: injection failed');
       this.bufferEvent(event);
@@ -212,5 +218,9 @@ export class PhoneRelaySession implements NarratorSession {
 
   async injectText(text: string): Promise<void> {
     this.send(JSON.stringify({ type: 'narration', text }));
+  }
+
+  async injectTextWithKind(text: string, kind: string): Promise<void> {
+    this.send(JSON.stringify({ type: 'narration', text, kind }));
   }
 }

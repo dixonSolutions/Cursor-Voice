@@ -19,6 +19,7 @@ import { getConfig } from '../config.js';
 import { childLogger } from '../log.js';
 import type { Project } from '../state/registry.js';
 import type { SessionState } from '../state/registry.js';
+import { buildAgentPrompt, buildAskPrompt } from './agentPrompt.js';
 import type { StreamJsonEvent } from './watcher.js';
 
 const log = childLogger('cursor-agent');
@@ -94,9 +95,11 @@ export function buildArgs(opts: SpawnOptions): string[] {
   }
 
   // Prompt is the last — the only caller-controlled value.
-  // Prepend standing instruction to keep the agent heads-down (from docs/05).
-  const fullPrompt = `Make reasonable assumptions and proceed; do not ask clarifying questions.\n\n${prompt}`;
-  args.push(fullPrompt);
+  if (mode === 'ask') {
+    args.push(buildAskPrompt(prompt));
+  } else {
+    args.push(buildAgentPrompt(prompt));
+  }
 
   return args;
 }
@@ -166,12 +169,32 @@ export function spawnAgent(opts: SpawnOptions): AgentHandle {
       capturedSessionId = event['session_id'];
     }
 
-    // Capture summary from result event.
+    // Capture summary from result event (field name varies by CLI version).
     if (event['type'] === 'result') {
+      if (typeof event['result'] === 'string' && event['result'].trim()) {
+        capturedSummary = event['result'];
+      } else {
+        const msg = event['message'];
+        if (typeof msg === 'string') {
+          capturedSummary = msg;
+        } else if (
+          typeof msg === 'object' &&
+          msg !== null &&
+          'content' in msg &&
+          Array.isArray((msg as { content: unknown[] }).content)
+        ) {
+          const textPart = (msg as { content: Array<{ text?: string }> }).content.find(
+            (c) => typeof c.text === 'string',
+          );
+          if (textPart?.text) capturedSummary = textPart.text;
+        }
+      }
+    }
+
+    // Fallback: last assistant text turn (stream-json ask/agent).
+    if (event['type'] === 'assistant') {
       const msg = event['message'];
-      if (typeof msg === 'string') {
-        capturedSummary = msg;
-      } else if (
+      if (
         typeof msg === 'object' &&
         msg !== null &&
         'content' in msg &&
@@ -180,7 +203,7 @@ export function spawnAgent(opts: SpawnOptions): AgentHandle {
         const textPart = (msg as { content: Array<{ text?: string }> }).content.find(
           (c) => typeof c.text === 'string',
         );
-        if (textPart?.text) capturedSummary = textPart.text;
+        if (textPart?.text?.trim()) capturedSummary = textPart.text;
       }
     }
 

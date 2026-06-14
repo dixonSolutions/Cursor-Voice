@@ -1,0 +1,94 @@
+<p-card header="Push to talk">
+  <p-fluid>
+    <p-iftalabel>
+      <p-select
+        inputId="project-select"
+        [options]="projectOptions()"
+        [(ngModel)]="selectedProject"
+        optionLabel="label"
+        optionValue="value"
+        placeholder="Select a project…"
+        [disabled]="projectOptions().length === 0 || !isBridgeConnected()"
+        (onChange)="onProjectChange(selectedProject)"
+        [fluid]="true" />
+      <label for="project-select">Active project</label>
+    </p-iftalabel>
+
+    @if (activeProviderLabel(); as provider) {
+      <div class="cv-voice-summary">
+        <span>Using</span>
+        <p-tag [value]="provider" severity="info" />
+        @if (activeModelLabel(); as model) {
+          <p-tag [value]="model" severity="secondary" />
+        }
+        <span class="cv-voice-summary-hint">Change in Providers &amp; Models.</span>
+      </div>
+    } @else {
+      <p-message
+        severity="warn"
+        variant="simple"
+        text="No voice provider configured. Add keys and register a provider under Providers &amp; Models." />
+    }
+
+    <p-toolbar [style]="{ border: 'none', background: 'transparent', padding: '0.5rem 0 1rem' }">
+      <ng-template #center>
+        <p-button
+          [icon]="pttIcon()"
+          [attr.aria-label]="pttAriaLabel()"
+          [loading]="voiceSession.sessionConnecting()"
+          [rounded]="true"
+          size="large"
+          [severity]="pttSeverity()"
+          [outlined]="appState.state() === 'idle'"
+          [disabled]="pttDisabled()"
+          [style]="{
+            width: '8.5rem',
+            height: '8.5rem',
+            'border-radius': '50%',
+            padding: '0'
+          }"
+          (onClick)="handlePtt()" />
+      </ng-template>
+    </p-toolbar>
+
+    <p-message severity="secondary" variant="simple" [text]="wakeHint()" />
+  </p-fluid>
+</p-card>
+
+<p-card header="Wake words">
+  <p-fluid>
+    <p-message
+      severity="secondary"
+      variant="simple"
+      text="Start phrase activates listening; stop phrase pauses listening (session stays open). Tap mic to hang up." />
+
+    <p-fieldset legend="Phrases">
+      <p-iftalabel>
+        <input
+          pInputText
+          id="wake-start"
+          [(ngModel)]="wakeStart"
+          placeholder="cursor listen"
+          [disabled]="!isBridgeConnected()" />
+        <label for="wake-start">Start (activate)</label>
+      </p-iftalabel>
+
+      <p-iftalabel>
+        <input
+          pInputText
+          id="wake-stop"
+          [(ngModel)]="wakeStop"
+          placeholder="cursor stop"
+          [disabled]="!isBridgeConnected()" />
+        <label for="wake-stop">Stop (end session)</label>
+      </p-iftalabel>
+
+      <p-button
+        label="Save wake words"
+        icon="pi pi-save"
+        [loading]="savingWakeWords"
+        [disabled]="!isBridgeConnected()"
+        (onClick)="onSaveWakeWords()" />
+    </p-fieldset>
+  </p-fluid>
+</p-card>

@@ -1,195 +1,183 @@
-import {
-  Component,
-  ElementRef,
-  OnDestroy,
-  OnInit,
-  ViewChild,
-  computed,
-  inject,
-} from '@angular/core';
+import type { EffectRef, OnDestroy, OnInit } from '@angular/core';
+import { Component, computed, effect, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Subscription } from 'rxjs';
 
+import { Avatar } from 'primeng/avatar';
 import { Button } from 'primeng/button';
 import { Dialog } from 'primeng/dialog';
+import { Fluid } from 'primeng/fluid';
+import { IftaLabel } from 'primeng/iftalabel';
 import { InputText } from 'primeng/inputtext';
+import { Message } from 'primeng/message';
 import { Password } from 'primeng/password';
-import { ScrollPanel } from 'primeng/scrollpanel';
-import { Select } from 'primeng/select';
+import { Tag } from 'primeng/tag';
+import { Toast } from 'primeng/toast';
+import { Toolbar } from 'primeng/toolbar';
+
+import { ConnectionTabComponent } from './components/connection-tab/connection-tab.component';
+import { LogsTabComponent } from './components/logs-tab/logs-tab.component';
+import { ProvidersTabComponent } from './components/providers-tab/providers-tab.component';
+import { VoiceTabComponent } from './components/voice-tab/voice-tab.component';
 import { AppStateService } from './services/app-state.service';
 import { BridgeService } from './services/bridge.service';
+import { LogService } from './services/log.service';
+import { ToastService } from './services/toast.service';
+import { VoiceProvidersService } from './services/voice-providers.service';
 import { VoiceSessionService } from './services/voice-session.service';
 
-interface ProjectOption {
+export type AppTab = 'voice' | 'providers' | 'connection' | 'logs';
+
+type TagSeverity = 'success' | 'info' | 'warn' | 'danger' | 'secondary' | 'contrast' | undefined;
+
+interface TabItem {
+  id: AppTab;
   label: string;
-  value: string;
+  icon: string;
 }
 
 @Component({
   selector: 'cv-root',
   templateUrl: './app.component.html',
-  styleUrl: './app.component.scss',
   standalone: true,
   imports: [
     FormsModule,
+    Avatar,
     Button,
     Dialog,
+    Fluid,
+    IftaLabel,
     InputText,
+    Message,
     Password,
-    ScrollPanel,
-    Select,
+    Tag,
+    Toast,
+    Toolbar,
+    VoiceTabComponent,
+    ProvidersTabComponent,
+    ConnectionTabComponent,
+    LogsTabComponent,
   ],
 })
 export class AppComponent implements OnInit, OnDestroy {
-  // ── Services ───────────────────────────────────────────────────────────
-
   protected readonly bridge = inject(BridgeService);
   protected readonly appState = inject(AppStateService);
   protected readonly voiceSession = inject(VoiceSessionService);
+  protected readonly voiceProviders = inject(VoiceProvidersService);
+  private readonly toast = inject(ToastService);
+  private readonly logs = inject(LogService);
 
-  // ── Setup form state ───────────────────────────────────────────────────
-
-  protected tokenInput   = '';
+  protected tokenInput = '';
   protected bridgeUrlInput = '';
+  protected readonly activeTab = signal<AppTab>('voice');
 
-  // ── Project selector state ─────────────────────────────────────────────
+  protected readonly tabs: TabItem[] = [
+    { id: 'voice', label: 'Voice', icon: 'pi pi-microphone' },
+    { id: 'providers', label: 'Providers & Models', icon: 'pi pi-sliders-h' },
+    { id: 'connection', label: 'Connection', icon: 'pi pi-link' },
+    { id: 'logs', label: 'Logs', icon: 'pi pi-list' },
+  ];
 
-  protected selectedProject: string | null = null;
-
-  // ── Computed ───────────────────────────────────────────────────────────
-
-  protected readonly projectOptions = computed<ProjectOption[]>(() =>
-    this.bridge.projects().map((p) => ({
-      label: p.description ? `${p.name} — ${p.description}` : p.name,
-      value: p.name,
-    })),
-  );
-
-  protected readonly statusClass = computed<string>(() => {
+  protected readonly statusLabel = computed(() => {
     const ws = this.bridge.wsStatus();
     const st = this.appState.state();
-    if (st === 'working') return 'working';
-    if (ws === 'connected') return 'connected';
-    if (ws === 'error')     return 'error';
-    return 'connecting';
-  });
-
-  protected readonly statusLabel = computed<string>(() => {
-    const ws = this.bridge.wsStatus();
-    const st = this.appState.state();
-    if (st === 'working')      return 'Working…';
-    if (st === 'listening')    return 'Listening';
-    if (ws === 'connected')    return 'Connected';
-    if (ws === 'connecting')   return 'Connecting…';
-    if (ws === 'error')        return 'Disconnected';
+    if (this.bridge.apiStatus() === 'error') return 'API blocked';
+    if (st === 'working') return 'Working';
+    if (st === 'listening') return 'Listening';
+    if (st === 'inactive') return 'Mic on';
+    if (ws === 'connected') return 'Connected';
+    if (ws === 'connecting') return 'Connecting';
+    if (ws === 'disconnected') return 'Disconnected';
+    if (ws === 'error') return 'Reconnecting…';
     return 'Not connected';
   });
 
-  // ── Scroll anchor ──────────────────────────────────────────────────────
+  protected readonly statusSeverity = computed<TagSeverity>(() => {
+    const ws = this.bridge.wsStatus();
+    const st = this.appState.state();
+    if (this.bridge.apiStatus() === 'error') return 'warn';
+    if (st === 'working') return 'warn';
+    if (ws === 'connected' || st === 'listening') return 'success';
+    if (ws === 'error') return 'warn';
+    if (ws === 'disconnected') return 'secondary';
+    return 'secondary';
+  });
 
-  @ViewChild('transcriptBottom')
-  private transcriptBottom!: ElementRef<HTMLDivElement>;
+  protected readonly statusIcon = computed(() => {
+    const st = this.appState.state();
+    if (st === 'working') return 'pi pi-spin pi-spinner';
+    if (st === 'listening') return 'pi pi-microphone';
+    if (this.bridge.wsStatus() === 'connected') return 'pi pi-check-circle';
+    if (this.bridge.wsStatus() === 'error') return 'pi pi-sync';
+    if (this.bridge.wsStatus() === 'disconnected') return 'pi pi-link';
+    return 'pi pi-sync';
+  });
 
-  // ── Subscriptions ──────────────────────────────────────────────────────
-
+  private _connectEffect: EffectRef;
+  private _apiWarned = false;
   private _subs = new Subscription();
 
-  // ── Lifecycle ──────────────────────────────────────────────────────────
+  constructor() {
+    this._connectEffect = effect(() => {
+      if (this.bridge.wsStatus() === 'connected') {
+        void this.voiceProviders.refresh();
+      }
+      if (this.bridge.apiStatus() === 'error' && !this._apiWarned) {
+        this._apiWarned = true;
+        this.toast.warn('API unavailable', 'Check Bridge URL or leave it blank in test mode.');
+      }
+      if (this.bridge.apiStatus() === 'ok') {
+        this._apiWarned = false;
+      }
+    });
+  }
 
   ngOnInit(): void {
     this.bridge.loadCredentials();
-
     if (this.bridge.hasCredentials()) {
       this.bridge.connect();
+      this.logs.append('info', 'bridge', 'Loaded saved credentials');
     }
 
-    // Keep selectedProject in sync with bridge.activeProject
-    this._subs.add(
-      // Watch activeProject signal via effect-like subscription
-      // We use bridge.activeProject as a source for selectedProject binding
-      { unsubscribe: () => {} }, // placeholder; we use computed effect below
-    );
-
-    // Route narration events from bridge → voice session
     this._subs.add(
       this.bridge.narration$.subscribe((event) => {
-        this.voiceSession.addEntry(event.text, 'assistant');
         this.voiceSession.injectNarration(event.text);
-        if (event.kind === 'job_done' || event.kind === 'job_error') {
-          this.appState.transitionTo('idle');
+        if (event.kind === 'job_started') {
+          this.voiceSession.notifyJobRunning(true);
+        } else if (
+          event.kind === 'job_done' ||
+          event.kind === 'job_error' ||
+          event.kind === 'ghost_killed'
+        ) {
+          this.voiceSession.notifyJobRunning(false);
         }
-        this._scrollTranscript();
       }),
     );
   }
 
   ngOnDestroy(): void {
+    this._connectEffect.destroy();
     this._subs.unsubscribe();
     this.voiceSession.stopSession();
     this.bridge.disconnect();
   }
 
-  // ── Setup dialog ───────────────────────────────────────────────────────
+  protected setTab(tab: AppTab): void {
+    this.activeTab.set(tab);
+  }
+
+  protected isActiveTab(tab: AppTab): boolean {
+    return this.activeTab() === tab;
+  }
 
   protected onSaveToken(): void {
     const token = this.tokenInput.trim();
     if (!token) return;
     this.bridge.saveCredentials(token, this.bridgeUrlInput.trim());
-    this.tokenInput      = '';
-    this.bridgeUrlInput  = '';
+    this.tokenInput = '';
+    this.bridgeUrlInput = '';
     this.bridge.connect();
-  }
-
-  // ── Project ────────────────────────────────────────────────────────────
-
-  protected onProjectChange(name: string | null): void {
-    if (!name) return;
-    void this.bridge.setActiveProject(name).then(() => {
-      this.voiceSession.addEntry(`Active project: ${name}`, 'system');
-      this._scrollTranscript();
-    });
-  }
-
-  // ── PTT ────────────────────────────────────────────────────────────────
-
-  protected handlePtt(): void {
-    const st = this.appState.state();
-    if (st === 'idle') {
-      void this.voiceSession.startSession().then(() => this._scrollTranscript());
-    } else if (st === 'listening') {
-      this.voiceSession.stopSession('Mic off');
-      this._scrollTranscript();
-    }
-    // 'working': button is visually disabled; tap is ignored
-  }
-
-  // ── Settings ───────────────────────────────────────────────────────────
-
-  protected onClearCredentials(): void {
-    if (!confirm('Clear saved token and bridge URL? You will need to re-enter them.')) {
-      return;
-    }
-    this.voiceSession.stopSession();
-    this.bridge.clearCredentials();
-  }
-
-  // ── Scroll helper ──────────────────────────────────────────────────────
-
-  private _scrollTranscript(): void {
-    // Run after Angular renders the new entry
-    setTimeout(() => {
-      this.transcriptBottom?.nativeElement.scrollIntoView({ behavior: 'smooth', block: 'end' });
-    }, 50);
-  }
-
-  // ── Template helpers ───────────────────────────────────────────────────
-
-  /** Called by template effect to keep selectedProject in sync. */
-  protected syncProjectSelection(): string | null {
-    const ap = this.bridge.activeProject();
-    if (ap && ap !== this.selectedProject) {
-      this.selectedProject = ap;
-    }
-    return this.selectedProject;
+    this.logs.append('info', 'bridge', 'Initial credentials saved');
+    this.toast.success('Saved', 'Connecting to bridge…');
   }
 }

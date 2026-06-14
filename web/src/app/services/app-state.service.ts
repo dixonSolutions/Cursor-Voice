@@ -1,6 +1,6 @@
 import { Injectable, computed, signal } from '@angular/core';
 
-export type AppState = 'idle' | 'listening' | 'working';
+export type AppState = 'idle' | 'inactive' | 'listening' | 'working';
 
 export interface StatusDisplay {
   label: string;
@@ -10,9 +10,11 @@ export interface StatusDisplay {
 /**
  * Signal-based state machine for the PTT lifecycle.
  *
- *   idle ──tap──► listening ──tool call──► working
- *     ▲               │   ▲                   │
- *     └── tap/close ──┘   └─── result done ───┘
+ *   idle ──tap──► inactive ──"cursor listen"──► listening
+ *     ▲               │   ▲                        │
+ *     └── tap/close ──┘   └── "cursor stop" ───────┘
+ *                         (session stays open; mic stays on)
+ *   listening/working ──job──► working (say "cursor listen" again after stop)
  */
 @Injectable({ providedIn: 'root' })
 export class AppStateService {
@@ -25,8 +27,9 @@ export class AppStateService {
   readonly pttLabel = computed(() => {
     switch (this._state()) {
       case 'idle':      return 'TAP TO TALK';
+      case 'inactive':  return 'MIC ON — SAY TO ACTIVATE';
       case 'listening': return 'LISTENING…';
-      case 'working':   return 'WORKING…';
+      case 'working':   return 'CURSOR WORKING';
     }
   });
 

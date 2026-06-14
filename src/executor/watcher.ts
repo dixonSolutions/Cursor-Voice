@@ -46,7 +46,8 @@ export type NarrationKind =
   | 'shell_run'
   | 'progress_tick'
   | 'job_done'
-  | 'job_error';
+  | 'job_error'
+  | 'ghost_killed';
 
 export interface NarrationEvent {
   kind: NarrationKind;
@@ -105,21 +106,53 @@ function classifyToolCall(toolCall: Record<string, unknown>): {
   return { kind: 'other', label: 'called a tool' };
 }
 
+/** Detect Task/subagent/explore spawns — budget-burning "ghost agent" pattern. */
+export function isGhostToolCall(toolCall: Record<string, unknown>): {
+  ghost: boolean;
+  reason: string | null;
+} {
+  for (const key of Object.keys(toolCall)) {
+    const lower = key.toLowerCase();
+    if (
+      lower.includes('task') ||
+      lower.includes('subagent') ||
+      lower.includes('explore') ||
+      lower === 'tasktoolcall'
+    ) {
+      return { ghost: true, reason: key };
+    }
+  }
+
+  const blob = JSON.stringify(toolCall).toLowerCase();
+  if (
+    blob.includes('subagent_type') ||
+    blob.includes('"explore"') ||
+    blob.includes('subagent_type":"explore')
+  ) {
+    return { ghost: true, reason: 'subagent_spawn' };
+  }
+
+  return { ghost: false, reason: null };
+}
+
 // ── Watcher ───────────────────────────────────────────────────────────────
 
 export class Watcher {
   private readonly jobId: string;
   private readonly projectName: string;
+  private readonly onGhostDetected: (() => void) | null;
   private readonly listeners: Array<(event: NarrationEvent) => void> = [];
   private readonly summary: JobSummary;
 
   private lastNarrationAt: number = 0;
   private cadenceMs: number;
   private cadenceTimer: ReturnType<typeof setTimeout> | null = null;
+  private ghostTriggered = false;
 
-  constructor(jobId: string, projectName: string) {
+  constructor(jobId: string, projectName: string, onGhostDetected?: () => void) {
     this.jobId = jobId;
     this.projectName = projectName;
+    this.onGhostDetected = onGhostDetected ?? null;
     this.summary = {
       filesRead: [],
       filesWritten: [],
@@ -157,6 +190,22 @@ export class Watcher {
     // ── tool_use_start ────────────────────────────────────────────────
     if (event.type === 'assistant' && 'subtype' in event && event.subtype === 'tool_use_start') {
       const toolCall = (event as { type: 'assistant'; subtype: 'tool_use_start'; tool_call: Record<string, unknown> }).tool_call;
+
+      const ghost = isGhostToolCall(toolCall);
+      if (ghost.ghost && !this.ghostTriggered) {
+        this.ghostTriggered = true;
+        this.stopCadenceTicks();
+        const reason = ghost.reason ?? 'subagent';
+        log.warn({ jobId: this.jobId, reason }, 'ghost agent tool detected — killing job');
+        addJobEvent(this.jobId, 'ghost_killed', { reason });
+        this.emit({
+          kind: 'ghost_killed',
+          text: `Stopped — Cursor tried to spawn extra agents (${reason}). Budget protection kicked in.`,
+        });
+        this.onGhostDetected?.();
+        return;
+      }
+
       const { kind, label, path, cmd } = classifyToolCall(toolCall);
 
       if (kind === 'write' && path) {
@@ -199,6 +248,27 @@ export class Watcher {
       this.emit({ kind: 'job_error', text: `Something went wrong. Cursor said: ${msg}` });
       return;
     }
+  }
+
+  /** Human-readable snapshot of what the agent is doing right now. */
+  getActivitySummary(): string {
+    const s = this.getSummary();
+    const parts: string[] = [];
+    if (s.filesWritten.length > 0) {
+      const last = s.filesWritten[s.filesWritten.length - 1];
+      parts.push(`last wrote ${last}`);
+    }
+    if (s.shellCommands.length > 0) {
+      const last = s.shellCommands[s.shellCommands.length - 1];
+      parts.push(`last ran ${last}`);
+    }
+    if (s.filesRead.length > 0 && parts.length === 0) {
+      parts.push(`read ${s.filesRead.length} file${s.filesRead.length !== 1 ? 's' : ''} so far`);
+    }
+    if (parts.length === 0) {
+      return 'Cursor started but no file activity yet.';
+    }
+    return parts.join('; ');
   }
 
   /** Return a snapshot of the current rolling summary. */

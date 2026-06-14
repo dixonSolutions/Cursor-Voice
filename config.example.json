@@ -1,30 +1,118 @@
 {
   "settings": {
-    "voiceProvider": "openai",
-    "realtimeModel": "gpt-realtime",
+    "runMode": "test",
+    "runModes": {
+      "test": {
+        "backendPort": 8000,
+        "webPort": 4200
+      },
+      "serve": {
+        "backendPort": 8787,
+        "publicBaseUrl": "https://your-machine.tailnet-name.ts.net"
+      }
+    },
+    "voice": {
+      "defaultProvider": "openai",
+      "providers": {
+        "openai": {
+          "defaultModel": "gpt-realtime-mini",
+          "models": [
+            {
+              "id": "gpt-realtime-mini",
+              "label": "GPT Realtime Mini",
+              "builtin": true
+            },
+            {
+              "id": "gpt-4o-mini-realtime-preview",
+              "label": "GPT-4o Mini Realtime",
+              "builtin": true
+            },
+            {
+              "id": "gpt-realtime",
+              "label": "GPT Realtime",
+              "builtin": true
+            },
+            {
+              "id": "gpt-4o-realtime-preview",
+              "label": "GPT-4o Realtime Preview",
+              "builtin": true
+            }
+          ]
+        },
+        "amazon_bedrock": {
+          "defaultModel": "amazon.nova-2-sonic-v1:0",
+          "models": [
+            {
+              "id": "amazon.nova-2-sonic-v1:0",
+              "label": "Nova 2 Sonic",
+              "builtin": true
+            },
+            {
+              "id": "amazon.nova-sonic-v1:0",
+              "label": "Nova Sonic v1",
+              "builtin": true
+            }
+          ]
+        },
+        "gemini": {
+          "defaultModel": "gemini-2.5-flash-native-audio-preview-12-2025",
+          "models": [
+            {
+              "id": "gemini-2.5-flash-native-audio-preview-12-2025",
+              "label": "Gemini 2.5 Flash Live",
+              "builtin": true
+            },
+            {
+              "id": "gemini-2.0-flash-live-preview",
+              "label": "Gemini 2.0 Flash Live",
+              "builtin": true
+            }
+          ]
+        }
+      },
+      "wakeWords": {
+        "start": "cursor listen",
+        "stop": "cursor stop"
+      },
+      "systemPrompt": {
+        "activationRules": "## Activation rules\n- You are **inactive** until the user says **\"{{WAKE_START}}\"** (STT may hear \"kasa listen\", \"curse or listen\" — treat those as start).\n- After **\"{{WAKE_START}}\"**, you are **active** — call tools for the user's request.\n- While **inactive**, do **not** speak, explain, or call tools. Wait silently.\n- When **\"{{WAKE_STOP}}\"** is heard, become **inactive**. **Never call `cursor_stop`** for **\"{{WAKE_STOP}}\"** — it only pauses listening.\n- Mic stays open until the user taps hang up.",
+        "template": "You are a **messenger** between the user and **Cursor**. You do NOT know the codebase. Cursor thinks; you relay.\n\n{{ACTIVATION_RULES}}\n\n## Model vs execution mode (do not confuse)\n- **AI model** (Claude, GPT, auto) → `cursor_list_models` / `cursor_set_model`. IDs look like `claude-opus-...`, `gpt-5...`, or `auto`.\n- **Execution mode** (how Cursor runs work) → `cursor_submit` parameter `mode`: **agent** (apply changes) or **plan** (propose only).\n- **\"agent mode\"** / **\"plan mode\"** → set `cursor_submit` mode — **never** `cursor_set_model`.\n- **ask** is read-only Q&A → always `cursor_ask`, not a model and not submit mode.\n\n## Ask vs submit (critical)\n- **Questions** (next steps, what's done, explain, list) → **`cursor_ask` only**.\n- **Code/git changes** (commit, PR, merge, implement, fix, build) → **`cursor_submit` only**.\n\n## Messenger rules\n1. User asks about a project → `cursor_set_project` if needed, then the right tool.\n2. Only speak tool results — **never reason aloud**.\n3. **TTS echo** → ignore completely.\n4. **`cursor_status`** only for background **write jobs** from `cursor_submit`.\n\n## After cursor_ask returns\n- Read **answer** once. Summarize/repeat → `cursor_recall_answer`.\n\n## While cursor_ask is pending\n- Wait 1–2 min. Do not retry or call `cursor_stop`.\n\n## cursor_stop\n- Only to cancel a **writing job** from `cursor_submit`.\n\n## Project names (routing only)\n{{PROJECT_CATALOG}}\n\n## Language\n- Reply in the user's language. Short sentences — this is voice."
+      }
+    },
     "defaultMode": "agent",
     "maxConcurrentJobs": 1,
     "jobTimeoutMs": 600000,
     "planFirst": false,
-    "preRunFlags": ["--force", "--trust"],
+    "preRunFlags": [
+      "--force",
+      "--trust"
+    ],
     "modelCacheTtlMs": 3600000,
     "narratorEnabled": true,
     "narratorCadenceMs": 15000,
     "narratorMaxBufferEvents": 50,
+    "ghostKillEnabled": true,
     "logLevel": "info"
   },
   "projects": [
     {
       "name": "cursorvoice",
       "path": "/home/eva/Projects/SideProjects/CursorVoice",
-      "aliases": ["cursor voice", "the voice project"],
+      "aliases": [
+        "cursor voice",
+        "the voice project"
+      ],
       "description": "This project — the voice bridge",
       "enabled": true
     },
     {
       "name": "budget",
       "path": "/home/projects/budget-app",
-      "aliases": ["budget app", "the finance tracker", "money app"],
+      "aliases": [
+        "budget app",
+        "the finance tracker",
+        "money app"
+      ],
       "description": "Personal finance tracker (web)",
       "enabled": true
     }
