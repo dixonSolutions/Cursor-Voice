@@ -120,6 +120,7 @@ startup; invalid config fails fast with a clear error.
     "maxConcurrentJobs": 1,
     "jobTimeoutMs": 600000,
     "planFirst": false,
+    "preRunFlags": ["--force", "--trust"],
     "logLevel": "info"
   },
   "projects": [

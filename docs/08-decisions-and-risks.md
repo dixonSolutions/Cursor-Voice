@@ -132,6 +132,34 @@ completion agent) is the natural fit.
 not in-run. Operator must provision/maintain the deny list as security config.
 Resolves the core concern behind R-11.
 
+### ADR-014 — Voice model stays "dumb"; gains repo context via `cursor_ask` (ask mode)
+**Decision:** The realtime voice model has **no direct repo access**. It only
+converses and drafts prompts. For any repo/code uncertainty it calls a new
+read-only tool **`cursor_ask`** (`cursor-agent --mode ask`) **before** asking Dad
+a question or drafting a `cursor_submit`. It asks **Dad** only for
+intent/preference the repo can't answer. `cursor_ask` is one-shot and does not
+pollute the project's work session.
+**Rationale:** Keeps the voice model cheap/simple and grounds all repo facts in
+the real codebase via the read-only ask mode, reducing wrong assumptions. Clean
+separation: voice = talk + draft; cursor-agent (ask) = know; cursor-agent (agent)
+= do.
+**Consequence:** New `cursor_ask` tool (read-only, hard-coded `--mode ask`, still
+allowlist-validated + audited). System prompt encodes "ask cursor before Dad for
+repo facts."
+
+### ADR-015 — Configurable pre-run flags (default `--force --trust`); no "skip questions" flag exists
+**Decision:** All `cursor-agent` invocations apply a configurable
+`settings.preRunFlags` (default `["--force", "--trust"]`) — one place to control
+run behavior for every request. There is **no CLI flag to suppress the agent's
+questions**, and none is needed: headless mode never prompts interactively. To
+keep the agent heads-down, the bridge **prompt-steers** it ("make reasonable
+assumptions; proceed; don't ask"). User-facing questions come from the voice
+model, not the agent.
+**Rationale:** Matches confirmed CLI behavior; centralizes run policy; preserves
+the deny-list guardrails (which `--force` honors).
+**Consequence:** Changing run posture (e.g., propose-only, add `--sandbox`) is a
+config edit. "Skip questions" is a prompt-engineering concern, not a flag.
+
 ## Open items / risks (to resolve during build)
 
 | ID | Item | Plan to resolve | Severity |

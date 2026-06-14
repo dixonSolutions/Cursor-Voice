@@ -53,12 +53,33 @@ Key points validated for the GA Realtime API:
   - Only act on utterances directed at it via the **"Cursor…" prefix**; treat
     other speech as ambient/ignored.
     - Recognize **"cursor end"** (and "cursor stop"/"that's all") as the stop verb.
-  - Ask **clarifying questions** when a request is ambiguous before calling
-    `cursor_submit`.
+  - **Stay "dumb": you have no repo access.** For anything about the code/repo,
+    call `cursor_ask` (read-only) to get facts *before* drafting a `cursor_submit`
+    or asking Dad. Never guess about the codebase.
+  - Ask **Dad** clarifying questions only for **intent/preference** the repo can't
+    answer; resolve **repo facts** via `cursor_ask` first.
   - Narrate progress conversationally during long jobs (Doherty/Peak-End).
   - Reply in the **same language** the user spoke (Polish or English).
   - Know the **project catalog** (names + aliases + descriptions are injected
     into the session) and follow the project-selection rules below.
+
+### The voice model stays "dumb" (delegates knowledge to cursor)
+
+A core principle: the realtime model is a **conversational drafting layer**, not a
+codebase expert. It has **no direct repo access**. When it needs context it asks
+`cursor-agent` in **ask mode** (`cursor_ask`, read-only) rather than trying to be
+clever. Decision order when unsure:
+
+1. **Repo/code question?** → `cursor_ask` (e.g., "does a settings page exist?",
+   "what test framework is used?"). Use the answer to draft a precise prompt or to
+   ask Dad a *better-informed* question.
+2. **Intent/preference question?** (e.g., "dark mode on by default?") → ask **Dad**
+   directly — cursor can't know this.
+3. Only then **draft `cursor_submit`** with a concrete, grounded prompt.
+
+Benefits: cheaper/simpler voice model, answers grounded in the real codebase,
+fewer wrong assumptions, and a clean separation (voice = talk + draft;
+cursor-agent = know + do). See `05` for the tool mechanics.
 
 ## Project selection (two ways, one registry)
 

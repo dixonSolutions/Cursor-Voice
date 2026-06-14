@@ -125,6 +125,16 @@ commands unless explicitly denied."*
   MCP tool surface + project allowlist. The deny list bounds what the agent can
   do *inside* an allowlisted workspace once a valid `cursor_submit` is running.
 
+### `cursor_ask` is read-only by construction
+
+The voice model has **no direct repo access**; its only context path is
+`cursor_ask`, which the bridge runs **exclusively in `--mode ask`** (read-only
+exploration — searches/reads, never edits or runs mutating commands). The handler
+hard-codes ask mode; the model cannot escalate a `cursor_ask` into a writing run.
+Still subject to the same project allowlist (resolves `project → path`) and audit
+logging. This lets the "dumb" voice model gather grounded context without
+widening the write surface.
+
 ## Secrets & data hygiene
 
 - `.env` perms `600`, owned by the service user, **never committed** (`.env` in

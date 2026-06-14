@@ -37,7 +37,9 @@ iPhone (Safari PWA) ──WebRTC audio──► Speech-to-speech model (OpenAI R
   tool layer, executes `cursor-agent`, persists state.
 - **MCP tools** — `cursor_submit`, `cursor_status`, `cursor_stop`,
   `cursor_revert`, `cursor_diff`, `cursor_new_session`, `cursor_list_projects`,
-  `cursor_set_project` — the only things the voice model can do.
+  `cursor_set_project`, `cursor_ask` (read-only repo Q&A) — the only things the
+  voice model can do. The voice model has **no direct repo access**; it gains
+  context only via `cursor_ask` (ask mode).
 - **Network** — Tailscale mesh + `tailscale serve` for the HTTPS required by
   mobile mic access. No port forwarding.
 

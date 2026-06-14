@@ -52,6 +52,7 @@ get a final summary + diffstat, revert it, and stop a running job.
 | zod tool schemas (single source of truth) for the tools. | S |
 | MCP server wiring + handlers calling the executor. | M |
 | **Project resolution**: name/alias/fuzzy match + `query` search, sticky active project (`session_state`), `cursor_list_projects`/`cursor_set_project`, disambiguation errors. | M |
+| `cursor_ask` (read-only `--mode ask` context tool) + `preRunFlags` from config applied to all invocations. | S |
 | HTTP project endpoints: `GET /api/projects` (names+descriptions, **no paths**) + `POST /api/active-project` for the web-app dropdown. | S |
 | Server-side arg validation + project allowlist enforcement + audit logging. | M |
 | Emit provider function-tool definitions from the same schemas. | S |

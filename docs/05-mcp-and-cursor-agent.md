@@ -14,6 +14,7 @@ inputs are intentionally minimal.
 | --- | --- | --- | --- |
 | `cursor_list_projects` | `query?: string` | `{ projects: [{name, description, aliases, active}] }` | View/search the registry. No `query` → full list; `query` → server-side filtered (name/alias/description, fuzzy). Used for "what can I work on?", search ("anything about the website?"), and disambiguation read-back. |
 | `cursor_set_project` | `project: string` | `{ active_project, description }` | Sets the **sticky active project** for the session. "Cursor, switch to the budget app." |
+| `cursor_ask` | `question: string`, `project?: string` | `{ answer }` | **Read-only repo Q&A** (`--mode ask`). The voice model's *only* way to gain repo context — it has no direct repo access. Used to clarify *before* asking dad a question or drafting a `cursor_submit`. Cannot edit anything. |
 | `cursor_submit` | `prompt: string`, `project?: string`, `mode?: "agent"\|"plan"\|"ask"` | `{ job_id, session_id, status, project }` | Starts (or resumes) work. `project` **optional** — defaults to the active project. Returns fast; long work tracked via `cursor_status`. |
 | `cursor_status` | `job_id: string` | `{ status, progress[], summary?, diffstat?, session_id }` | Poll for progress/result. `status ∈ running\|done\|error\|stopped`. |
 | `cursor_stop` | `job_id: string` | `{ status }` | Kills the running agent process for that job. |
@@ -59,6 +60,8 @@ the bridge is the final authority and only ever runs against an allowlisted path
   `--workspace`. If omitted, use the session's active project; if there is none,
   return `no_active_project` so the model asks which one.
 - `prompt` → non-empty, length-capped; passed as a single argv element.
+- `question` (`cursor_ask`) → non-empty, length-capped; run **only** in
+  `--mode ask` (read-only); never resolves to a writing run.
 - `mode` → enum; default per config (recommend `agent`, with optional
   `plan`-first config toggle).
 - `job_id` / `session_id` → must exist in state DB and belong to the project.
@@ -85,6 +88,21 @@ the bridge is the final authority and only ever runs against an allowlisted path
 | `--approve-mcps` | Only if the executor agent itself uses MCPs. |
 | `agent ls` | Lists **chat sessions for a workspace**, not projects. Scoped to `--workspace` (defaults to cwd). Use `cursor-agent ls --workspace <registry path>` when recovering a specific project's sessions. |
 
+### Pre-run flags (configurable, default = force)
+
+Every invocation gets a **configurable pre-run flag set** applied uniformly,
+sourced from `config.json` settings (`preRunFlags`, see `07`). Default:
+
+```jsonc
+// config.json → settings
+"preRunFlags": ["--force", "--trust"]   // auto-run + apply + skip trust prompt
+```
+
+- This is the one place to change run behavior for *all* requests (e.g., add
+  `--sandbox`, `--approve-mcps`, or drop `--force` for a propose-only mode).
+- `--force` honors the **`deny` list** in the CLI permission files (see `03`/`07`),
+  so "default force" still has hard guardrails.
+
 ### Canonical invocation (built in code, `shell:false`)
 
 ```ts
@@ -93,13 +111,32 @@ const args = [
   "--output-format", "stream-json",
   "--workspace", project.path,        // from registry
   "--model", config.executorModel,
-  "--force", "--trust",
+  ...config.preRunFlags,              // default: --force --trust
   ...(resumeId ? ["--resume", resumeId] : []),
   ...(mode === "plan" ? ["--mode", "plan"] : []),
-  prompt,                              // single argv element
+  prompt,                             // single argv element
 ];
 spawn("cursor-agent", args, { cwd: project.path, shell: false, env: scopedEnv });
 ```
+
+### `cursor_ask` invocation (read-only context for the voice model)
+
+```ts
+const args = [
+  "-p",
+  "--output-format", "json",          // single answer; no progress needed
+  "--workspace", project.path,
+  "--model", config.executorModel,
+  "--mode", "ask",                    // READ-ONLY: cannot edit or run mutating cmds
+  ...config.preRunFlags,              // harmless in ask mode (read-only)
+  question,
+];
+// one-shot by default (no --resume) so exploration never pollutes the work thread
+```
+
+`cursor_ask` is the **only** repo-context path for the voice model. It runs in
+`--mode ask` (read-only exploration — searches/reads, makes no changes), returns
+the answer text, and does **not** persist to the project's work session.
 
 `--workspace` is **always** present and always comes from the registry
 (`project.path`), never from caller input. It is the single value that scopes
@@ -205,27 +242,58 @@ Provision these permission files as part of deployment (see `07`) so every
 project the bridge runs gets the same guardrails. Treat the deny list as part of
 the security configuration, version-controlled via `config.example`.
 
-### How clarifying questions actually work (two levels)
+### Is there a flag to "skip cursor's questions"?
 
-cursor-agent won't ask interactively, so clarification lives elsewhere:
+**No dedicated flag — and none is needed.** Headless mode has no interactive Q&A;
+the agent never *pops* a question. Two practical implications:
 
-1. **Before submit — the voice model asks dad.** The realtime model's job is to
-   resolve ambiguity *conversationally* and only then call `cursor_submit` with a
-   well-formed prompt. This is the primary path (see `06`).
-2. **After a run — via session resume.** If the agent's **final output** contains
-   a question or flags uncertainty (e.g., "Should I also update the tests?"), the
-   bridge returns that text → the voice model **speaks it to dad** → dad answers →
-   the voice model calls `cursor_submit` again, which **`--resume`s the same
-   session** with dad's answer as the next prompt. Multi-turn clarification is
-   therefore **session-level**, not a blocking in-run prompt.
-3. **Optional plan-first.** `--mode plan` makes the agent emit a plan + clarifying
-   questions *as output text* (no edits). The voice model can read the plan to
-   dad, get a "yes", then run the same request in agent mode. Good for risky or
-   vague tasks (config toggle, see `08`).
+- **It won't stall asking.** With `preRunFlags` defaulting to `--force --trust`,
+  permission/trust decisions are pre-answered. There is no prompt to skip.
+- **To keep the agent heads-down (don't emit questions, just proceed),** steer it
+  via the **prompt text** the bridge builds, e.g. prepend a standing instruction:
+  *"Make reasonable assumptions and proceed; do not ask clarifying questions."*
+  This is prompt-level, not a CLI flag. The questions we *want* come from the
+  **voice model**, not the agent.
 
-This makes the **voice model the conversational layer** and **cursor-agent the
-run-to-completion executor** — a clean separation that the non-blocking headless
-behavior enables.
+### Clarifying questions: the voice model stays "dumb"
+
+Design rule (confirmed): the **voice model has no repo access**. It only drafts
+prompts and converses. To gain context it **delegates to `cursor-agent` in ask
+mode** instead of guessing. Order of operations when the voice model is unsure:
+
+```
+Dad says something ambiguous
+      │
+      ├─ Is the ambiguity about the REPO/code? ── yes ──► cursor_ask(question)   [--mode ask, read-only]
+      │        (e.g., "is there already a settings page?")        │
+      │                                                           ▼
+      │                                              use the answer to either:
+      │                                                ├─ draft a precise cursor_submit, or
+      │                                                └─ ask Dad a better, informed question
+      │
+      └─ Is the ambiguity about INTENT/preference? ── yes ──► ask Dad directly
+               (e.g., "dark mode default on or off?")   (cursor can't know this)
+```
+
+So the voice model **asks `cursor` before it asks Dad** for anything the repo
+could answer, and only bothers Dad with intent/preference decisions. This keeps
+the voice model cheap/simple while answers stay grounded in the real codebase.
+
+### After a run — clarification via session resume
+
+If a `cursor_submit` run's **final output** still contains a question or flags
+uncertainty, the bridge returns that text → the voice model **speaks it to Dad**
+→ Dad answers → the voice model calls `cursor_submit` again, which **`--resume`s
+the same session** with the answer. Multi-turn is **session-level**, not a
+blocking in-run prompt. (`--mode plan` remains available for plan-first
+confirmation on risky/vague tasks.)
+
+Net separation of concerns:
+
+- **Voice model** = conversational layer (drafts prompts, asks Dad, asks
+  `cursor_ask` for repo facts). No repo access, stays dumb.
+- **cursor-agent (ask)** = read-only knowledge source for the voice model.
+- **cursor-agent (agent)** = run-to-completion executor that applies changes.
 
 ## ⚠️ The node-pty question (validate first, then likely drop)
 
