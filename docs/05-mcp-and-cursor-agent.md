@@ -14,6 +14,8 @@ inputs are intentionally minimal.
 | --- | --- | --- | --- |
 | `cursor_list_projects` | `query?: string` | `{ projects: [{name, description, aliases, active}] }` | View/search the registry. No `query` → full list; `query` → server-side filtered (name/alias/description, fuzzy). Used for "what can I work on?", search ("anything about the website?"), and disambiguation read-back. |
 | `cursor_set_project` | `project: string` | `{ active_project, description }` | Sets the **sticky active project** for the session. "Cursor, switch to the budget app." |
+| `cursor_list_models` | `query?: string` | `{ models: [{id, displayName}], active_model }` | Lists available models from the live CLI (`cursor-agent models`). No `query` → full list; `query` → server-side filtered (id + displayName, case-insensitive contains). Cached with configurable TTL to avoid running the CLI on every request. Includes which model is currently the session default. |
+| `cursor_set_model` | `model_id: string` | `{ active_model, displayName }` | Sets the **sticky active model** for this session. Used for the next `cursor_submit` / `cursor_ask`. The model ID must be present in the cached model list (validated server-side). |
 | `cursor_ask` | `question: string`, `project?: string` | `{ answer }` | **Read-only repo Q&A** (`--mode ask`). The voice model's *only* way to gain repo context — it has no direct repo access. Used to clarify *before* asking dad a question or drafting a `cursor_submit`. Cannot edit anything. |
 | `cursor_submit` | `prompt: string`, `project?: string`, `mode?: "agent"\|"plan"\|"ask"` | `{ job_id, session_id, status, project }` | Starts (or resumes) work. `project` **optional** — defaults to the active project. Returns fast; long work tracked via `cursor_status`. |
 | `cursor_status` | `job_id: string` | `{ status, progress[], summary?, diffstat?, session_id }` | Poll for progress/result. `status ∈ running\|done\|error\|stopped`. |
@@ -79,7 +81,7 @@ the bridge is the final authority and only ever runs against an allowlisted path
 | `--stream-partial-output` | Optional; char-level deltas (probably unnecessary for voice). |
 | `--resume [chatId]` | Resume per-project session. |
 | `--continue` | Alias for `--resume=-1` (most recent). |
-| `--model <model>` | Pin the executor model (separate from the voice provider). |
+| `--model <model>` | Model ID from `cursor-agent models`. Set from `session_state.active_model` (default: `auto`). No hardcoded value in config. |
 | `--mode plan\|ask` | `agent` is default; `plan` for plan-first flow. |
 | `--force` / `--yolo` | Auto-run + apply changes. *"Force allow commands unless explicitly denied"* — **the `deny` list still applies.** Without it, headless silently denies non-allowlisted commands (no prompt either way). |
 | `--trust` | Required for headless; skips workspace-trust prompt. Scope to the allowlisted workspace. |
@@ -109,12 +111,12 @@ sourced from `config.json` settings (`preRunFlags`, see `07`). Default:
 const args = [
   "-p",
   "--output-format", "stream-json",
-  "--workspace", project.path,        // from registry
-  "--model", config.executorModel,
-  ...config.preRunFlags,              // default: --force --trust
+  "--workspace", project.path,        // from registry — never from caller
+  "--model", session.activeModel,     // from session_state; set via cursor_set_model
+  ...config.preRunFlags,              // default: ["--force", "--trust"]
   ...(resumeId ? ["--resume", resumeId] : []),
   ...(mode === "plan" ? ["--mode", "plan"] : []),
-  prompt,                             // single argv element
+  prompt,                             // single argv element — only caller-controlled value
 ];
 spawn("cursor-agent", args, { cwd: project.path, shell: false, env: scopedEnv });
 ```
@@ -126,17 +128,45 @@ const args = [
   "-p",
   "--output-format", "json",          // single answer; no progress needed
   "--workspace", project.path,
-  "--model", config.executorModel,
+  "--model", session.activeModel,     // same model as the work session
   "--mode", "ask",                    // READ-ONLY: cannot edit or run mutating cmds
   ...config.preRunFlags,              // harmless in ask mode (read-only)
   question,
 ];
-// one-shot by default (no --resume) so exploration never pollutes the work thread
+// one-shot (no --resume) — exploration never pollutes the work session thread
 ```
 
 `cursor_ask` is the **only** repo-context path for the voice model. It runs in
 `--mode ask` (read-only exploration — searches/reads, makes no changes), returns
 the answer text, and does **not** persist to the project's work session.
+
+### Model management (no hardcoded IDs)
+
+**No model IDs appear in `config.json`.** Instead:
+
+- `cursor_list_models` calls `cursor-agent models`, parses the plain-text output
+  into `[{id, displayName}]`, and **caches the result** (TTL from
+  `settings.modelCacheTtlMs`, e.g., 3600000 = 1 hour) in the SQLite state.
+  Dad can say *"Cursor, what models are available?"* or *"show me the Claude models"*.
+- `cursor_set_model` sets `session_state.active_model` (validated against the
+  cache). Dad can say *"Cursor, use Opus"* and the model filters/fuzzy-matches the
+  display name.
+- If no model is set for the session, the bridge passes `auto` (Cursor chooses
+  the account default). This is the sensible default — dad doesn't have to pick.
+- **Cache refresh:** on cache miss or expiry, call `cursor-agent models` again.
+  The bridge can also expose a `cursor_refresh_models` tool or do it automatically
+  at startup and on TTL expiry.
+
+```
+session_state
+  ├─ active_project  (set by cursor_set_project or web dropdown)
+  └─ active_model    (set by cursor_set_model; default: "auto")
+
+model_cache
+  ├─ fetched_at
+  ├─ ttl_ms
+  └─ models: [{id, displayName}]
+```
 
 `--workspace` is **always** present and always comes from the registry
 (`project.path`), never from caller input. It is the single value that scopes

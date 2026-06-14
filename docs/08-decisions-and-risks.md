@@ -147,6 +147,21 @@ separation: voice = talk + draft; cursor-agent (ask) = know; cursor-agent (agent
 allowlist-validated + audited). System prompt encodes "ask cursor before Dad for
 repo facts."
 
+### ADR-016 — No hardcoded model IDs; models fetched live via CLI + MCP tools
+**Decision:** No model ID is hardcoded anywhere in config. Models are fetched
+live at runtime via `cursor-agent models`, parsed, cached in SQLite
+(`model_cache`, TTL from `settings.modelCacheTtlMs`), and exposed via two new
+MCP tools: `cursor_list_models` (list/search) and `cursor_set_model` (set sticky
+session model). All invocations use `session_state.active_model` (default:
+`"auto"` = Cursor account default). Filtering is server-side (case-insensitive
+contains on `id` + `displayName`); no native CLI filter flag exists.
+**Rationale:** The model list changes with CLI updates (verified: 140+ models,
+June 2026). Hardcoding breaks silently; live fetch + session selection is robust
+and gives dad and the voice model natural model switching ("use Opus", "show me
+the fast models").
+**Consequence:** New `model_cache` table; `session_state` gains `active_model`;
+per-project `model` column in registry as an optional override.
+
 ### ADR-015 — Configurable pre-run flags (default `--force --trust`); no "skip questions" flag exists
 **Decision:** All `cursor-agent` invocations apply a configurable
 `settings.preRunFlags` (default `["--force", "--trust"]`) — one place to control
@@ -181,8 +196,9 @@ config edit. "Skip questions" is a prompt-engineering concern, not a flag.
 
 1. **Project naming convention** — which projects, what voice-friendly names?
    (Needed to seed the registry; collect during Milestone 1/6.)
-2. **`cursor-agent` executor model** — which model should do the actual coding
-   (`--model`)? Default to your Cursor account's default if unspecified.
+2. **`cursor-agent` executor model** — no hardcoding; dad selects via
+   `cursor_set_model` (or leaves as `auto` = Cursor account default). Models
+   fetched live from `cursor-agent models` via `cursor_list_models`.
 3. **Plan-mode-first default?** — Should `cursor_submit` propose a plan and wait
    for "yes" before applying, or apply directly? (Recommended: configurable;
    start with direct + git revert, add plan-first if it feels risky.)

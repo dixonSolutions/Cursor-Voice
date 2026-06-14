@@ -16,7 +16,7 @@ CREATE TABLE project (
   aliases     TEXT NOT NULL DEFAULT '[]', -- JSON array of spoken variants
   description TEXT,                     -- short, for the model + spoken readback
   resume_id   TEXT,                     -- current cursor-agent session id
-  model       TEXT,                     -- optional per-project executor model
+  model       TEXT,                     -- optional per-project model override (overrides session active_model)
   enabled     INTEGER NOT NULL DEFAULT 1,
   created_at  TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
@@ -26,7 +26,15 @@ CREATE TABLE project (
 CREATE TABLE session_state (
   session_key    TEXT PRIMARY KEY,      -- WS/connection or user key
   active_project TEXT REFERENCES project(name),
+  active_model   TEXT NOT NULL DEFAULT 'auto', -- model id; 'auto' = cursor default
   updated_at     TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Cached model list from cursor-agent models (avoids running the CLI on every request).
+CREATE TABLE model_cache (
+  id            INTEGER PRIMARY KEY CHECK (id = 1), -- single-row cache
+  fetched_at    TEXT NOT NULL,
+  models_json   TEXT NOT NULL          -- JSON array of {id, displayName}
 );
 
 -- One row per cursor_submit invocation.
@@ -115,12 +123,12 @@ startup; invalid config fails fast with a clear error.
   "settings": {
     "voiceProvider": "openai",
     "realtimeModel": "gpt-realtime",
-    "executorModel": "",
     "defaultMode": "agent",
     "maxConcurrentJobs": 1,
     "jobTimeoutMs": 600000,
     "planFirst": false,
     "preRunFlags": ["--force", "--trust"],
+    "modelCacheTtlMs": 3600000,
     "logLevel": "info"
   },
   "projects": [
