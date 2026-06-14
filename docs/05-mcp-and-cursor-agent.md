@@ -78,9 +78,9 @@ the bridge is the final authority and only ever runs against an allowlisted path
 | `--continue` | Alias for `--resume=-1` (most recent). |
 | `--model <model>` | Pin the executor model (separate from the voice provider). |
 | `--mode plan\|ask` | `agent` is default; `plan` for plan-first flow. |
-| `--force` / `--yolo` | Required non-interactively so it doesn't stall on approvals. |
-| `--trust` | Required for headless; scope to the allowlisted workspace. |
-| `--sandbox enabled\|disabled` | Optional defense-in-depth. |
+| `--force` / `--yolo` | Auto-run + apply changes. *"Force allow commands unless explicitly denied"* — **the `deny` list still applies.** Without it, headless silently denies non-allowlisted commands (no prompt either way). |
+| `--trust` | Required for headless; skips workspace-trust prompt. Scope to the allowlisted workspace. |
+| `--sandbox enabled\|disabled` | Optional defense-in-depth (OS-level boundaries; non-sandboxable commands fail instead of prompting). |
 | `--workspace <dir>` | **Always** — from registry, never from caller. |
 | `--approve-mcps` | Only if the executor agent itself uses MCPs. |
 | `agent ls` | Lists **chat sessions for a workspace**, not projects. Scoped to `--workspace` (defaults to cwd). Use `cursor-agent ls --workspace <registry path>` when recovering a specific project's sessions. |
@@ -148,6 +148,84 @@ Key points:
 5. **Initial prompt construction.** The bridge builds the prompt argv element
    from the model's task text only; workspace/flags are added in code. No host
    shell string is ever assembled (`shell:false`, args array).
+
+## Auto-run, permissions & clarifying questions
+
+A hard requirement for the voice flow: **`cursor-agent` must never stall waiting
+for input.** Confirmed behavior (Cursor CLI docs, June 2026):
+
+### Headless mode is non-blocking by design
+
+- **No permission dialogs in print mode.** Without `--force`, any non-allowlisted
+  command is **silently denied** and the agent adapts to the failure on its own;
+  with `--force`, it runs. **Neither path pops an interactive prompt** — so a
+  headless run cannot hang on "approve this command?".
+- **Applying changes = `--force`.** Without `--force`, file changes are only
+  *proposed, not applied*; with `--force` (alias `--yolo`) they are written
+  directly. "Accepting changes" is therefore a flag, not an interactive step.
+- **`--trust`** skips the workspace-trust prompt (headless only).
+- **No interactive Q&A.** Print mode has no back-and-forth; the agent runs to
+  completion and returns. `thinking` events are suppressed. The agent does **not**
+  pause mid-run to ask the user a question.
+
+### Recommended invocation: auto-run **with a deny list** (not blanket yolo)
+
+`--force` means *"force allow commands unless explicitly denied"* — the **`deny`
+list still applies under `--force`.** This gives us auto-run flow *and* hard
+guardrails. Configure CLI permissions in `~/.cursor/cli-config.json` (global) or
+`<workspace>/.cursor/cli.json` (project-level; only `permissions` is allowed
+there):
+
+```json
+{
+  "version": 1,
+  "permissions": {
+    "allow": [],
+    "deny": [
+      "Shell(rm)",
+      "Shell(sudo)",
+      "Shell(git:push*)",
+      "Read(.env*)",
+      "Write(**/*.key)",
+      "Write(**/*.pem)"
+    ]
+  }
+}
+```
+
+- Deny rules take precedence over allow; entries are exact-string/glob tokens
+  (`Shell(...)`, `Read(...)`, `Write(...)`, `WebFetch(...)`, `Mcp(...)`).
+- This blocks destructive/sensitive ops **even in auto-run**, satisfying the
+  "enforce security at the boundary" rule without losing hands-free flow.
+- Optional defense-in-depth: `--sandbox enabled` (OS-level filesystem/network
+  boundaries; non-sandboxable commands simply fail and the agent reacts).
+- `--approve-mcps` only if the executor agent itself calls MCP servers.
+
+Provision these permission files as part of deployment (see `07`) so every
+project the bridge runs gets the same guardrails. Treat the deny list as part of
+the security configuration, version-controlled via `config.example`.
+
+### How clarifying questions actually work (two levels)
+
+cursor-agent won't ask interactively, so clarification lives elsewhere:
+
+1. **Before submit — the voice model asks dad.** The realtime model's job is to
+   resolve ambiguity *conversationally* and only then call `cursor_submit` with a
+   well-formed prompt. This is the primary path (see `06`).
+2. **After a run — via session resume.** If the agent's **final output** contains
+   a question or flags uncertainty (e.g., "Should I also update the tests?"), the
+   bridge returns that text → the voice model **speaks it to dad** → dad answers →
+   the voice model calls `cursor_submit` again, which **`--resume`s the same
+   session** with dad's answer as the next prompt. Multi-turn clarification is
+   therefore **session-level**, not a blocking in-run prompt.
+3. **Optional plan-first.** `--mode plan` makes the agent emit a plan + clarifying
+   questions *as output text* (no edits). The voice model can read the plan to
+   dad, get a "yes", then run the same request in agent mode. Good for risky or
+   vague tasks (config toggle, see `08`).
+
+This makes the **voice model the conversational layer** and **cursor-agent the
+run-to-completion executor** — a clean separation that the non-blocking headless
+behavior enables.
 
 ## ⚠️ The node-pty question (validate first, then likely drop)
 

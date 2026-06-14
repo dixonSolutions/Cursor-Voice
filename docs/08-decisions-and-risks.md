@@ -112,6 +112,26 @@ restart-surviving continuity; no TTY scraping.
 **Consequence:** Resume must always reuse the original workspace (else the CLI
 starts fresh). Capturing the id reads a JSON field, not the terminal screen.
 
+### ADR-013 — Auto-run via `--force --trust` + deny list; questions handled out-of-run
+**Decision:** `cursor-agent` runs headless with **`--force --trust`** so it never
+stalls on permission/trust prompts and **applies** changes (not just proposes).
+Guardrails come from a CLI permissions **`deny` list** (which `--force` honors),
+provisioned by the operator (`~/.cursor/cli-config.json` and/or
+`<workspace>/.cursor/cli.json`), optionally plus `--sandbox enabled`. Clarifying
+questions are **not** done via blocking CLI prompts (headless has no interactive
+Q&A): the **voice model asks dad before submit**, and any question in the agent's
+**final output** is spoken back and answered on the next `--resume` turn.
+`--mode plan` is available for plan-first confirmation.
+**Rationale:** Confirmed from Cursor CLI docs (June 2026): headless mode is
+**non-blocking** — without `--force` non-allowlisted commands are *silently
+denied* (agent adapts), with `--force` they run; neither prompts. This makes a
+hands-free voice loop viable while the deny list preserves "security at the
+boundary." Separating conversation (voice model) from execution (run-to-
+completion agent) is the natural fit.
+**Consequence:** Multi-turn clarification is **session-level** (via `--resume`),
+not in-run. Operator must provision/maintain the deny list as security config.
+Resolves the core concern behind R-11.
+
 ## Open items / risks (to resolve during build)
 
 | ID | Item | Plan to resolve | Severity |
@@ -126,6 +146,8 @@ starts fresh). Capturing the id reads a JSON field, not the terminal screen.
 | R-8 | **iOS Safari audio quirks** (autoplay unlock, call/Siri interruptions, backgrounding). | Unlock AudioContext on tap; reconnect on interruption; keep sessions foreground. | Low |
 | R-9 | **Git revert aggressiveness** (uncommitted vs committed agent changes). | Define checkpoint policy in `git.ts`; gate hard resets behind confirmation. | Low |
 | R-10 | **Two billing accounts** (provider key vs Cursor subscription) — cost visibility. | Document expected usage; ephemeral token TTL limits provider abuse. | Low |
+| R-11 | **Agent needs info mid-task but headless can't ask interactively.** | Resolved (ADR-013): voice model clarifies *before* submit; final-output questions spoken back + answered via `--resume`; optional `--mode plan`. Residual: tuning when the model should resume vs. ask. | Low |
+| R-12 | **Auto-run blast radius even with deny list** (a valid prompt does harm inside an allowlisted workspace). | Deny list (`Shell(rm)`, `Read(.env*)`, no `git push`, …) + optional `--sandbox enabled` + `cursor_revert`; least-priv OS user; deny list maintained as security config. | Med |
 
 ## Questions that may still need user input (non-blocking for docs)
 

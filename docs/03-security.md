@@ -103,6 +103,28 @@ default.)
 - `--trust` is scoped to the allowlisted workspace only.
 - Pin the CLI version; the CLI is beta and flags may change.
 
+### Auto-run with a deny list (defense in depth)
+
+The voice flow runs `cursor-agent` with `--force --trust` so it never stalls
+(headless mode is non-blocking — see `05`). To keep auto-run from meaning
+"anything goes", we rely on `--force` honoring the **`deny` list**: *"force allow
+commands unless explicitly denied."*
+
+- Provision CLI permissions (`~/.cursor/cli-config.json` for the service user,
+  and/or `<workspace>/.cursor/cli.json` per project) with a **deny list** for
+  destructive/sensitive operations: `Shell(rm)`, `Shell(sudo)`, `Shell(git:push*)`,
+  `Read(.env*)`, `Write(**/*.key)`, `Write(**/*.pem)`, etc. Deny beats allow.
+- This blocks the worst outcomes **even though the agent auto-runs**, which
+  directly serves the "enforce security at the boundary" rule.
+- Optional `--sandbox enabled` adds OS-level filesystem/network boundaries;
+  non-sandboxable commands fail (the agent reacts) rather than prompting.
+- These permission files are **operator-provisioned** at deploy time and treated
+  as security configuration (version-controlled as examples; see `07`). The
+  voice model and dad cannot edit them.
+- Note this is a *second* layer: the primary boundary is still the constrained
+  MCP tool surface + project allowlist. The deny list bounds what the agent can
+  do *inside* an allowlisted workspace once a valid `cursor_submit` is running.
+
 ## Secrets & data hygiene
 
 - `.env` perms `600`, owned by the service user, **never committed** (`.env` in

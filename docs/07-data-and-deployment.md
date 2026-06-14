@@ -238,6 +238,33 @@ DB_PATH=/opt/cursor-voice/data/state.db
 > the owner has one obvious place to manage behavior; `.env` is just keys + where
 > to find the config/db.
 
+### cursor-agent permission files (auto-run guardrails)
+
+Because the voice flow runs `cursor-agent` with `--force --trust` (non-blocking;
+see `05`), guardrails come from CLI permission **deny** lists, which `--force`
+still honors. Provision these at deploy time for the service user:
+
+- **Global:** `~/.cursor/cli-config.json` (the dedicated service user's home).
+- **Per project (optional):** `<workspace>/.cursor/cli.json` (only `permissions`
+  allowed at project level).
+
+```json
+{
+  "version": 1,
+  "permissions": {
+    "allow": [],
+    "deny": [
+      "Shell(rm)", "Shell(sudo)", "Shell(git:push*)",
+      "Read(.env*)", "Write(**/*.key)", "Write(**/*.pem)"
+    ]
+  }
+}
+```
+
+Ship a `cli-config.example.json` in the repo and have the installer/systemd setup
+place it. Treat the deny list as security config (see `03`). The voice model and
+dad cannot modify these files.
+
 ### Operations
 
 - **Health endpoint** `/healthz`: bridge up, db ok, config loaded + N projects,
