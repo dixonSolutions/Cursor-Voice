@@ -1,0 +1,24 @@
+[Unit]
+Description=Cursor Voice Bridge
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cursorvoice
+WorkingDirectory=/opt/cursor-voice
+EnvironmentFile=/opt/cursor-voice/.env
+ExecStart=/usr/bin/node /opt/cursor-voice/dist/index.js
+Restart=on-failure
+RestartSec=3
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+# Adjust ReadWritePaths to include every allowlisted project workspace.
+# The bridge data dir and the project workspaces are the only writable locations.
+ReadWritePaths=/opt/cursor-voice/data /home/projects
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

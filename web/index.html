@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0f172a" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Cursor Voice" />
+    <link rel="manifest" href="/manifest.json" />
+    <!-- iOS Add to Home Screen icon. Falls back to SVG on older devices. -->
+    <link rel="apple-touch-icon" href="/icon-192.png" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <title>Cursor Voice</title>
+    <style>
+      /* ── Reset + tokens ──────────────────────────────────────────────── */
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+      :root {
+        --bg:       #0f172a;  /* slate-900 */
+        --surface:  #1e293b;  /* slate-800 */
+        --border:   #334155;  /* slate-700 */
+        --text:     #f1f5f9;  /* slate-100 */
+        --muted:    #94a3b8;  /* slate-400 */
+        --accent:   #6366f1;  /* indigo-500 */
+        --accent-h: #818cf8;  /* indigo-400 hover */
+        --danger:   #ef4444;  /* red-500 */
+        --success:  #22c55e;  /* green-500 */
+        --warn:     #f59e0b;  /* amber-500 */
+
+        --radius:   1rem;
+        --radius-sm: 0.5rem;
+        --transition: 150ms ease;
+        --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      }
+
+      body {
+        font-family: var(--font);
+        background: var(--bg);
+        color: var(--text);
+        min-height: 100dvh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: flex-start;
+        padding: 1.5rem 1rem;
+        gap: 1.5rem;
+        /* Prevent accidental zoom/scroll on iPhone during PTT */
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      /* ── Header ──────────────────────────────────────────────────────── */
+      header {
+        width: 100%;
+        max-width: 420px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .logo {
+        font-size: 1.125rem;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        color: var(--text);
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+
+      .logo-icon {
+        width: 28px; height: 28px;
+        background: var(--accent);
+        border-radius: 6px;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 14px;
+      }
+
+      /* ── Connection badge ─────────────────────────────────────────────── */
+      #status-badge {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        font-size: 0.75rem;
+        font-weight: 500;
+        color: var(--muted);
+        transition: color var(--transition);
+      }
+
+      .dot {
+        width: 8px; height: 8px;
+        border-radius: 50%;
+        background: var(--border);
+        transition: background var(--transition);
+      }
+
+      #status-badge.connected .dot   { background: var(--success); }
+      #status-badge.connected        { color: var(--success); }
+      #status-badge.error .dot       { background: var(--danger); }
+      #status-badge.error            { color: var(--danger); }
+      #status-badge.working .dot     { background: var(--warn); animation: pulse 1s infinite; }
+      #status-badge.working          { color: var(--warn); }
+
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50%       { opacity: 0.4; }
+      }
+
+      /* ── Main card ───────────────────────────────────────────────────── */
+      .card {
+        width: 100%;
+        max-width: 420px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 1.5rem;
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+      }
+
+      /* ── Project selector ────────────────────────────────────────────── */
+      .field-label {
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--muted);
+        margin-bottom: 0.35rem;
+      }
+
+      select {
+        width: 100%;
+        padding: 0.6rem 0.85rem;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        color: var(--text);
+        font-size: 0.95rem;
+        font-family: var(--font);
+        appearance: none;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2394a3b8' stroke-width='2' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 0.75rem center;
+        cursor: pointer;
+        transition: border-color var(--transition);
+      }
+
+      select:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
+
+      /* ── Push-to-talk button — Fitts's Law: large, centred, distinct ─── */
+      .ptt-wrap {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 1rem;
+        padding: 1.5rem 0 0.5rem;
+      }
+
+      #ptt-btn {
+        width: 120px; height: 120px;
+        border-radius: 50%;
+        border: 3px solid var(--accent);
+        background: transparent;
+        color: var(--text);
+        font-size: 0.85rem;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        cursor: pointer;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 0.4rem;
+        transition: background var(--transition), border-color var(--transition),
+                    transform 80ms ease, box-shadow var(--transition);
+        -webkit-tap-highlight-color: transparent;
+        touch-action: manipulation;
+        /* Prevent text selection while pressing */
+        user-select: none;
+        -webkit-user-select: none;
+      }
+
+      #ptt-btn:active, #ptt-btn.active {
+        background: var(--accent);
+        transform: scale(0.96);
+      }
+
+      #ptt-btn.active {
+        box-shadow: 0 0 0 12px rgba(99,102,241,0.15), 0 0 0 24px rgba(99,102,241,0.07);
+        animation: ring 2s infinite;
+      }
+
+      @keyframes ring {
+        0%, 100% { box-shadow: 0 0 0 12px rgba(99,102,241,0.15), 0 0 0 24px rgba(99,102,241,0.07); }
+        50%       { box-shadow: 0 0 0 16px rgba(99,102,241,0.20), 0 0 0 32px rgba(99,102,241,0.05); }
+      }
+
+      #ptt-btn .mic-icon { font-size: 2rem; }
+      #ptt-btn .ptt-label { font-size: 0.7rem; letter-spacing: 0.08em; }
+
+      .ptt-hint {
+        font-size: 0.75rem;
+        color: var(--muted);
+        text-align: center;
+      }
+
+      /* ── Transcript log ──────────────────────────────────────────────── */
+      #transcript {
+        width: 100%;
+        max-width: 420px;
+        max-height: 280px;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+
+      .transcript-entry {
+        font-size: 0.82rem;
+        line-height: 1.5;
+        padding: 0.5rem 0.75rem;
+        border-radius: var(--radius-sm);
+        border-left: 3px solid transparent;
+        animation: fadeIn 250ms ease;
+      }
+
+      @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(4px); }
+        to   { opacity: 1; transform: translateY(0); }
+      }
+
+      .transcript-entry.assistant {
+        background: rgba(99,102,241,0.08);
+        border-color: var(--accent);
+        color: var(--text);
+      }
+
+      .transcript-entry.user {
+        background: rgba(255,255,255,0.04);
+        border-color: var(--border);
+        color: var(--muted);
+      }
+
+      .transcript-entry.system {
+        background: rgba(34,197,94,0.07);
+        border-color: var(--success);
+        color: #86efac;
+        font-style: italic;
+      }
+
+      .transcript-entry.error {
+        background: rgba(239,68,68,0.08);
+        border-color: var(--danger);
+        color: #fca5a5;
+      }
+
+      /* ── Token setup overlay ─────────────────────────────────────────── */
+      #token-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(15,23,42,0.95);
+        backdrop-filter: blur(8px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 1.5rem;
+        z-index: 100;
+      }
+
+      #token-overlay.hidden { display: none; }
+
+      .token-card {
+        width: 100%;
+        max-width: 380px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 2rem 1.5rem;
+        display: flex;
+        flex-direction: column;
+        gap: 1.25rem;
+      }
+
+      .token-card h2 {
+        font-size: 1.25rem;
+        font-weight: 700;
+      }
+
+      .token-card p {
+        font-size: 0.85rem;
+        color: var(--muted);
+        line-height: 1.55;
+      }
+
+      input[type="password"], input[type="text"] {
+        width: 100%;
+        padding: 0.65rem 0.85rem;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        color: var(--text);
+        font-size: 0.95rem;
+        font-family: var(--font);
+        transition: border-color var(--transition);
+      }
+
+      input:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
+
+      .btn {
+        padding: 0.7rem 1.25rem;
+        border-radius: var(--radius-sm);
+        border: none;
+        font-size: 0.9rem;
+        font-weight: 600;
+        font-family: var(--font);
+        cursor: pointer;
+        transition: background var(--transition), opacity var(--transition);
+      }
+
+      .btn-primary {
+        background: var(--accent);
+        color: #fff;
+      }
+
+      .btn-primary:hover { background: var(--accent-h); }
+
+      .btn-ghost {
+        background: transparent;
+        color: var(--muted);
+        border: 1px solid var(--border);
+      }
+
+      .btn-ghost:hover { color: var(--text); border-color: var(--text); }
+    </style>
+  </head>
+  <body>
+    <!-- Token setup overlay (shown until token is saved) -->
+    <div id="token-overlay">
+      <div class="token-card">
+        <h2>🎙 Cursor Voice</h2>
+        <p>
+          Enter the app token from your bridge's <code>.env</code> file.
+          It stays in this device only and is never sent to any third party.
+        </p>
+        <div>
+          <div class="field-label">App Token</div>
+          <input type="password" id="token-input" placeholder="Paste token here…" autocomplete="off" />
+        </div>
+        <div>
+          <div class="field-label">Bridge URL (optional)</div>
+          <input type="text" id="bridge-url-input" placeholder="https://machine.ts.net" autocomplete="off" />
+          <p style="font-size:0.73rem;margin-top:0.35rem">Leave blank to use current origin.</p>
+        </div>
+        <button class="btn btn-primary" id="save-token-btn">Save &amp; Connect</button>
+      </div>
+    </div>
+
+    <!-- App header -->
+    <header>
+      <div class="logo">
+        <span class="logo-icon">🎙</span>
+        Cursor Voice
+      </div>
+      <div id="status-badge">
+        <span class="dot"></span>
+        <span id="status-text">Connecting…</span>
+      </div>
+    </header>
+
+    <!-- Project + mic card -->
+    <div class="card">
+      <div>
+        <div class="field-label">Active Project</div>
+        <select id="project-select">
+          <option value="">Loading…</option>
+        </select>
+      </div>
+
+      <div class="ptt-wrap">
+        <button id="ptt-btn" aria-label="Push to talk">
+          <span class="mic-icon">🎤</span>
+          <span class="ptt-label" id="ptt-label">TAP TO TALK</span>
+        </button>
+        <p class="ptt-hint">Tap once to start — tap again to stop<br/>Say <em>"Cursor…"</em> to begin a command</p>
+      </div>
+    </div>
+
+    <!-- Transcript -->
+    <div id="transcript" aria-live="polite" aria-label="Conversation transcript"></div>
+
+    <!-- Settings icon -->
+    <footer style="width:100%;max-width:420px;display:flex;justify-content:flex-end;padding-top:0.5rem;">
+      <button class="btn btn-ghost" id="settings-btn" style="font-size:0.75rem;padding:0.4rem 0.75rem;">
+        ⚙ Settings
+      </button>
+    </footer>
+
+    <script type="module" src="/src/main.ts"></script>
+    <script>
+      // Register service worker for PWA offline support + Add-to-Home-Screen
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').catch(() => {
+            // SW registration failing is non-fatal (dev server, private origin, etc.)
+          });
+        });
+      }
+    </script>
+  </body>
+</html>
