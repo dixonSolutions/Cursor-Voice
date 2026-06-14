@@ -197,8 +197,9 @@ config edit. "Skip questions" is a prompt-engineering concern, not a flag.
 
 | ID | Item | Plan to resolve | Severity |
 | --- | --- | --- | --- |
-| R-1 | **Does `cursor-agent` truly work without a pty?** Docs say yes (non-TTY infers print mode); plan assumed `node-pty` required. | Milestone 0 Spike A; record outcome here. Fallback: add `node-pty`, parsing unchanged. | Med |
-| R-2 | **`cursor-agent` is beta — flags may change.** | Pin version; startup self-check; isolate in `cursorAgent.ts`. | Med |
+| R-1 | **ACP auth in service user context.** `cursor-agent login` must be run once under the dedicated service OS user (SSH setup). If auth expires or the token store is lost, the ACP process fails to authenticate and all jobs stop. | One-time setup doc; health check surfaces auth failure immediately; restart procedure documented. | Med |
+| R-1b | **`--print` path without pty** (fallback). Docs say non-TTY infers print mode. | Milestone 0 Spike A still validates the fallback. `node-pty` almost certainly not needed. | Low |
+| R-2 | **`cursor-agent` is beta — ACP protocol and flags may change.** | Pin CLI version; startup self-check (`about --format json`); isolate all ACP/CLI knowledge in `src/executor/`. | Med |
 | R-3 | **STT accuracy for code-y Polish/English + project names.** Misheard names → wrong project. | Voice-friendly registry names; confirm-before-apply for risky ops; readback of chosen project. | Med |
 | R-4 | **Latency of long jobs vs conversational feel.** | Async function calling + progress narration; never silent. | Med |
 | R-5 | **"cursor start" while mic OFF** needs always-listening. | v1: button is the on-switch; v2 optional on-device wake-word spotter. | Low |
@@ -207,7 +208,7 @@ config edit. "Skip questions" is a prompt-engineering concern, not a flag.
 | R-8 | **iOS Safari audio quirks** (autoplay unlock, call/Siri interruptions, backgrounding). | Unlock AudioContext on tap; reconnect on interruption; keep sessions foreground. | Low |
 | R-9 | **Git revert aggressiveness** (uncommitted vs committed agent changes). | Define checkpoint policy in `git.ts`; gate hard resets behind confirmation. | Low |
 | R-10 | **Two billing accounts** (provider key vs Cursor subscription) — cost visibility. | Document expected usage; ephemeral token TTL limits provider abuse. | Low |
-| R-11 | **Agent needs info mid-task but headless can't ask interactively.** | Resolved (ADR-013): voice model clarifies *before* submit; final-output questions spoken back + answered via `--resume`; optional `--mode plan`. Residual: tuning when the model should resume vs. ask. | Low |
+| R-11 | **Agent mid-run questions** — fully resolved. ACP `cursor/ask_question` delivers structured questions; bridge relays to dad via voice; `cursor_answer_question` sends the reply. `cursor/create_plan` handles plan approval. Both are blocking — cursor waits. | ADR-013 + ADR-017. Residual: UX tuning of how questions are spoken and options mapped. | Low |
 | R-12 | **Auto-run blast radius even with deny list** (a valid prompt does harm inside an allowlisted workspace). | Deny list (`Shell(rm)`, `Read(.env*)`, no `git push`, …) + optional `--sandbox enabled` + `cursor_revert`; least-priv OS user; deny list maintained as security config. | Med |
 
 ## Questions that may still need user input (non-blocking for docs)

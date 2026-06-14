@@ -105,20 +105,22 @@ the bridge is the final authority and only ever runs against an allowlisted path
 | `--approve-mcps` | Only if the executor agent itself uses MCPs. |
 | `agent ls` | Lists **chat sessions for a workspace**, not projects. Scoped to `--workspace` (defaults to cwd). Use `cursor-agent ls --workspace <registry path>` when recovering a specific project's sessions. |
 
-### Pre-run flags (configurable, default = force)
+### Pre-run flags (configurable, default = force) — `--print` fallback path
 
-Every invocation gets a **configurable pre-run flag set** applied uniformly,
-sourced from `config.json` settings (`preRunFlags`, see `07`). Default:
+The `--print` fallback path applies a **configurable pre-run flag set** from
+`config.json` (`preRunFlags`). Default:
 
 ```jsonc
-// config.json → settings
 "preRunFlags": ["--force", "--trust"]   // auto-run + apply + skip trust prompt
 ```
 
-- This is the one place to change run behavior for *all* requests (e.g., add
-  `--sandbox`, `--approve-mcps`, or drop `--force` for a propose-only mode).
-- `--force` honors the **`deny` list** in the CLI permission files (see `03`/`07`),
-  so "default force" still has hard guardrails.
+**ACP production path** does not use these flags. Instead it uses:
+- `session/request_permission` — per-call approval (respond `allow-once` to auto-approve, or surface to dad for sensitive commands).
+- ACP `mode` on `session/new` — controls the session's run posture.
+- The deny list in `~/.cursor/cli-config.json` — still applies at the CLI level.
+
+`preRunFlags` is therefore **only active for the `--print` fallback**. Keep it
+in config so the fallback path has guardrails too.
 
 ### Canonical invocation (built in code, `shell:false`)
 
