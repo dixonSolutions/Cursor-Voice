@@ -276,26 +276,34 @@ executor MCP server. Informational; used for debugging.
 
 ## Complete tool inventory (all tools)
 
-| # | Tool | Group | CLI backed? |
-| --- | --- | --- | --- |
-| 1 | `cursor_list_projects` | Project | No (registry) |
-| 2 | `cursor_set_project` | Project | No (registry) |
-| 3 | `cursor_list_models` | Model | Yes: `models` |
-| 4 | `cursor_set_model` | Model | No (state) |
-| 5 | `cursor_submit` | Execute | Yes: `-p stream-json` |
-| 6 | `cursor_ask` | Execute | Yes: `-p json --mode ask` |
-| 7 | `cursor_status` | Job | No (DB) |
-| 8 | `cursor_stop` | Job | No (kill pid) |
-| 9 | `cursor_new_session` | Session | Yes: `create-chat` |
-| 10 | `cursor_session_info` | Session | No (DB) |
-| 11 | `cursor_diff` | Git | No (simple-git) |
-| 12 | `cursor_revert` | Git | No (simple-git) |
-| 13 | `cursor_agent_info` | System | Yes: `about --format json` |
-| 14 | `cursor_agent_status` | System | Yes: `status --format json` |
-| 15 | `cursor_mcp_list` | MCP inspect | Yes: `mcp list` |
-| 16 | `cursor_mcp_tools` | MCP inspect | Yes: `mcp list-tools` |
+> **ACP note:** `cursor_submit`, `cursor_ask`, `cursor_stop`, `cursor_status`,
+> `cursor_new_session`, `cursor_approve_plan`, and `cursor_answer_question` are
+> backed by the **ACP protocol** (`cursor-agent acp`, JSON-RPC over stdio) in the
+> production implementation. The `--print` path is retained as a fallback/spike.
+> See [`12-acp-and-live-monitoring.md`](./12-acp-and-live-monitoring.md).
 
-**16 tools total.** All defined from a single zod schema source; MCP and provider
+| # | Tool | Group | Backed by |
+| --- | --- | --- | --- |
+| 1 | `cursor_list_projects` | Project | Registry (custom) |
+| 2 | `cursor_set_project` | Project | Registry (custom) |
+| 3 | `cursor_list_models` | Model | CLI: `cursor-agent models` |
+| 4 | `cursor_set_model` | Model | State (DB) |
+| 5 | `cursor_submit` | Execute | ACP: `session/prompt` |
+| 6 | `cursor_ask` | Execute | ACP: `session/prompt --mode ask` |
+| 7 | `cursor_status` | Job | DB + ACP pending state |
+| 8 | `cursor_stop` | Job | ACP: `session/cancel` |
+| 9 | `cursor_new_session` | Session | ACP: `session/new` + `create-chat` |
+| 10 | `cursor_session_info` | Session | DB |
+| 11 | `cursor_diff` | Git | simple-git |
+| 12 | `cursor_revert` | Git | simple-git |
+| 13 | `cursor_agent_info` | System | CLI: `about --format json` |
+| 14 | `cursor_agent_status` | System | CLI: `status --format json` |
+| 15 | `cursor_mcp_list` | MCP inspect | CLI: `mcp list` |
+| 16 | `cursor_mcp_tools` | MCP inspect | CLI: `mcp list-tools` |
+| 17 | `cursor_answer_question` | Interaction | ACP: respond to `cursor/ask_question` |
+| 18 | `cursor_approve_plan` | Interaction | ACP: respond to `cursor/create_plan` |
+
+**18 tools total.** All defined from a single zod schema source; MCP and provider
 function-tool definitions are generated from that schema (DRY).
 
 ---
@@ -310,6 +318,7 @@ src/mcp/
 │   ├── execute.ts       # cursor_submit, cursor_ask
 │   ├── job.ts           # cursor_status, cursor_stop
 │   ├── session.ts       # cursor_new_session, cursor_session_info
+│   ├── interaction.ts   # cursor_answer_question, cursor_approve_plan
 │   ├── git.ts           # cursor_diff, cursor_revert
 │   ├── system.ts        # cursor_agent_info, cursor_agent_status
 │   └── mcpInspect.ts    # cursor_mcp_list, cursor_mcp_tools
@@ -317,4 +326,12 @@ src/mcp/
 ├── server.ts            # MCP server wiring — registers all tools
 ├── handlers.ts          # dispatches by tool name → module
 └── functionTools.ts     # generates provider function-tool defs from schemas
+
+src/executor/
+├── acp.ts               # ACP process: spawn, initialize, authenticate, reconnect
+├── session.ts           # session/new, session/load, session/cancel
+├── events.ts            # session/update, todos, tasks, permissions handler
+├── questions.ts         # pending cursor/ask_question + cursor/create_plan state
+├── cursorAgent.ts       # --print fallback path (Milestone 0 spike + compatibility)
+└── git.ts               # simple-git: diff, revert, checkpoint
 ```

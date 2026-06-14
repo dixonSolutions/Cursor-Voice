@@ -23,7 +23,8 @@ actual work on projects hosted on a home machine.
 | [`08-decisions-and-risks.md`](./08-decisions-and-risks.md) | Decision log (ADR-style) capturing confirmed choices + remaining open risks | You're unsure why something is the way it is |
 | [`09-competitive-landscape.md`](./09-competitive-landscape.md) | Similar OSS/commercial projects, duplication analysis, open source vs commercial recommendation | Evaluating whether to build, fork, buy, or open source |
 | [`10-cursor-cli-reference.md`](./10-cursor-cli-reference.md) | Full Cursor CLI reference for everything useful to this project — commands, flags, output formats, model IDs, permissions | Implementing or debugging any CLI interaction |
-| [`11-mcp-tool-surface.md`](./11-mcp-tool-surface.md) | Complete MCP tool inventory (16 tools, 8 groups) — full args, returns, CLI backing, what was excluded and why, source module layout | Implementing the MCP server |
+| [`11-mcp-tool-surface.md`](./11-mcp-tool-surface.md) | Complete MCP tool inventory (18 tools, 8 groups) — full args, returns, ACP/CLI backing, what was excluded and why, source module layout | Implementing the MCP server |
+| [`12-acp-and-live-monitoring.md`](./12-acp-and-live-monitoring.md) | ACP protocol deep-dive — live subscriptions, cursor question/plan approval handling, TUI vs ACP decision, per-call permission control | Implementing the executor transport |
 
 ## One-paragraph summary
 

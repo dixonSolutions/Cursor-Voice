@@ -30,6 +30,14 @@ backing for every tool are in [`11-mcp-tool-surface.md`](./11-mcp-tool-surface.m
 | 14 | `cursor_agent_status` | System | Auth status + user info (`status --format json`) |
 | 15 | `cursor_mcp_list` | MCP inspect | List executor's configured MCP servers |
 | 16 | `cursor_mcp_tools` | MCP inspect | List tools for an executor MCP server |
+| 17 | `cursor_answer_question` | Interaction | Reply to a blocking `cursor/ask_question` mid-run |
+| 18 | `cursor_approve_plan` | Interaction | Accept/reject a blocking `cursor/create_plan` mid-run |
+
+> **ACP transport:** `cursor_submit`, `cursor_ask`, `cursor_stop`,
+> `cursor_new_session`, `cursor_answer_question`, and `cursor_approve_plan` are
+> backed by `cursor-agent acp` (JSON-RPC over stdio) rather than `--print`.
+> ACP enables live subscriptions, cursor's questions, plan approvals, per-call
+> permissions, and clean cancellation. See [`12-acp-and-live-monitoring.md`](./12-acp-and-live-monitoring.md).
 
 ### Project selection & resolution (server-side)
 

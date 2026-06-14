@@ -11,7 +11,8 @@ WebRTC voice loop) so we fail fast on anything that would invalidate the design.
 
 | Task | Size | Acceptance |
 | --- | --- | --- |
-| **Spike A — cursor-agent without pty.** Run `cursor-agent -p --output-format stream-json --workspace <dir> --force --trust "<prompt>"` via plain `child_process.spawn`. | M | Clean NDJSON + final JSON object captured with no TTY. **Records the node-pty decision in `08`.** |
+| **Spike A — cursor-agent --print without pty.** Run `cursor-agent -p --output-format stream-json --workspace <dir> --force --trust "<prompt>"` via plain `child_process.spawn`. | M | Clean NDJSON + final JSON object with no TTY. **Records the node-pty decision.** (Kept as fallback even if ACP is used in production.) |
+| **Spike A2 — ACP full flow.** Spawn `cursor-agent acp`, send `initialize` → `authenticate` → `session/new` → `session/prompt`, receive streaming events and final result. Confirm `cursor/ask_question` and `session/request_permission` arrive. | M | Full ACP round-trip works; question/permission handling confirmed. Records ACP as production transport in `08`. |
 | **Spike B — resume continuity.** Run twice with persisted `--resume <id>`; confirm context carries over; `agent ls` lists it. | S | Second run remembers first. |
 | **Spike C — WebRTC + ephemeral token round-trip.** Bridge mints token; a throwaway page connects via WebRTC; you can speak and hear a reply. | M | Two-way audio works from iPhone Safari over the Tailscale HTTPS origin. |
 | **Spike D — function calling over WebRTC.** Define one dummy tool; confirm the data-channel function-call event arrives and `function_call_output` round-trips. | M | Dummy tool call observed end-to-end. |
@@ -37,8 +38,11 @@ health endpoint green; registry loads and validates paths.
 
 | Task | Size |
 | --- | --- |
-| `cursorAgent.ts`: flag builder (from registry), spawn, `stream-json` parser, version self-check. | L |
-| `sessions.ts`: persist/restore per-project resume id. | S |
+| `acp.ts`: spawn `cursor-agent acp`, initialize, authenticate, reconnect on crash. | L |
+| `session.ts` (executor): `session/new`, `session/load`, `session/cancel`, persist resume IDs. | M |
+| `events.ts`: `session/update` handler — stream to job progress, todo narration, task narration. | M |
+| `questions.ts`: pending `cursor/ask_question` + `cursor/create_plan` state machine; relay to MCP tools `cursor_answer_question` / `cursor_approve_plan`. | M |
+| `cursorAgent.ts`: `--print` fallback path (spike output + compatibility). | S |
 | `git.ts`: `cursor_diff`, `cursor_revert` with pre-job checkpoint. | M |
 | Job lifecycle: job rows, events, concurrency cap, timeout, stop/reap, startup orphan cleanup. | M |
 

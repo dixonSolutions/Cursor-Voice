@@ -147,6 +147,24 @@ separation: voice = talk + draft; cursor-agent (ask) = know; cursor-agent (agent
 allowlist-validated + audited). System prompt encodes "ask cursor before Dad for
 repo facts."
 
+### ADR-017 — Use ACP (not --print and not the TUI) as the production executor transport
+**Decision:** The production executor uses **`cursor-agent acp`** (Agent Client
+Protocol, JSON-RPC 2.0 over stdio) rather than `--print --output-format
+stream-json`. The TUI is **not used** programmatically. The `--print` path is
+retained as a Milestone 0 spike and a fallback.
+**Rationale:** ACP is the official integration path (used by JetBrains, Neovim,
+Zed). It adds what `--print` lacks: blocking `cursor/ask_question` and
+`cursor/create_plan` (cursor can ask *us* questions mid-run; bridge relays to
+dad via voice), per-call `session/request_permission` (finer control than blanket
+`--force`), `session/cancel` (clean stop), `session/list`, and multi-session
+reuse on one process. Verified live: `initialize` → `authenticate` works;
+session creation confirmed. TUI requires PTY + keystroke scraping — fragile and
+unnecessary when ACP exists.
+**Consequence:** Two new MCP tools (`cursor_answer_question`,
+`cursor_approve_plan`) to handle blocking mid-run questions from cursor. 18 tools
+total. ACP process is persistent per bridge; sessions multiplexed. Service user
+needs one-time `cursor-agent login` (SSH setup). `--print` path kept as fallback.
+
 ### ADR-016 — No hardcoded model IDs; models fetched live via CLI + MCP tools
 **Decision:** No model ID is hardcoded anywhere in config. Models are fetched
 live at runtime via `cursor-agent models`, parsed, cached in SQLite
