@@ -7,22 +7,29 @@ touches one module.
 ## Tool surface (single source of truth)
 
 Define each tool **once** with a zod schema; emit both the MCP tool registration
-and the provider function-tool definition from it (DRY). The model-controlled
-inputs are intentionally minimal.
+and the provider function-tool definition from it (DRY). Full details and CLI
+backing for every tool are in [`11-mcp-tool-surface.md`](./11-mcp-tool-surface.md).
 
-| Tool | Args | Returns | Notes |
+**16 tools total across 8 groups:**
+
+| # | Tool | Group | Description |
 | --- | --- | --- | --- |
-| `cursor_list_projects` | `query?: string` | `{ projects: [{name, description, aliases, active}] }` | View/search the registry. No `query` → full list; `query` → server-side filtered (name/alias/description, fuzzy). Used for "what can I work on?", search ("anything about the website?"), and disambiguation read-back. |
-| `cursor_set_project` | `project: string` | `{ active_project, description }` | Sets the **sticky active project** for the session. "Cursor, switch to the budget app." |
-| `cursor_list_models` | `query?: string` | `{ models: [{id, displayName}], active_model }` | Lists available models from the live CLI (`cursor-agent models`). No `query` → full list; `query` → server-side filtered (id + displayName, case-insensitive contains). Cached with configurable TTL to avoid running the CLI on every request. Includes which model is currently the session default. |
-| `cursor_set_model` | `model_id: string` | `{ active_model, displayName }` | Sets the **sticky active model** for this session. Used for the next `cursor_submit` / `cursor_ask`. The model ID must be present in the cached model list (validated server-side). |
-| `cursor_ask` | `question: string`, `project?: string` | `{ answer }` | **Read-only repo Q&A** (`--mode ask`). The voice model's *only* way to gain repo context — it has no direct repo access. Used to clarify *before* asking dad a question or drafting a `cursor_submit`. Cannot edit anything. |
-| `cursor_submit` | `prompt: string`, `project?: string`, `mode?: "agent"\|"plan"\|"ask"` | `{ job_id, session_id, status, project }` | Starts (or resumes) work. `project` **optional** — defaults to the active project. Returns fast; long work tracked via `cursor_status`. |
-| `cursor_status` | `job_id: string` | `{ status, progress[], summary?, diffstat?, session_id }` | Poll for progress/result. `status ∈ running\|done\|error\|stopped`. |
-| `cursor_stop` | `job_id: string` | `{ status }` | Kills the running agent process for that job. |
-| `cursor_revert` | `project?: string` | `{ reverted_to, files[] }` | Git-level undo. Defaults to active project. |
-| `cursor_new_session` | `project?: string` | `{ session_id }` | Starts a fresh `cursor-agent` thread (drops resume id). Defaults to active project. |
-| `cursor_diff` | `project?: string` | `{ diffstat, patch? }` | Current uncommitted diff for review/narration. Defaults to active project. |
+| 1 | `cursor_list_projects` | Project | List/search the project registry |
+| 2 | `cursor_set_project` | Project | Set the sticky active project |
+| 3 | `cursor_list_models` | Model | List/filter available models (CLI-backed, cached) |
+| 4 | `cursor_set_model` | Model | Set the sticky active model (default: `auto`) |
+| 5 | `cursor_submit` | Execute | Submit work to cursor-agent (async, returns job_id) |
+| 6 | `cursor_ask` | Execute | Read-only repo Q&A (`--mode ask`, no writes) |
+| 7 | `cursor_status` | Job | Poll a job's status and progress events |
+| 8 | `cursor_stop` | Job | Kill a running job |
+| 9 | `cursor_new_session` | Session | Drop resume id; start fresh thread next submit |
+| 10 | `cursor_session_info` | Session | Read persisted session state for a project |
+| 11 | `cursor_diff` | Git | Current uncommitted diff (stat + optional patch) |
+| 12 | `cursor_revert` | Git | Git-level undo to pre-job checkpoint |
+| 13 | `cursor_agent_info` | System | CLI version, OS, model (`about --format json`) |
+| 14 | `cursor_agent_status` | System | Auth status + user info (`status --format json`) |
+| 15 | `cursor_mcp_list` | MCP inspect | List executor's configured MCP servers |
+| 16 | `cursor_mcp_tools` | MCP inspect | List tools for an executor MCP server |
 
 ### Project selection & resolution (server-side)
 

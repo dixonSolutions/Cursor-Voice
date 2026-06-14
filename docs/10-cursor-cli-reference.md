@@ -77,9 +77,14 @@ Lists **chat sessions scoped to a workspace**. Default scope = cwd.
 cursor-agent ls --workspace /path/to/project
 ```
 
-- Returns sessions for that workspace only (not global, not cross-project).
-- Always pass `--workspace` when checking a specific project's sessions.
-- Use for **manual recovery** of a lost resume ID; not for project discovery.
+> ⚠️ **Requires an interactive TTY.** When run headlessly (piped stdin / no TTY),
+> `cursor-agent ls` throws a raw-mode error and exits non-zero. **Do not call
+> this from the bridge.** Session IDs are captured from `cursor_submit`'s
+> `stream-json` output (`session_id` on `system:init` and `result` events) and
+> persisted in the DB. `cursor_session_info` exposes this without a CLI call.
+
+- Use for **manual recovery** of a lost resume ID over SSH/iSH only.
+- Always pass `--workspace` to scope to the correct project.
 
 ---
 

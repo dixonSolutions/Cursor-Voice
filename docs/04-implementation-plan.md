@@ -49,13 +49,17 @@ get a final summary + diffstat, revert it, and stop a running job.
 
 | Task | Size |
 | --- | --- |
-| zod tool schemas (single source of truth) for the tools. | S |
-| MCP server wiring + handlers calling the executor. | M |
-| **Project resolution**: name/alias/fuzzy match + `query` search, sticky active project (`session_state`), `cursor_list_projects`/`cursor_set_project`, disambiguation errors. | M |
-| `cursor_ask` (read-only `--mode ask` context tool) + `preRunFlags` from config applied to all invocations. | S |
-| HTTP project endpoints: `GET /api/projects` (names+descriptions, **no paths**) + `POST /api/active-project` for the web-app dropdown. | S |
-| Server-side arg validation + project allowlist enforcement + audit logging. | M |
-| Emit provider function-tool definitions from the same schemas. | S |
+| zod schemas in `schemas.ts` (single source of truth for all 16 tools). | M |
+| MCP server wiring — register all 16 tools across 8 modules (see `11`). | M |
+| **Project tools**: registry resolution, fuzzy match + `query` filter, sticky active project, disambiguation errors. | M |
+| **Model tools**: `cursor-agent models` parse + SQLite cache + TTL refresh + filter. | M |
+| **Session tools**: `cursor_new_session` (`create-chat`), `cursor_session_info` from DB. | S |
+| **System tools**: `cursor_agent_info` / `cursor_agent_status` (`about/status --format json`). | S |
+| **MCP inspect tools**: `cursor_mcp_list`, `cursor_mcp_tools` (parse plain-text output). | S |
+| `cursor_ask` (hard-coded `--mode ask`) + `preRunFlags` from config for all invocations. | S |
+| HTTP project endpoints: `GET /api/projects` (names+descriptions, no paths) + `POST /api/active-project`. | S |
+| Server-side arg validation + project allowlist enforcement + audit logging on all tools. | M |
+| `functionTools.ts` — generate provider function-tool definitions from the same zod schemas. | S |
 
 **Acceptance:** each tool callable via MCP; invalid/foreign-project args rejected
 and audited; function-tool definitions generated.
