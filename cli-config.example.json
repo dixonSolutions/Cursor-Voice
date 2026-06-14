@@ -1,0 +1,18 @@
+{
+  "_comment": "Place this at ~/.cursor/cli-config.json for the cursorvoice service user.",
+  "_comment2": "Deny rules fire even under --force (--yolo). This is the second safety layer after the MCP tool surface.",
+  "version": 1,
+  "permissions": {
+    "allow": [],
+    "deny": [
+      "Shell(rm)",
+      "Shell(sudo)",
+      "Shell(git:push*)",
+      "Shell(git:push)",
+      "Read(.env*)",
+      "Write(**/*.key)",
+      "Write(**/*.pem)",
+      "Write(**/*.env)"
+    ]
+  }
+}

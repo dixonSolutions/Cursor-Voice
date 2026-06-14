@@ -1,0 +1,32 @@
+{
+  "settings": {
+    "voiceProvider": "openai",
+    "realtimeModel": "gpt-realtime",
+    "defaultMode": "agent",
+    "maxConcurrentJobs": 1,
+    "jobTimeoutMs": 600000,
+    "planFirst": false,
+    "preRunFlags": ["--force", "--trust"],
+    "modelCacheTtlMs": 3600000,
+    "narratorEnabled": true,
+    "narratorCadenceMs": 15000,
+    "narratorMaxBufferEvents": 50,
+    "logLevel": "info"
+  },
+  "projects": [
+    {
+      "name": "cursorvoice",
+      "path": "/home/eva/Projects/SideProjects/CursorVoice",
+      "aliases": ["cursor voice", "the voice project"],
+      "description": "This project — the voice bridge",
+      "enabled": true
+    },
+    {
+      "name": "budget",
+      "path": "/home/projects/budget-app",
+      "aliases": ["budget app", "the finance tracker", "money app"],
+      "description": "Personal finance tracker (web)",
+      "enabled": true
+    }
+  ]
+}

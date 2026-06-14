@@ -1,10 +1,61 @@
 # 10 — Cursor CLI Reference (useful surface for Cursor Voice)
 
-Verified against the live CLI (June 2026). The CLI is **beta** — flags and
-output may change between releases. All CLI interaction in the bridge is isolated
-in `src/executor/cursorAgent.ts` so regressions are a one-file fix.
+Live-verified against `cursor-agent 2026.06.04-5fd875e` (June 2026, Ultra account).
+The CLI is **beta** — flags and output may change between releases.
+All CLI interaction is isolated in `src/executor/cursorAgent.ts`.
 
-> `cursor-agent` is the binary name on PATH after install. `agent` is an alias.
+> Binary name: `cursor-agent` (also aliased as `agent`). On PATH after install.
+
+---
+
+## Complete command reference (`cursor-agent --help`)
+
+```
+Usage: agent [options] [command] [prompt...]
+
+Arguments:
+  prompt                       Initial prompt for the agent
+
+Options:
+  -v, --version
+  --api-key <key>              (can also use CURSOR_API_KEY env var)
+  -H, --header <header>        Custom header (format: 'Name: Value', repeatable)
+  -p, --print                  Non-interactive / headless mode. Full tool access.
+  --output-format <format>     text | json | stream-json  (only with --print)
+  --stream-partial-output      Char-level deltas (only with --print + stream-json)
+  --mode <mode>                plan | ask  (agent is default, no flag needed)
+  --plan                       Shorthand for --mode=plan
+  --resume [chatId]            Resume a session (default: false)
+  --continue                   Resume most recent session
+  --model <model>              Model ID (e.g. gpt-5.2, claude-opus-4-8-thinking-high)
+  --list-models                List models and exit
+  -f, --force / --yolo         Auto-run + apply; deny list still applies
+  --sandbox <mode>             enabled | disabled
+  --approve-mcps               Auto-approve all MCP servers
+  --trust                      Skip workspace-trust prompt (headless only)
+  --workspace <path>           Workspace dir (defaults to cwd)
+  --plugin-dir <path>          Load a local plugin dir (repeatable)
+  -w, --worktree [name]        Run in isolated git worktree at ~/.cursor/worktrees/
+  --worktree-base <branch>     Base branch for new worktree (default: HEAD)
+  --skip-worktree-setup        Skip setup scripts from .cursor/worktrees.json
+
+Commands:
+  install-shell-integration    Add shell integration to ~/.zshrc
+  uninstall-shell-integration  Remove shell integration from ~/.zshrc
+  login                        Authenticate with Cursor
+  logout                       Sign out
+  mcp                          Manage MCP servers (sub-commands below)
+  worker [options]             Start a private cloud worker
+  status|whoami [options]      View authentication status (--format text|json)
+  models                       List available models
+  about [options]              Version + system + account info (--format text|json)
+  update                       Update to latest CLI version (manual only in prod)
+  create-chat                  Create a new empty chat, return its ID
+  generate-rule|rule           Generate a Cursor rule (interactive TTY only)
+  agent [prompt]               Start Cursor Agent (interactive)
+  ls                           List/resume chat sessions (interactive TTY only)
+  resume                       Resume latest chat (interactive TTY only)
+```
 
 ---
 
@@ -12,35 +63,31 @@ in `src/executor/cursorAgent.ts` so regressions are a one-file fix.
 
 ### `cursor-agent models`
 
-Lists every model available to the authenticated account.
-
 ```bash
 cursor-agent models
 # or
 cursor-agent --list-models
 ```
 
-**Output:** plain text, one line per model, format `<id> - <display name>`.
-Approximately 140+ models (verified on this account, June 2026). There is **no
-native filter flag** — filtering is done by the bridge (the `cursor_list_models`
-MCP tool parses and filters this output server-side).
+**Output (live, June 2026):** plain text, one line per model, format `<id> - <display name>`.
+143 models on this Ultra account. No JSON output available — parse manually.
 
 ```
+Available models
+
 auto - Auto
-composer-2.5-fast - Composer 2.5 Fast (default)
-gpt-5.2 - GPT-5.2
-claude-opus-4-8-thinking-high - Opus 4.8 1M Thinking
+gpt-5.3-codex-low - Codex 5.3 Low
 ...
+kimi-k2.5 - Kimi K2.5
+
 Tip: use --model <id> (or /model <id> in interactive mode) to switch.
 ```
 
-**Parsing:** strip the last `Tip:` line and the header `Available models` line;
-split each remaining line at ` - ` into `{ id, displayName }`. No JSON output
-available for this command — parse manually.
-
-**Known issue (community-reported May 2026):** `--model` suffix for thinking
-level is sometimes silently ignored after CLI updates, resetting to medium/default
-thinking. Keep the model ID as the version-pinned parameter; test after updates.
+**Parsing rules:**
+- Strip the first line "Available models" (and any blank lines after it).
+- Strip the last "Tip: …" line.
+- Each remaining non-blank line: split at the **first** ` - ` to get `{ id, displayName }`.
+- `auto - Auto` is always first — valid model ID, means "Cursor chooses default".
 
 ---
 
@@ -50,93 +97,88 @@ thinking. Keep the model ID as the version-pinned parameter; test after updates.
 cursor-agent -p [flags] "prompt"
 ```
 
-The non-interactive execution path. All Cursor Voice executor calls use this.
+All Cursor Voice executor calls use this path.
 
-| Flag | Description |
+| Flag | Cursor Voice use |
 | --- | --- |
-| `-p, --print` | Required for headless. Enables stdout output + all tools (incl. write/shell). |
-| `--output-format text\|json\|stream-json` | `stream-json` preferred (NDJSON; events during run). `json` is single object at completion. `text` is final message only. |
-| `--stream-partial-output` | With `stream-json`: char-level deltas (probably not needed for voice; add only if you need live typing). |
-| `--model <id>` | Model ID from `cursor-agent models`. Set per-job; no hardcoding in config. |
-| `--workspace <dir>` | **Always set** from registry. Scopes both edits and session history. |
-| `--force` / `--yolo` | Auto-run + apply changes. Still respects `deny` list in permissions config. |
+| `-p, --print` | Always required for headless. |
+| `--output-format stream-json` | **Preferred** — NDJSON, events during run. |
+| `--output-format json` | Single JSON at completion (used for `cursor_ask`). |
+| `--model <id>` | From `session_state.active_model`. |
+| `--workspace <dir>` | **Always** from registry path — never from caller. |
+| `--force` / `--yolo` | Auto-run + apply; deny list still applies. |
 | `--trust` | Skips workspace-trust prompt (headless only). |
-| `--sandbox enabled\|disabled` | OS-level filesystem/network boundaries; non-sandboxable commands fail silently. |
-| `--resume [id]` | Resume a session (workspace-scoped). Must pair with the **same `--workspace`**. |
-| `--continue` | Resume the most recent session in the workspace (alias for `--resume=-1`). |
-| `--mode plan\|ask` | `agent` is default. `ask` = read-only (no writes). `plan` = emit plan + questions, no edits. |
-| `--approve-mcps` | Auto-approve MCP servers the agent itself uses (not Cursor Voice's MCP server). |
+| `--sandbox enabled\|disabled` | Optional OS-level sandboxing. |
+| `--resume [chatId]` | Resume a session (must pair with same `--workspace`). |
+| `--continue` | Resume most recent in workspace. |
+| `--mode plan\|ask` | `plan` = no edits; `ask` = read-only Q&A. |
+| `--approve-mcps` | Only if the executor agent itself uses MCPs. |
 
 ---
 
-### `cursor-agent ls`
-
-Lists **chat sessions scoped to a workspace**. Default scope = cwd.
+### `cursor-agent about --format json`
 
 ```bash
-cursor-agent ls --workspace /path/to/project
+cursor-agent about --format json
 ```
 
-> ⚠️ **Requires an interactive TTY.** When run headlessly (piped stdin / no TTY),
-> `cursor-agent ls` throws a raw-mode error and exits non-zero. **Do not call
-> this from the bridge.** Session IDs are captured from `cursor_submit`'s
-> `stream-json` output (`session_id` on `system:init` and `result` events) and
-> persisted in the DB. `cursor_session_info` exposes this without a CLI call.
+**Live output (June 2026):**
+```json
+{
+  "cliVersion": "2026.06.04-5fd875e",
+  "model": "Composer 2.5 Fast",
+  "subscriptionTier": "Ultra",
+  "osPlatform": "linux",
+  "osArch": "x64",
+  "userEmail": "user@example.com",
+  "terminalProgram": "unknown",
+  "shell": "bash",
+  "lastRequestId": null
+}
+```
 
-- Use for **manual recovery** of a lost resume ID over SSH/iSH only.
-- Always pass `--workspace` to scope to the correct project.
+Used by the health endpoint and the `cursor_agent_info` MCP tool.
 
 ---
 
-### `cursor-agent resume` / `--resume` / `--continue`
+### `cursor-agent status --format json`
 
 ```bash
-cursor-agent --resume <id>         # resume specific session
-cursor-agent --continue            # resume most recent in cwd
-cursor-agent resume                # interactive resume of latest
+cursor-agent status --format json
 ```
 
-- Sessions are **workspace-scoped**: resuming with a different `--workspace`
-  than the session was created under silently starts fresh.
-- The bridge **always** pairs `--resume <id>` with the same `--workspace` the
-  session originated from (both stored per project in the registry).
-
----
-
-### `cursor-agent status` (whoami)
-
-```bash
-cursor-agent status
+**Live output (June 2026):**
+```json
+{
+  "status": "authenticated",
+  "isAuthenticated": true,
+  "hasAccessToken": true,
+  "hasRefreshToken": true,
+  "userInfo": {
+    "email": "user@example.com",
+    "userId": 123456789,
+    "firstName": "Firstname",
+    "lastName": "Lastname",
+    "createdAt": "2025-01-01T00:00:00.000Z"
+  }
+}
 ```
 
-Shows authenticated account (email, user ID). Useful in the health check to
-confirm the service user is logged in.
-
----
-
-### `cursor-agent about`
-
-```bash
-cursor-agent about
-```
-
-Emits version, system info, and account. Parse the version for startup logging
-and the health endpoint.
+Used by the health endpoint and the `cursor_agent_status` MCP tool.
 
 ---
 
 ### `cursor-agent mcp` subcommands
 
-Manage MCP server configurations (these operate on Cursor's own `.cursor/mcp.json`,
-not Cursor Voice's bridge MCP server):
-
 ```bash
-cursor-agent mcp list                    # list configured MCP servers + status
-cursor-agent mcp list-tools <server>     # list tools for a specific server
-cursor-agent mcp enable <server>
-cursor-agent mcp disable <server>
-cursor-agent mcp login <server>
+cursor-agent mcp list                     # list configured MCP servers + status
+cursor-agent mcp list-tools <identifier>  # list tools for a specific server
+cursor-agent mcp enable <identifier>      # add to local approved list
+cursor-agent mcp disable <identifier>     # disable (won't load or prompt)
+cursor-agent mcp login <identifier>       # authenticate with an MCP server
 ```
+
+Used by `cursor_mcp_list` and `cursor_mcp_tools` MCP tools (informational only).
 
 ---
 
@@ -146,146 +188,107 @@ cursor-agent mcp login <server>
 cursor-agent create-chat
 ```
 
-Creates a new empty chat and returns its ID. Useful for **pre-creating a session
-ID** before submitting the first prompt (alternative to extracting it from the
-first run's output). Potential use in `cursor_new_session` to get a clean ID up
-front.
+Creates a new empty chat, prints its ID. Used by `cursor_new_session` to pre-create
+a session ID before any prompt.
+
+---
+
+### `cursor-agent ls` ⚠️ REQUIRES INTERACTIVE TTY
+
+```
+⚠️ Cannot be used headlessly.
+cursor-agent ls exits with a raw-mode error when stdin is not a TTY.
+```
+
+Session IDs are captured from `system:init` and `result` events in the stream-json
+output and persisted to the DB. **Never call `ls` from the bridge.**
+
+Use for **manual session recovery over SSH only** (outside the voice flow).
+
+---
+
+## `stream-json` event reference (live-verified, June 2026)
+
+`cursor-agent -p --output-format stream-json` emits one JSON object per line.
+
+```jsonc
+// Run started
+{"type":"system","subtype":"init","session_id":"...","model":"..."}
+
+// Tool call starting
+{"type":"assistant","subtype":"tool_use_start","tool_call":{"writeToolCall":{"path":"src/app.ts"}}}
+
+// Tool call completed
+{"type":"assistant","subtype":"tool_use_done","tool_call":{...},"success":true}
+
+// Aggregated assistant message (between tool calls)
+{"type":"assistant","message":{"content":[{"text":"Done. Added dark mode..."}]}}
+
+// Run complete
+{"type":"result","session_id":"...","usage":{...}}
+
+// Run failed
+{"type":"error","message":"..."}
+```
+
+**Key fields:**
+- `session_id` — on `system:init` and `result`; persist as `project.resume_id`.
+- `tool_call` keys: `writeToolCall`, `readToolCall`, `shellToolCall`, etc.
+- `thinking` events are **suppressed** in print mode.
+- Unknown fields: **ignore** (forward-compatible).
+- Buffer until `\n`; run `strip-ansi` defensively before `JSON.parse`.
 
 ---
 
 ## Permissions config (`cli-config.json`)
 
-Location:
-- Global (service user): `~/.cursor/cli-config.json`
-- Project-level (only `permissions` key honoured): `<workspace>/.cursor/cli.json`
+```
+Global (service user):  ~/.cursor/cli-config.json
+Per project (only `permissions` honoured): <workspace>/.cursor/cli.json
+```
 
 ```json
 {
   "version": 1,
   "permissions": {
-    "allow": ["Shell(ls)", "Shell(git)", "WebFetch(docs.github.com)"],
-    "deny":  ["Shell(rm)", "Shell(sudo)", "Shell(git:push*)",
-              "Read(.env*)", "Write(**/*.key)", "Write(**/*.pem)"]
+    "allow": ["Shell(git)", "Shell(ls)"],
+    "deny": [
+      "Shell(rm)", "Shell(sudo)", "Shell(git:push*)",
+      "Read(.env*)", "Write(**/*.key)", "Write(**/*.pem)"
+    ]
   }
 }
 ```
 
-Token types: `Shell(<cmd>)`, `Read(<glob>)`, `Write(<glob>)`,
-`WebFetch(<domain>)`, `Mcp(<server>:<tool>)`. Deny beats allow. Glob patterns
-support `**`, `*`, `?`.
-
-`--force` (`--yolo`) = auto-run BUT **still honours the deny list**.
-Without `--force`: non-allowlisted commands silently denied (agent adapts, no
-dialog). **Neither path pops an interactive prompt in headless mode.**
+Token types: `Shell(<cmd>)`, `Read(<glob>)`, `Write(<glob>)`, `WebFetch(<domain>)`, `Mcp(<server>:<tool>)`.
+`--force` honors deny rules. Deny beats allow.
 
 ---
 
-## Output formats (`--output-format`)
+## Model ID conventions (observed June 2026)
 
-### `stream-json` (NDJSON — preferred for Cursor Voice)
+Pattern: `<family>-<version>[-<variant>][-<effort>][-fast]`
 
-One JSON object per line, emitted as the run progresses.
-
-```jsonc
-// system init
-{"type":"system","subtype":"init","session_id":"...","model":"..."}
-
-// tool call start
-{"type":"assistant","subtype":"tool_use_start","tool_call":{"writeToolCall":{"path":"src/app.ts"}}}
-
-// tool call done
-{"type":"assistant","subtype":"tool_use_done","tool_call":{...},"success":true}
-
-// final assistant message (aggregated between tool calls)
-{"type":"assistant","message":{"content":[{"text":"Done. Added dark mode toggle..."}]}}
-
-// run complete
-{"type":"result","session_id":"...","usage":{...}}
-```
-
-Key fields:
-- `session_id` — appears on `system:init` and `result`; persist as `resume_id`.
-- Tool call events (`tool_use_start`/`tool_use_done`) → use for progress narration.
-- `thinking` events are **suppressed** in print mode.
-- Ignore unknown fields (forward-compatible).
-- Buffer lines until `\n`; run `strip-ansi` defensively before `JSON.parse`.
-
-### `json` (single object at completion)
-
-Emits one JSON object when the run completes. No intermediate events — worse for
-voice progress narration but simpler for `cursor_ask` (read-only, one-shot).
-
-### `text` (final message only)
-
-Human-readable final assistant message. No structure; avoid for programmatic use.
-
----
-
-## `stream-json` event type cheat sheet
-
-| `type` | `subtype` | Meaning |
-| --- | --- | --- |
-| `system` | `init` | Run started; contains `session_id`, `model` |
-| `assistant` | `tool_use_start` | Tool call beginning (path/url in `tool_call`) |
-| `assistant` | `tool_use_done` | Tool call complete; `success: bool` |
-| `assistant` | _(none)_ | Aggregated assistant message text |
-| `result` | | Run finished; contains `session_id`, `usage` |
-| `error` | | Run failed |
-
----
-
-## Model ID conventions (observed, June 2026)
-
-Naming pattern: `<family>-<version>-[<variant>-]<effort>[-fast]`
-
-| Segment | Examples |
+| Family | Examples |
 | --- | --- |
-| Family | `claude`, `gpt`, `gemini`, `grok`, `kimi`, `composer` |
-| Version | `4.8`, `5.2`, `5.3`, `3.1` |
-| Variant | `opus`, `sonnet`, `fable`, `codex`, `mini`, `nano` |
-| Effort | `low`, `medium` (often omitted), `high`, `xhigh`, `max` |
-| Thinking | insert `thinking-` before effort: `thinking-high` |
-| Fast | suffix `-fast` = faster/cheaper variant of same capability |
+| gpt | `gpt-5.2`, `gpt-5.3-codex-high`, `gpt-5.5-medium` |
+| claude | `claude-opus-4-8-thinking-high`, `claude-4-sonnet`, `claude-fable-5-thinking-high` |
+| gemini | `gemini-3-flash`, `gemini-3.1-pro`, `gemini-3.5-flash` |
+| composer | `composer-2.5-fast` (account default as of June 2026) |
+| kimi | `kimi-k2.5` |
 
-Special values:
-- `auto` — Cursor chooses automatically.
-- `composer-2.5-fast` — the current account default (marked `(default)` in output).
-
-**No hardcoded model IDs in Cursor Voice config** — models are fetched live via
-`cursor_list_models` and selected per-request via `cursor_set_model`. The bridge
-caches the model list (TTL configurable) to avoid running `cursor-agent models`
-on every request.
+Special: `auto` = Cursor chooses (safe default for `session_state.active_model`).
 
 ---
 
-## Other useful CLI facts
+## Commands NOT ported and why
 
-- **`CURSOR_API_KEY` env var** — alternative to `--api-key`; set for the service
-  user if needed.
-- **`--worktree`** — runs agent in a fresh git worktree under `~/.cursor/worktrees`.
-  Potential use for isolated experiments without touching the working tree.
-- **Cloud handoff (`&` prefix or `-c`)** — delegates to Cursor cloud mid-session.
-  Out of scope for Cursor Voice (local machine is the target).
-- **`/max-mode [on|off]`** — toggles Max Mode in interactive mode only.
-- **`agent update`** — updates the CLI. Run manually; **pin the version** in
-  production (the bridge logs it on startup via `cursor-agent about`).
-- **Sessions are workspace-scoped** — `agent ls` and `--resume` are scoped to
-  `--workspace` (or cwd). Moving a project directory breaks the session link.
-- **Non-TTY detection** — print mode is inferred for piped stdin or non-TTY
-  stdout; `-p` is explicit and always safe to include.
-
----
-
-## Full command reference (summary)
-
-| Command | Cursor Voice use |
+| Command | Why not ported |
 | --- | --- |
-| `cursor-agent models` | `cursor_list_models` — parse and cache |
-| `cursor-agent -p --output-format stream-json ...` | `cursor_submit`, `cursor_ask` |
-| `cursor-agent ls --workspace <path>` | Manual session recovery |
-| `cursor-agent --resume <id> --workspace <path>` | Session continuity (via `cursor_submit`) |
-| `cursor-agent create-chat` | Optional: pre-create session for `cursor_new_session` |
-| `cursor-agent status` | Health check: confirm authenticated |
-| `cursor-agent about` | Health check: log version |
-| `cursor-agent mcp list` | Debugging: confirm executor's own MCPs |
-| `cursor-agent update` | Manual only; never auto-update the service |
+| `cursor-agent ls` | **Requires interactive TTY** — raw-mode error headlessly. |
+| `cursor-agent resume` (interactive) | TTY only; bridge uses `--resume` flag instead. |
+| `cursor-agent login` / `logout` | Operator-only setup via SSH. |
+| `cursor-agent update` | Never auto-update the service — manual only. |
+| `cursor-agent worker` | Cloud worker mode; Cursor Voice uses local `cursor-agent -p`. |
+| `cursor-agent generate-rule` | Interactive TTY only. |
+| `cursor-agent acp` | Evaluated and rejected (ADR-017 in `08`); `--print` is simpler. |

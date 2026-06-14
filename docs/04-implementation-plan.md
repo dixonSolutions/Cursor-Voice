@@ -65,28 +65,33 @@ hears mid-job narration → final summary spoken → diff visible → revert wor
 **Acceptance:** each tool callable via MCP; invalid/foreign-project args rejected
 and audited; function-tool definitions generated.
 
-## Milestone 4 — Voice provider + token + relay
+## Milestone 4 — Voice provider + token + relay ✅
 
-| Task | Size |
-| --- | --- |
-| `provider.ts` interface; OpenAI Realtime (GA) implementation. | L |
-| `token.ts`: mint ephemeral tokens with session+tool config baked in. | M |
-| Control WS: receive forwarded tool calls, dispatch handlers, return results. | M |
-| System prompt: "Cursor…" prefix, clarifying questions, progress narration, Polish/English, "cursor end". | M |
-| Async-function-calling + job/poll support for long jobs. | M |
+| Task | Size | Status |
+| --- | --- | --- |
+| `provider.ts` interface; OpenAI Realtime (GA) implementation. | L | ✅ |
+| `token.ts`: mint ephemeral tokens with session+tool config baked in. | M | ✅ |
+| `token.ts` / `provider.ts`: expose `model` in token response so PWA uses correct SDP exchange URL. | S | ✅ |
+| Control WS: receive forwarded tool calls, dispatch handlers, return results. | M | ✅ |
+| System prompt: "Cursor…" prefix, clarifying questions, progress narration, Polish/English, "cursor end". | M | ✅ |
+| `narrator.ts` + `PhoneRelaySession`: narration relay via control WS → PWA → provider. | M | ✅ |
 
 **Acceptance:** spoken command → clarifying question (if needed) → tool call →
 agent runs → spoken summary, end to end, with the key never leaving the bridge.
 
-## Milestone 5 — PWA
+## Milestone 5 — PWA ✅
 
-| Task | Size |
-| --- | --- |
-| UI: large push-to-talk toggle, status, transcript log, connection indicator (UX-law-aligned). | M |
-| **Project dropdown**: load `GET /api/projects`, manual select → `POST /api/active-project`, active-project badge synced with voice selection. | M |
-| `webrtc.ts`: peer connection, data channel, tool-call relay, AudioContext unlock. | L |
-| Latching toggle + "cursor start/end" handling; iOS interruption recovery. | M |
-| PWA manifest/icons; token entry + storage. | S |
+| Task | Size | Status |
+| --- | --- | --- |
+| UI: large push-to-talk toggle, status, transcript log, connection indicator (UX-law-aligned). | M | ✅ |
+| **Project dropdown**: load `GET /api/projects`, manual select → `POST /api/active-project`, active-project badge synced with voice selection. | M | ✅ |
+| `audio.ts`: iOS AudioContext unlock + `<audio>` element factory. | S | ✅ |
+| `webrtc.ts`: peer connection, data channel, tool-call relay (`relayToolCall` callback), narration injection, transcript events. | L | ✅ |
+| Latching toggle + "cursor end"/"cursor stop" client-side detection from user speech transcript. | M | ✅ |
+| Speaking-state relay: `onSpeaking` callback → bridge WS `{ type:"speaking", value }` → narrator cadence gate. | S | ✅ |
+| Pending-tool-call map: WS `tool_result` / `tool_error` frames resolve/reject in-flight calls. | S | ✅ |
+| PWA manifest (SVG + PNG entries), `icon.svg`, `sw.js` service worker, SW registration in HTML. | S | ✅ |
+| Token entry + `localStorage` storage; `scripts/gen-icons.mjs` for PNG icon generation. | S | ✅ |
 
 **Acceptance:** add-to-Home-Screen app; tap to talk; full loop works on dad's
 iPhone over Tailscale.
