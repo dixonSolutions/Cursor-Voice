@@ -129,6 +129,9 @@ startup; invalid config fails fast with a clear error.
     "planFirst": false,
     "preRunFlags": ["--force", "--trust"],
     "modelCacheTtlMs": 3600000,
+    "narratorEnabled": true,
+    "narratorCadenceMs": 15000,
+    "narratorMaxBufferEvents": 50,
     "logLevel": "info"
   },
   "projects": [

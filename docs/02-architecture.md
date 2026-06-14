@@ -61,12 +61,12 @@ Dad: "Cursor… add a dark-mode toggle to the settings page in the budget app"
   │
   ├─ PWA → Bridge (WSS, app token): forward tool call
   ├─ Bridge: validate token → validate args → project in allowlist?
-  ├─ Bridge: ACP → session/new {workspace, model, prompt}   (production)
-  │    OR   --print --output-format stream-json             (fallback spike)
-  ├─ Bridge: ACP session/update events → "still working…" voice hints
-  ├─ Bridge: on cursor/ask_question → speaks question to Dad, waits for
-  │            cursor_answer_question → ACP reply → job resumes
-  ├─ Bridge: final result, persist session_id
+  ├─ Bridge: spawn cursor-agent -p --output-format stream-json \
+  │            --workspace <registry path> --resume <id> --force --trust "…"
+  ├─ Bridge: Watcher reads NDJSON stdout line-by-line; at key events injects
+  │            narration into the realtime session ("Cursor is editing the
+  │            component…", "tests are running…") so Dad is never left silent
+  ├─ Bridge: final JSON result → parse summary + session_id; persist resume id
   ├─ Bridge → PWA: tool result (summary, session_id, diff stat)
   │
   ├─ PWA → Provider: function_call_output(result)
@@ -98,12 +98,10 @@ cursor-voice/
 │   │   ├── server.ts         # MCP server wiring
 │   │   └── handlers.ts       # tool implementations (call executor)
 │   ├── executor/
-│   │   ├── acp.ts            # ACP process: spawn, init, auth, reconnect (prod)
-│   │   ├── session.ts        # session/new, session/load, session/cancel
-│   │   ├── events.ts         # session/update → voice hints; todos/tasks
-│   │   ├── questions.ts      # pending cursor/ask_question + cursor/create_plan
-│   │   ├── cursorAgent.ts    # --print fallback (Milestone 0 spike + compat)
-│   │   └── git.ts            # simple-git: revert/diff/checkpoint
+│   │   ├── cursorAgent.ts    # spawn, flag building, NDJSON parsing
+│   │   ├── watcher.ts        # stream-json event processor → narration events
+│   │   ├── narrator.ts       # narration event → inject into realtime session
+│   │   └── git.ts            # simple-git: diff, revert, checkpoint
 │   ├── state/
 │   │   ├── db.ts             # better-sqlite3 connection + migrations
 │   │   └── registry.ts       # project allowlist registry
@@ -124,8 +122,7 @@ Design principles applied (per project rules):
 - **Single source of truth** for tool schemas (DRY) — one zod definition emits
   both MCP tools and provider function tools.
 - **Swappable provider** behind `provider.ts` (Open/Closed, reusability).
-- **All CLI/ACP knowledge isolated** in `src/executor/` (the CLI is beta; contain
-  the churn). ACP is the production path; `cursorAgent.ts` is the fallback.
+- **All CLI knowledge isolated** in `cursorAgent.ts` (the CLI is beta; contain the churn).
 - **Security at the boundary** (`auth.ts` + `registry.ts`), enforced on every
   request, not in the UI.
 

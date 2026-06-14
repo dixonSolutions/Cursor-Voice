@@ -147,23 +147,25 @@ separation: voice = talk + draft; cursor-agent (ask) = know; cursor-agent (agent
 allowlist-validated + audited). System prompt encodes "ask cursor before Dad for
 repo facts."
 
-### ADR-017 — Use ACP (not --print and not the TUI) as the production executor transport
-**Decision:** The production executor uses **`cursor-agent acp`** (Agent Client
-Protocol, JSON-RPC 2.0 over stdio) rather than `--print --output-format
-stream-json`. The TUI is **not used** programmatically. The `--print` path is
-retained as a Milestone 0 spike and a fallback.
-**Rationale:** ACP is the official integration path (used by JetBrains, Neovim,
-Zed). It adds what `--print` lacks: blocking `cursor/ask_question` and
-`cursor/create_plan` (cursor can ask *us* questions mid-run; bridge relays to
-dad via voice), per-call `session/request_permission` (finer control than blanket
-`--force`), `session/cancel` (clean stop), `session/list`, and multi-session
-reuse on one process. Verified live: `initialize` → `authenticate` works;
-session creation confirmed. TUI requires PTY + keystroke scraping — fragile and
-unnecessary when ACP exists.
-**Consequence:** Two new MCP tools (`cursor_answer_question`,
-`cursor_approve_plan`) to handle blocking mid-run questions from cursor. 18 tools
-total. ACP process is persistent per bridge; sessions multiplexed. Service user
-needs one-time `cursor-agent login` (SSH setup). `--print` path kept as fallback.
+### ADR-017 — CLI-only (`--print --output-format stream-json`) is the production executor transport
+**Decision:** The production executor uses `cursor-agent -p --output-format
+stream-json` (NDJSON over stdout) as the sole execution path. ACP was considered
+and prototyped but is **not adopted**. The TUI is not used.
+**Rationale:** `--print --output-format stream-json` is a stable, structured
+data stream that is straightforward to parse with readline. It gives us: tool
+invocations, file writes, shell commands, progress, final result + session_id —
+everything we need to narrate progress and detect completion. ACP is more
+complex (persistent process, auth lifecycle, JSON-RPC state machine) with the
+same end result, and its `cursor/ask_question` feature is unnecessary since
+headless mode with `--force` does not block for questions. CLI-only is more
+reliable and lower maintenance — verified by a comparison of the two approaches.
+The watcher engine (`watcher.ts` + `narrator.ts`) covers the monitoring gap:
+events from the NDJSON stream are classified and injected into the realtime
+session so Dad hears progress as it happens.
+**Consequence:** 16 MCP tools total (the two ACP interaction tools
+`cursor_answer_question` / `cursor_approve_plan` are dropped). No ACP process
+management. Mid-run questions are handled by prompt-steering (`--force` +
+system prompt) rather than a structured question/answer protocol.
 
 ### ADR-016 — No hardcoded model IDs; models fetched live via CLI + MCP tools
 **Decision:** No model ID is hardcoded anywhere in config. Models are fetched
@@ -197,9 +199,8 @@ config edit. "Skip questions" is a prompt-engineering concern, not a flag.
 
 | ID | Item | Plan to resolve | Severity |
 | --- | --- | --- | --- |
-| R-1 | **ACP auth in service user context.** `cursor-agent login` must be run once under the dedicated service OS user (SSH setup). If auth expires or the token store is lost, the ACP process fails to authenticate and all jobs stop. | One-time setup doc; health check surfaces auth failure immediately; restart procedure documented. | Med |
-| R-1b | **`--print` path without pty** (fallback). Docs say non-TTY infers print mode. | Milestone 0 Spike A still validates the fallback. `node-pty` almost certainly not needed. | Low |
-| R-2 | **`cursor-agent` is beta — ACP protocol and flags may change.** | Pin CLI version; startup self-check (`about --format json`); isolate all ACP/CLI knowledge in `src/executor/`. | Med |
+| R-1 | **Does `cursor-agent` truly work without a pty?** Docs say yes (non-TTY infers print mode). | Milestone 0 Spike A validates. Fallback: add `node-pty`; parsing unchanged. | Med |
+| R-2 | **`cursor-agent` is beta — flags and stream-json schema may change.** | Pin CLI version; startup self-check (`about --format json`); isolate all CLI knowledge in `src/executor/cursorAgent.ts`. | Med |
 | R-3 | **STT accuracy for code-y Polish/English + project names.** Misheard names → wrong project. | Voice-friendly registry names; confirm-before-apply for risky ops; readback of chosen project. | Med |
 | R-4 | **Latency of long jobs vs conversational feel.** | Async function calling + progress narration; never silent. | Med |
 | R-5 | **"cursor start" while mic OFF** needs always-listening. | v1: button is the on-switch; v2 optional on-device wake-word spotter. | Low |
@@ -208,7 +209,7 @@ config edit. "Skip questions" is a prompt-engineering concern, not a flag.
 | R-8 | **iOS Safari audio quirks** (autoplay unlock, call/Siri interruptions, backgrounding). | Unlock AudioContext on tap; reconnect on interruption; keep sessions foreground. | Low |
 | R-9 | **Git revert aggressiveness** (uncommitted vs committed agent changes). | Define checkpoint policy in `git.ts`; gate hard resets behind confirmation. | Low |
 | R-10 | **Two billing accounts** (provider key vs Cursor subscription) — cost visibility. | Document expected usage; ephemeral token TTL limits provider abuse. | Low |
-| R-11 | **Agent mid-run questions** — fully resolved. ACP `cursor/ask_question` delivers structured questions; bridge relays to dad via voice; `cursor_answer_question` sends the reply. `cursor/create_plan` handles plan approval. Both are blocking — cursor waits. | ADR-013 + ADR-017. Residual: UX tuning of how questions are spoken and options mapped. | Low |
+| R-11 | **Agent mid-run questions.** With `--force`, headless cursor does not block for questions — it proceeds or aborts. If cursor does abort mid-task asking for clarification, the voice model receives the partial result text, speaks it back, and the user can follow up with `cursor_submit` + `--resume`. | Prompt-steering in system prompt ("proceed; make reasonable assumptions"). Worst case: dad answers a question via voice and a new `cursor_submit` continues the thread. | Low |
 | R-12 | **Auto-run blast radius even with deny list** (a valid prompt does harm inside an allowlisted workspace). | Deny list (`Shell(rm)`, `Read(.env*)`, no `git push`, …) + optional `--sandbox enabled` + `cursor_revert`; least-priv OS user; deny list maintained as security config. | Med |
 
 ## Questions that may still need user input (non-blocking for docs)

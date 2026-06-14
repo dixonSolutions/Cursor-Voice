@@ -11,15 +11,14 @@ WebRTC voice loop) so we fail fast on anything that would invalidate the design.
 
 | Task | Size | Acceptance |
 | --- | --- | --- |
-| **Spike A — cursor-agent --print without pty.** Run `cursor-agent -p --output-format stream-json --workspace <dir> --force --trust "<prompt>"` via plain `child_process.spawn`. | M | Clean NDJSON + final JSON object with no TTY. **Records the node-pty decision.** (Kept as fallback even if ACP is used in production.) |
-| **Spike A2 — ACP full flow.** Spawn `cursor-agent acp`, send `initialize` → `authenticate` → `session/new` → `session/prompt`, receive streaming events and final result. Confirm `cursor/ask_question` and `session/request_permission` arrive. | M | Full ACP round-trip works; question/permission handling confirmed. Records ACP as production transport in `08`. |
-| **Spike B — resume continuity.** Run twice with persisted `--resume <id>`; confirm context carries over; `agent ls` lists it. | S | Second run remembers first. |
+| **Spike A — cursor-agent --print without pty.** Run `cursor-agent -p --output-format stream-json --workspace <dir> --force --trust "<prompt>"` via plain `child_process.spawn`. | M | Clean NDJSON + final JSON object with no TTY. **Records the node-pty decision.** |
+| **Spike B — resume continuity.** Run twice with persisted `--resume <id>`; confirm context carries over. | S | Second run remembers first. |
 | **Spike C — WebRTC + ephemeral token round-trip.** Bridge mints token; a throwaway page connects via WebRTC; you can speak and hear a reply. | M | Two-way audio works from iPhone Safari over the Tailscale HTTPS origin. |
 | **Spike D — function calling over WebRTC.** Define one dummy tool; confirm the data-channel function-call event arrives and `function_call_output` round-trips. | M | Dummy tool call observed end-to-end. |
 
-**Gate:** all four green before building the real system. If A fails, add
-`node-pty` (parsing unchanged). If C/D reveal provider quirks, adjust the
-provider adapter before committing.
+**Gate:** all three green before building the real system. If A fails (rare),
+add `node-pty`; parsing is unchanged. If C/D reveal provider quirks, adjust
+the provider adapter before committing.
 
 ## Milestone 1 — Bridge skeleton + security
 
@@ -34,27 +33,25 @@ provider adapter before committing.
 **Acceptance:** unauthorized requests rejected (401 / socket closed) at the API;
 health endpoint green; registry loads and validates paths.
 
-## Milestone 2 — Executor (cursor-agent integration)
+## Milestone 2 — Executor (cursor-agent integration + watcher engine)
 
 | Task | Size |
 | --- | --- |
-| `acp.ts`: spawn `cursor-agent acp`, initialize, authenticate, reconnect on crash. | L |
-| `session.ts` (executor): `session/new`, `session/load`, `session/cancel`, persist resume IDs. | M |
-| `events.ts`: `session/update` handler — stream to job progress, todo narration, task narration. | M |
-| `questions.ts`: pending `cursor/ask_question` + `cursor/create_plan` state machine; relay to MCP tools `cursor_answer_question` / `cursor_approve_plan`. | M |
-| `cursorAgent.ts`: `--print` fallback path (spike output + compatibility). | S |
-| `git.ts`: `cursor_diff`, `cursor_revert` with pre-job checkpoint. | M |
-| Job lifecycle: job rows, events, concurrency cap, timeout, stop/reap, startup orphan cleanup. | M |
+| `cursorAgent.ts`: spawn `cursor-agent -p --output-format stream-json`, flag builder, NDJSON readline parser, process lifecycle (kill/timeout/reap). | M |
+| Job state: SQLite `jobs` + `job_events` rows; persist resume `session_id`; concurrency cap; orphan cleanup on startup. | M |
+| `watcher.ts`: classify stream-json events (tool-use, file-write, shell-run, result, error); maintain rolling job summary; emit `NarrationEvent`s at cadence limits. | M |
+| `narrator.ts`: consume `NarrationEvent`s; inject text into the active realtime session via OpenAI Realtime `conversation.item.create` so Dad hears progress without asking. | M |
+| `git.ts`: pre-job checkpoint commit; `cursor_diff`; `cursor_revert` (hard reset to checkpoint, gated by voice confirm). | M |
 
-**Acceptance:** can submit a prompt programmatically, see streamed progress,
-get a final summary + diffstat, revert it, and stop a running job.
+**Acceptance:** submit a prompt programmatically → see watcher events → Dad
+hears mid-job narration → final summary spoken → diff visible → revert works.
 
 ## Milestone 3 — MCP tool layer
 
 | Task | Size |
 | --- | --- |
 | zod schemas in `schemas.ts` (single source of truth for all 16 tools). | M |
-| MCP server wiring — register all 16 tools across 8 modules (see `11`). | M |
+| MCP server wiring — register all 16 tools (see `11` for full surface). | M |
 | **Project tools**: registry resolution, fuzzy match + `query` filter, sticky active project, disambiguation errors. | M |
 | **Model tools**: `cursor-agent models` parse + SQLite cache + TTL refresh + filter. | M |
 | **Session tools**: `cursor_new_session` (`create-chat`), `cursor_session_info` from DB. | S |
