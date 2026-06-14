@@ -1,0 +1,13 @@
+{
+  "/api": {
+    "target": "http://localhost:8787",
+    "secure": false,
+    "logLevel": "warn"
+  },
+  "/ws": {
+    "target": "ws://localhost:8787",
+    "ws": true,
+    "secure": false,
+    "logLevel": "warn"
+  }
+}
