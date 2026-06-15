@@ -172,8 +172,8 @@ export async function registerVoiceProviderRoutes(app: FastifyInstance): Promise
     },
   );
 
-  /** PATCH /api/voice/wake-words { start, stop } */
-  app.patch<{ Body: { start: string; stop: string } }>(
+  /** PATCH /api/voice/wake-words { start } */
+  app.patch<{ Body: { start: string } }>(
     '/api/voice/wake-words',
     async (req, reply) => {
       try {

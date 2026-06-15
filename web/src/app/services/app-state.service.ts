@@ -10,11 +10,11 @@ export interface StatusDisplay {
 /**
  * Signal-based state machine for the PTT lifecycle.
  *
- *   idle ──tap──► inactive ──"cursor listen"──► listening
- *     ▲               │   ▲                        │
- *     └── tap/close ──┘   └── "cursor stop" ───────┘
- *                         (session stays open; mic stays on)
- *   listening/working ──job──► working (say "cursor listen" again after stop)
+ *   idle ──tap orb──► inactive ──activation phrase──► listening
+ *     ▲                    │                              │
+ *     └── tap orb (hang up)┘                              │
+ *                                                         │
+ *   listening/working ──job──► working (stay active until orb tap)
  */
 @Injectable({ providedIn: 'root' })
 export class AppStateService {

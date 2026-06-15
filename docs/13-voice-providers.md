@@ -83,19 +83,19 @@ OpenAI uses browser WebRTC. Bedrock uses `/ws/voice` on the bridge (AWS keys nev
 Legacy configs with `voiceProvider` + `realtimeModel` are migrated automatically
 on load.
 
-## Voice system prompt (`settings.voice.systemPrompt`)
+## Voice system prompt (`settings.voice.systemPrompts`)
 
-The Nova/OpenAI voice model instructions are **not hardcoded** in `session.ts`.
-Edit them in `config.json`:
+The Nova/OpenAI voice model instructions live in **`prompts/`** as readable markdown,
+not as escaped strings in `config.json`. See **[`14-prompts.md`](./14-prompts.md)** for
+the full layout, manifest format, and editing workflow.
+
+Minimal `config.json` wiring:
 
 ```json
 {
   "settings": {
     "voice": {
-      "systemPrompt": {
-        "activationRules": "## Activation rules\\n- You are inactive until...",
-        "template": "You are a messenger...\\n\\n{{ACTIVATION_RULES}}\\n..."
-      }
+      "systemPrompts": ["prompts/systemprompts.json"]
     }
   }
 }
@@ -105,14 +105,15 @@ Edit them in `config.json`:
 
 | Placeholder | Source |
 | --- | --- |
-| `{{ACTIVATION_RULES}}` | `systemPrompt.activationRules` (after wake-word substitution) |
-| `{{PROJECT_CATALOG}}` | Enabled projects from the registry (names + aliases only) |
+| `{{ACTIVATION_RULES}}` | `prompts/activation-rules.md` (after wake-word substitution) |
+| `{{ACTIVE_PROJECT}}` | Project selected in the app before the call |
+| `{{PROJECT_CATALOG}}` | Other registered projects (reference only) |
 | `{{WAKE_START}}` | `settings.voice.wakeWords.start` |
-| `{{WAKE_STOP}}` | `settings.voice.wakeWords.stop` |
 
-Fresh installs and migrations without `systemPrompt` copy defaults from
-`config/voice-system-prompt.json`. After editing `config.json`, restart the bridge
-and start a new voice session (prompt is baked into the ephemeral token).
+There is no spoken stop phrase — the user hangs up by tapping the orb only.
+
+After editing prompt files, restart the bridge and start a new voice session (prompt
+is baked into the ephemeral token).
 
 ## Viability rules
 

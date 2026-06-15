@@ -248,6 +248,39 @@ Provider ──speaks summary──► Dad
   (autoplay policy), keep the screen-awake consideration for long sessions, and
   handle interruptions (calls, Siri) by re-establishing the connection.
 
+### Voice orb visualizer
+
+The Voice tab orb uses the **Web Audio API** analyser pipeline already wired
+into Bedrock/WebRTC sessions:
+
+```
+Mic stream ──► AnalyserNode ──► getByteFrequencyData ──► Canvas radial wave
+AI playback ──► AnalyserNode ──► (merged max per bin)
+```
+
+- **Silent:** static blue core — no fake animation when off
+- **Your voice:** radial wave driven by mic frequency bins
+- **AI speaking:** same wave reacts to playback analyser output
+
+Implementation: `web/src/voice-audio-meter.ts` + `cv-voice-orb` component.
+Polls at 60 fps via `requestAnimationFrame` while a voice session is active.
+
+### Background noise filtering
+
+Implemented in `web/src/audio.ts` for loud environments (leaf blowers, HVAC, traffic):
+
+1. **Browser DSP** — `getUserMedia` requests `noiseSuppression`, `echoCancellation`,
+   and `autoGainControl` (plus Chromium `goog*` extras when available).
+2. **High-pass filter (~180 Hz)** — Web Audio `BiquadFilterNode` removes low-frequency
+   rumble before uplink. Especially important for **Bedrock** (raw PCM over WS).
+3. **Adaptive noise gate** — attenuates steady background between words; opens when
+   you speak.
+
+Bedrock path: mic → high-pass → gate → 16 kHz PCM → bridge.
+WebRTC path: same chain via `MediaStreamDestination` before `addTrack`.
+
+No config toggle yet — always on. Tune `MicFilterOptions` in `audio.ts` if needed.
+
 ## PWA delivery
 
 - Vanilla TS + Vite, served as static files by the bridge over the Tailscale

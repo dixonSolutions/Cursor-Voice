@@ -14,6 +14,7 @@ export interface RecallResult {
   project: string;
   completed_at: string;
   has_more?: boolean;
+  message?: string;
 }
 
 export function handleCursorRecallAnswer(
@@ -44,5 +45,7 @@ export function handleCursorRecallAnswer(
     project: last.project,
     completed_at: last.completedAt,
     has_more: brief.length < last.answer.length,
+    message:
+      'Recalled the last Cursor answer. Read the answer field aloud now — summarize in your own words. Do not stay silent.',
   };
 }

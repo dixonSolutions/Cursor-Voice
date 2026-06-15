@@ -98,7 +98,7 @@ export const FUNCTION_TOOLS: FunctionTool[] = [
     type: 'function',
     name: 'cursor_submit',
     description:
-      'ONLY when the user wants to IMPLEMENT, BUILD, FIX, or CHANGE code (writes files). NEVER for questions — use cursor_ask. Do not use for "next steps", "what is", or "asking about".',
+      'Send a coding task to Cursor. Pass the user\'s words as-is — do not rewrite. Use for build/fix/implement/change requests.',
     parameters: {
       type: 'object',
       properties: {
@@ -124,7 +124,7 @@ export const FUNCTION_TOOLS: FunctionTool[] = [
     type: 'function',
     name: 'cursor_ask',
     description:
-      'DEFAULT for all questions: next steps, status, what is done, roadmap, explain, list. Read-only — no code changes. Call once, wait up to 2 minutes, read answer once.',
+      'Send a question to Cursor. Pass the user\'s words as-is. Read-only. Call once and wait for the answer — do not retry while it runs.',
     parameters: {
       type: 'object',
       properties: {
@@ -160,7 +160,8 @@ export const FUNCTION_TOOLS: FunctionTool[] = [
     type: 'function',
     name: 'cursor_status',
     description:
-      'Ask the bridge what Cursor is doing right now. Use when the user asks about progress — never guess; always call this.',
+      'Live progress while Cursor is working — safe to call during cursor_ask (runs immediately, does not wait for ask to finish). ' +
+      'Call at most once every 20 seconds while waiting. Read the activity field aloud to the user.',
     parameters: {
       type: 'object',
       properties: {
@@ -176,7 +177,7 @@ export const FUNCTION_TOOLS: FunctionTool[] = [
     type: 'function',
     name: 'cursor_stop',
     description:
-      'Cancel a background WRITING job from cursor_submit only — never right after starting a job, never for wake phrase "cursor stop". User must explicitly say cancel the job/task.',
+      'Cancel a background write job ONLY when the user explicitly says cancel/stop the job or task. NEVER because Cursor is slow. NEVER for wake phrase "cursor stop".',
     parameters: {
       type: 'object',
       properties: {
@@ -291,3 +292,16 @@ export const FUNCTION_TOOLS: FunctionTool[] = [
 
 /** Build a lookup map by tool name. */
 export const FUNCTION_TOOL_MAP = new Map(FUNCTION_TOOLS.map((t) => [t.name, t]));
+
+/** Voice session tools — project is chosen in the app UI, not by the model. */
+const VOICE_EXCLUDED_TOOLS = new Set([
+  'cursor_set_project',
+  'cursor_list_projects',
+  /** Session metadata only — voice should use cursor_ask / cursor_status instead. */
+  'cursor_session_info',
+  'cursor_new_session',
+]);
+
+export const VOICE_FUNCTION_TOOLS = FUNCTION_TOOLS.filter(
+  (t) => !VOICE_EXCLUDED_TOOLS.has(t.name),
+);

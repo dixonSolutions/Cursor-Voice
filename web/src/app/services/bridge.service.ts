@@ -158,12 +158,14 @@ export class BridgeService {
       this.projects.set(data.projects);
       this.apiStatus.set('ok');
 
-      // Restore last selected project
+      // Restore last selected project and sync to bridge session state.
       const saved = localStorage.getItem('cv_active_project');
-      if (saved && data.projects.some((p) => p.name === saved)) {
-        this.activeProject.set(saved);
-      } else if (data.projects[0]) {
-        this.activeProject.set(data.projects[0].name);
+      const name =
+        saved && data.projects.some((p) => p.name === saved)
+          ? saved
+          : data.projects[0]?.name;
+      if (name) {
+        await this.setActiveProject(name);
       }
     } catch {
       this.apiStatus.set('error');

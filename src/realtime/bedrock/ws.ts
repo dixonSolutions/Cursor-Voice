@@ -6,10 +6,10 @@ import type { FastifyInstance } from 'fastify';
 import { verifyWsToken, parseWsAuthMessage } from '../../auth.js';
 import { childLogger } from '../../log.js';
 import { getConfig } from '../../config.js';
-import { randomUUID } from 'node:crypto';
 import { NovaSonicSession } from './novaSonicSession.js';
 import { consumePendingBedrockSession } from './pendingSessions.js';
 import { resolveBedrockAuth } from './credentials.js';
+import { setVoiceToolActivityBroadcaster } from '../voiceUiEvents.js';
 
 const log = childLogger('bedrock-ws');
 
@@ -54,13 +54,17 @@ export function registerBedrockVoiceWebSocket(app: FastifyInstance): void {
         let auth;
         try {
           auth = resolveBedrockAuth(env);
-        } catch {
-          socket.close(1011, 'AWS Bedrock credentials not configured');
+        } catch (err) {
+          const message =
+            err instanceof Error ? err.message : 'AWS Bedrock credentials not configured';
+          log.warn({ err }, 'bedrock voice auth failed');
+          socket.close(1011, message);
           return;
         }
 
         authenticated = true;
-        const voiceSessionKey = randomUUID();
+        /** Same key as /api/active-project — UI project selection applies to voice tools. */
+        const voiceSessionKey = 'default';
         nova = new NovaSonicSession(
           pending.model,
           pending.region,
@@ -75,18 +79,22 @@ export function registerBedrockVoiceWebSocket(app: FastifyInstance): void {
               socket.send(JSON.stringify({ type: 'assistant_transcript', text: t })),
             onAudioOutput: (content) =>
               socket.send(JSON.stringify({ type: 'audio_out', content })),
-            onSpeaking: (speaking) =>
-              socket.send(JSON.stringify({ type: 'speaking', value: speaking })),
+            onSpeaking: (value) =>
+              socket.send(JSON.stringify({ type: 'speaking', value })),
             onWorking: (working) =>
               socket.send(JSON.stringify({ type: 'working', value: working })),
-            onDeactivated: (phrase) =>
-              socket.send(JSON.stringify({ type: 'deactivated', phrase })),
             onError: (message) => {
               socket.send(JSON.stringify({ type: 'error', message }));
               socket.close(1011, message);
             },
             onClosed: () => socket.close(1000, 'Session ended'),
+            onToolActivity: (event) =>
+              socket.send(JSON.stringify({ type: 'tool_activity', ...event })),
           },
+        );
+
+        setVoiceToolActivityBroadcaster((event) =>
+          socket.send(JSON.stringify({ type: 'tool_activity', ...event })),
         );
 
         void nova.start().catch((err) => {
@@ -109,13 +117,21 @@ export function registerBedrockVoiceWebSocket(app: FastifyInstance): void {
         nova.sendAudio(frame.content);
       }
 
+      if (frame.type === 'narration' && frame.content && nova) {
+        nova.injectNarration(frame.content);
+      }
+
       if (frame.type === 'close') {
         void nova?.close();
       }
     });
 
     socket.on('close', () => {
-      void nova?.close();
+      setVoiceToolActivityBroadcaster(null);
+      if (nova) {
+        void nova.close().catch(() => undefined);
+        nova = null;
+      }
     });
   });
 }

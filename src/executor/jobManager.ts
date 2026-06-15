@@ -16,12 +16,15 @@ import stripAnsi from 'strip-ansi';
 import { spawnAgent } from './cursorAgent.js';
 import {
   assertAgentAvailable,
+  getActiveAgentActivity,
+  getActiveAgentRun,
   killActiveAgent,
   registerAgentRun,
   releaseAgentRun,
 } from './agentSingleton.js';
 import { Watcher } from './watcher.js';
 import { getNarrator } from './narrator.js';
+import { emitVoiceToolActivity } from '../realtime/voiceUiEvents.js';
 import { checkpoint } from './git.js';
 import { createJob, updateJob, getJob, type JobMode } from '../state/jobs.js';
 import { setProjectResumeId, getSessionState, type Project } from '../state/registry.js';
@@ -65,7 +68,19 @@ export function getActiveJobIdForSession(sessionKey: string): string | null {
 export function getActiveJobActivity(sessionKey: string): string | null {
   const jobId = getActiveJobIdForSession(sessionKey);
   if (!jobId) return null;
-  return activeJobs.get(jobId)?.watcher.getActivitySummary() ?? null;
+  const summary = activeJobs.get(jobId)?.watcher.getActivitySummary() ?? null;
+  if (!summary) return null;
+  const age = getJobRunAgeMs(jobId);
+  return age !== null ? `${summary} (${Math.round(age / 1000)}s elapsed)` : summary;
+}
+
+/** Live activity for cursor_ask or cursor_submit. */
+export function getActiveCursorActivity(sessionKey: string): string | null {
+  const fromAsk = getActiveAgentRun();
+  if (fromAsk?.sessionKey === sessionKey && fromAsk.kind === 'ask') {
+    return getActiveAgentActivity();
+  }
+  return getActiveJobActivity(sessionKey);
 }
 
 // ── Submit ────────────────────────────────────────────────────────────────
@@ -120,8 +135,6 @@ export async function submitJob(
 
   // Spawn the agent process.
   const handle = spawnAgent({ project, session, prompt, mode });
-  registerAgentRun({ kind: 'job', refId: jobId, sessionKey, handle });
-  updateJob(jobId, { pid: handle.pid });
 
   // Wire watcher → narrator.
   const watcher = new Watcher(jobId, project.name, () => {
@@ -133,6 +146,8 @@ export async function submitJob(
   const narrator = getNarrator();
   watcher.onNarration((evt) => void narrator.receive(evt));
   handle.onEvent((evt) => watcher.process(evt));
+  registerAgentRun({ kind: 'job', refId: jobId, sessionKey, handle, watcher });
+  updateJob(jobId, { pid: handle.pid });
 
   sessionActiveJobs.set(sessionKey, jobId);
 
@@ -260,16 +275,29 @@ export async function askQuestion(
 
   const session = getSessionState(sessionKey);
 
-  log.info({ project: project.name, sessionKey, question: question.slice(0, 120) }, 'cursor_ask started');
-
   const handle = spawnAgent({
     project,
     session,
     prompt: question,
     mode: 'ask',
-    oneShot: true,
+    oneShot: false, // stream-json — full multi-tool research runs to completion
   });
-  registerAgentRun({ kind: 'ask', refId: 'ask', sessionKey, handle });
+
+  log.info(
+    { project: project.name, sessionKey, question: question.slice(0, 120), pid: handle.pid },
+    'cursor_ask started (headless cursor-agent CLI — fresh session, not IDE sidebar)',
+  );
+
+  const watcher = new Watcher('ask', project.name, undefined, false);
+  handle.onEvent((evt) => watcher.process(evt));
+  registerAgentRun({ kind: 'ask', refId: 'ask', sessionKey, handle, watcher });
+
+  emitVoiceToolActivity({
+    tool: 'cursor_ask',
+    phase: 'start',
+    label: `Cursor CLI running (pid ${handle.pid}) — researching repo…`,
+    detail: question.slice(0, 120),
+  });
 
   try {
     const result = await handle.result;

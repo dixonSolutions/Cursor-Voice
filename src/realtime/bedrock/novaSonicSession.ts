@@ -5,12 +5,17 @@ import {
 import { NodeHttp2Handler } from '@smithy/node-http-handler';
 import { randomUUID } from 'node:crypto';
 
-import { FUNCTION_TOOLS } from '../../mcp/functionTools.js';
+import { VOICE_FUNCTION_TOOLS } from '../../mcp/functionTools.js';
 import { dispatchTool } from '../../mcp/handlers.js';
+import {
+  enrichToolResultForVoice,
+  toolDoneLabel,
+  toolStartLabel,
+} from '../../mcp/toolVoice/index.js';
+import { getActiveJobIdForSession } from '../../executor/jobManager.js';
+import { getActiveAgentRun, isAgentBusy } from '../../executor/agentSingleton.js';
 import { childLogger } from '../../log.js';
 import type { SessionConfig } from '../provider.js';
-import { getWakeWordsFromConfig } from '../session.js';
-import { isStopPhrase } from '../wakeWords.js';
 import {
   audioInputEvent,
   promptStartEvent,
@@ -19,16 +24,24 @@ import {
   systemPromptEvents,
   toNovaToolConfiguration,
   toolResultEvents,
+  narrationInputEvents,
   userAudioStartEvent,
 } from './events.js';
 import type { BedrockAuth } from './credentials.js';
+import { isLikelyTtsEcho, isLikelyNoiseTranscript } from './echoFilter.js';
+import { isMetaVoiceBridgeQuestion, normalizeAskQuestion } from '../../mcp/tools/questionDetect.js';
 
 const log = childLogger('bedrock-nova');
+
+/** Read-only tools that must not wait behind cursor_ask / cursor_submit. */
+const QUICK_TOOLS = new Set(['cursor_status', 'cursor_recall_answer']);
 
 /** ~100 ms of silence at 16 kHz — keeps Bedrock stream alive during long tool calls. */
 const SILENT_PCM_BASE64 = Buffer.alloc(3200).toString('base64');
 /** Bedrock closes the stream if no audio/interactive content for ~55 s. */
 const TOOL_KEEPALIVE_MS = 20_000;
+/** Baseline ping so Nova can think between tools without killing the stream. */
+const SESSION_KEEPALIVE_MS = 15_000;
 
 export interface NovaSonicCallbacks {
   onConnected(): void;
@@ -37,9 +50,14 @@ export interface NovaSonicCallbacks {
   onAudioOutput(base64Pcm: string): void;
   onSpeaking(speaking: boolean): void;
   onWorking(working: boolean): void;
-  onDeactivated(phrase: string): void;
   onError(message: string): void;
   onClosed(): void;
+  onToolActivity?(event: {
+    tool: string;
+    phase: 'start' | 'done' | 'error';
+    label: string;
+    detail?: string;
+  }): void;
 }
 
 /** Manages one Nova Sonic bidirectional stream (speech-to-speech). */
@@ -52,6 +70,8 @@ export class NovaSonicSession {
   private closed = false;
   private processing = false;
   private toolKeepaliveTimer: ReturnType<typeof setInterval> | null = null;
+  private jobKeepaliveTimer: ReturnType<typeof setInterval> | null = null;
+  private sessionKeepaliveTimer: ReturnType<typeof setInterval> | null = null;
   /** Nova may emit parallel toolUse events — run one at a time. */
   private toolChain: Promise<void> = Promise.resolve();
 
@@ -87,6 +107,7 @@ export class NovaSonicSession {
 
     const response = await this.client.send(command);
     this.cb.onConnected();
+    this.startSessionKeepalive();
     void this.processOutput(response.body);
   }
 
@@ -97,10 +118,23 @@ export class NovaSonicSession {
     );
   }
 
+  /** Inject a spoken status update (progress narration while tools run). */
+  injectNarration(text: string): void {
+    if (this.closed || !text.trim()) return;
+    const line = text.trim();
+    const contentName = randomUUID();
+    for (const e of narrationInputEvents(this.promptName, contentName, line)) {
+      this.enqueue(e);
+    }
+    log.debug({ text: text.slice(0, 80) }, 'nova narration injected');
+  }
+
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
+    this.stopSessionKeepalive();
     this.stopToolKeepalive();
+    this.stopJobKeepalive();
     this.enqueue(sessionEndEvent());
     this.flushWaiters();
     this.client?.destroy();
@@ -109,7 +143,7 @@ export class NovaSonicSession {
   }
 
   private buildInitEvents(): string[] {
-    const toolConfig = toNovaToolConfiguration(FUNCTION_TOOLS);
+    const toolConfig = toNovaToolConfiguration(VOICE_FUNCTION_TOOLS);
     const systemContent = randomUUID();
     return [
       sessionStartEvent(),
@@ -171,11 +205,11 @@ export class NovaSonicSession {
           const content = out.content?.trim() ?? '';
           if (!content || content.includes('"interrupted"')) continue;
           if (out.role === 'USER') {
-            this.cb.onUserTranscript(content);
-            const { stop } = getWakeWordsFromConfig();
-            if (isStopPhrase(content, stop)) {
-              this.cb.onDeactivated(stop);
+            if (isLikelyTtsEcho(content) || isLikelyNoiseTranscript(content)) {
+              log.debug({ content: content.slice(0, 80) }, 'ignored likely noise or TTS echo');
+              continue;
             }
+            this.cb.onUserTranscript(content);
           } else {
             this.cb.onAssistantTranscript(content);
           }
@@ -201,10 +235,6 @@ export class NovaSonicSession {
           }
         }
 
-        if ('contentEnd' in event) {
-          this.cb.onSpeaking(false);
-        }
-
         if ('completionEnd' in event) {
           this.cb.onWorking(false);
         }
@@ -219,6 +249,13 @@ export class NovaSonicSession {
   }
 
   private scheduleToolUse(toolName: string, toolUseId: string, rawArgs: string): void {
+    if (QUICK_TOOLS.has(toolName)) {
+      void this.handleToolUse(toolName, toolUseId, rawArgs, { quick: true }).catch((err) => {
+        log.error({ err, tool: toolName }, 'quick tool failed');
+      });
+      return;
+    }
+
     this.toolChain = this.toolChain
       .then(async () => {
         this.cb.onWorking(true);
@@ -230,7 +267,12 @@ export class NovaSonicSession {
       });
   }
 
-  private async handleToolUse(toolName: string, toolUseId: string, rawArgs: string): Promise<void> {
+  private async handleToolUse(
+    toolName: string,
+    toolUseId: string,
+    rawArgs: string,
+    opts: { quick?: boolean } = {},
+  ): Promise<void> {
     let args: unknown = {};
     try {
       args = rawArgs ? JSON.parse(rawArgs) : {};
@@ -238,18 +280,83 @@ export class NovaSonicSession {
       args = {};
     }
 
-    this.startToolKeepalive();
+    if (toolName === 'cursor_ask' || toolName === 'cursor_submit') {
+      const field = toolName === 'cursor_ask' ? 'question' : 'prompt';
+      const raw = String((args as Record<string, unknown>)[field] ?? '');
+      (args as Record<string, unknown>)[field] = normalizeAskQuestion(raw);
+    }
+
+    if (toolName === 'cursor_ask') {
+      const q = String((args as Record<string, unknown>)['question'] ?? '');
+      if (isLikelyTtsEcho(q) || isMetaVoiceBridgeQuestion(q)) {
+        const reject = JSON.stringify({
+          error: 'Ignored likely echo or off-topic question.',
+          speak_to_user:
+            'I am still on your earlier question — I will summarize when Cursor finishes.',
+        });
+        this.cb.onToolActivity?.({ tool: toolName, phase: 'done', label: 'Waiting for Cursor' });
+        const contentName = randomUUID();
+        for (const e of toolResultEvents(this.promptName, contentName, toolUseId, reject)) {
+          this.enqueue(e);
+        }
+        if (!opts.quick) this.cb.onWorking(false);
+        return;
+      }
+    }
+
+    const startLabel = toolStartLabel(toolName, args);
+    this.cb.onToolActivity?.({ tool: toolName, phase: 'start', label: startLabel });
+
+    if (!opts.quick && toolName === 'cursor_ask' && isAgentBusy()) {
+      const busyResult = JSON.stringify({
+        error: 'Cursor is already answering a question.',
+        speak_to_user:
+          'I am still working on your question — I will summarize when Cursor finishes.',
+      });
+      this.cb.onToolActivity?.({
+        tool: toolName,
+        phase: 'done',
+        label: 'Waiting for Cursor',
+      });
+      const contentName = randomUUID();
+      for (const e of toolResultEvents(this.promptName, contentName, toolUseId, busyResult)) {
+        this.enqueue(e);
+      }
+      this.cb.onWorking(false);
+      return;
+    }
+
+    if (!opts.quick) {
+      this.startToolKeepalive();
+    }
 
     let resultJson: string;
+    let parsedResult: Record<string, unknown> = {};
     try {
       const result = await dispatchTool(toolName, args, this.sessionKey);
-      resultJson = JSON.stringify(result ?? {});
+      parsedResult =
+        result && typeof result === 'object'
+          ? (result as Record<string, unknown>)
+          : { value: result };
+      parsedResult = enrichToolResultForVoice(toolName, parsedResult);
+      resultJson = JSON.stringify(parsedResult);
+      const doneLabel = toolDoneLabel(toolName, parsedResult);
+      this.cb.onToolActivity?.({ tool: toolName, phase: 'done', label: doneLabel });
     } catch (err) {
-      resultJson = JSON.stringify({
-        error: err instanceof Error ? err.message : String(err),
+      const message = err instanceof Error ? err.message : String(err);
+      parsedResult = { error: message };
+      resultJson = JSON.stringify(parsedResult);
+      this.cb.onToolActivity?.({
+        tool: toolName,
+        phase: 'error',
+        label: startLabel,
+        detail: message,
       });
     } finally {
-      this.stopToolKeepalive();
+      this.bumpStreamAlive();
+      if (!getActiveJobIdForSession(this.sessionKey) && getActiveAgentRun()?.kind !== 'ask') {
+        this.syncToolKeepalive();
+      }
     }
 
     if (this.closed) {
@@ -262,7 +369,80 @@ export class NovaSonicSession {
     for (const e of toolResultEvents(this.promptName, contentName, toolUseId, resultJson)) {
       this.enqueue(e);
     }
-    this.cb.onWorking(false);
+    if (!opts.quick) {
+      this.cb.onWorking(false);
+    }
+
+    this.pushAnswerTranscriptForTts(toolName, parsedResult);
+
+    if (!opts.quick && getActiveJobIdForSession(this.sessionKey)) {
+      this.startJobKeepalive();
+    }
+  }
+
+  /** When Nova returns text-only, browser TTS reads the Cursor answer aloud. */
+  private pushAnswerTranscriptForTts(tool: string, result: Record<string, unknown>): void {
+    if (result['error']) return;
+    if (tool !== 'cursor_ask' && tool !== 'cursor_recall_answer') return;
+    const answer = typeof result['answer'] === 'string' ? result['answer'].trim() : '';
+    if (!answer) return;
+    this.cb.onAssistantTranscript(answer);
+  }
+
+  private bumpStreamAlive(): void {
+    this.startToolKeepalive();
+  }
+
+  private syncToolKeepalive(): void {
+    const busy =
+      getActiveJobIdForSession(this.sessionKey) !== null ||
+      getActiveAgentRun()?.kind === 'ask';
+    if (busy) return;
+    this.stopToolKeepalive();
+  }
+
+  /** Always-on silent audio — Bedrock drops the stream after ~55 s of silence. */
+  private startSessionKeepalive(): void {
+    if (this.sessionKeepaliveTimer) return;
+    this.sendAudio(SILENT_PCM_BASE64);
+    this.sessionKeepaliveTimer = setInterval(() => {
+      if (this.closed) {
+        this.stopSessionKeepalive();
+        return;
+      }
+      this.sendAudio(SILENT_PCM_BASE64);
+    }, SESSION_KEEPALIVE_MS);
+  }
+
+  private stopSessionKeepalive(): void {
+    if (this.sessionKeepaliveTimer) {
+      clearInterval(this.sessionKeepaliveTimer);
+      this.sessionKeepaliveTimer = null;
+    }
+  }
+
+  /** Keep silent audio flowing while a background job runs (cursor_submit returns immediately). */
+  private startJobKeepalive(): void {
+    if (this.jobKeepaliveTimer) return;
+    this.sendAudio(SILENT_PCM_BASE64);
+    this.jobKeepaliveTimer = setInterval(() => {
+      if (this.closed) {
+        this.stopJobKeepalive();
+        return;
+      }
+      if (!getActiveJobIdForSession(this.sessionKey)) {
+        this.stopJobKeepalive();
+        return;
+      }
+      this.sendAudio(SILENT_PCM_BASE64);
+    }, TOOL_KEEPALIVE_MS);
+  }
+
+  private stopJobKeepalive(): void {
+    if (this.jobKeepaliveTimer) {
+      clearInterval(this.jobKeepaliveTimer);
+      this.jobKeepaliveTimer = null;
+    }
   }
 
   /** Send silent audio so Bedrock does not time out during multi-minute tool calls. */
@@ -274,6 +454,8 @@ export class NovaSonicSession {
         this.stopToolKeepalive();
         return;
       }
+      this.syncToolKeepalive();
+      if (!this.toolKeepaliveTimer) return;
       this.sendAudio(SILENT_PCM_BASE64);
     }, TOOL_KEEPALIVE_MS);
   }

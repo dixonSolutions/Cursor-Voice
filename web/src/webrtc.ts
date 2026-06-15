@@ -22,10 +22,9 @@
  *   → injectNarration() → conversation.item.create (data channel)
  *   → provider TTS plays it for Dad
  *
- * "cursor listen" / "cursor stop":
+ * Activation phrase (from config):
  *   Start phrase → onActivated (begin listening for commands).
- *   Stop phrase → onDeactivated (stop listening; session and mic stay open).
- *   End session entirely → PTT tap while inactive/listening.
+ *   End session entirely → tap the orb while session is open.
  *
  * ## GA API notes (not the beta schema)
  * - Token mint: POST https://api.openai.com/v1/realtime/client_secrets
@@ -35,7 +34,14 @@
  * - Event names: response.output_audio.delta / .done, response.done (function calls)
  */
 
-import { unlockAudioContext, createAudioElement } from './audio.js';
+import {
+  unlockAudioContext,
+  createAudioElement,
+  captureMicStream,
+  createFilteredMicStream,
+  getSharedAudioContext,
+} from './audio.js';
+import { getVoiceAudioMeter } from './voice-audio-meter.js';
 import {
   OPENAI_REALTIME_CALLS_URL,
   OPENAI_ASSISTANT_TRANSCRIPT,
@@ -46,9 +52,7 @@ import {
   readHttpError,
 } from './openai-realtime.js';
 import {
-  DEFAULT_WAKE_WORDS,
   isStartPhrase,
-  isStopPhrase,
   type WakeWords,
 } from './wake-words.js';
 
@@ -69,14 +73,19 @@ export interface SessionCallbacks {
   onClosed(reason?: string): void;
   /** Start wake phrase heard — assistant is now active. */
   onActivated?(phrase: string): void;
-  /** Stop wake phrase heard — stop listening; session stays open. */
-  onDeactivated?(phrase: string): void;
   /**
    * Relay a function call to the bridge control WebSocket.
    * Returns the tool result, or throws on tool error / WS disconnect.
    * Implemented in main.ts; wraps the WS send + pending-call map.
    */
   relayToolCall(callId: string, name: string, args: unknown): Promise<unknown>;
+  /** Latest tool call visibility (Bedrock server path or WebRTC relay). */
+  onToolActivity?(event: {
+    tool: string;
+    phase: 'start' | 'done' | 'error';
+    label: string;
+    detail?: string;
+  }): void;
 }
 
 // ── Internal types ─────────────────────────────────────────────────────────
@@ -106,8 +115,9 @@ export class WebRTCVoiceSession {
   private dc: RTCDataChannel | null = null;
   private audioEl: HTMLAudioElement | null = null;
   private micStream: MediaStream | null = null;
+  private micFilterDispose: (() => void) | null = null;
   private isClosed = false;
-  private wakeWords: WakeWords = DEFAULT_WAKE_WORDS;
+  private wakeWords: WakeWords = { start: '' };
 
   constructor(
     private readonly bridgeBase: string,
@@ -133,18 +143,25 @@ export class WebRTCVoiceSession {
       // 2. Unlock AudioContext inside the gesture stack (iOS autoplay policy)
       await unlockAudioContext();
 
-      // 3. Capture microphone
-      this.micStream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: false,
-      });
+      // 3. Capture microphone (browser NS + high-pass + noise gate for WebRTC uplink)
+      this.micStream = await captureMicStream();
+      const filtered = createFilteredMicStream(this.micStream);
+      this.micFilterDispose = filtered.dispose;
+
+      const meterCtx = getSharedAudioContext();
+      const micMonitor = meterCtx.createMediaStreamSource(this.micStream);
+      const micTap = getVoiceAudioMeter().tapMic(meterCtx, micMonitor);
+      const micSilent = meterCtx.createGain();
+      micSilent.gain.value = 0;
+      micTap.connect(micSilent);
+      micSilent.connect(meterCtx.destination);
 
       // 4. Create peer connection
       this.pc = new RTCPeerConnection();
 
-      // 5. Send mic audio to provider
-      for (const track of this.micStream.getTracks()) {
-        this.pc.addTrack(track, this.micStream);
+      // 5. Send filtered mic audio to provider
+      for (const track of filtered.stream.getTracks()) {
+        this.pc.addTrack(track, filtered.stream);
       }
 
       // 6. Receive provider TTS audio → attach to <audio>
@@ -152,10 +169,17 @@ export class WebRTCVoiceSession {
       this.pc.ontrack = (ev: RTCTrackEvent) => {
         if (this.audioEl && ev.streams[0]) {
           this.audioEl.srcObject = ev.streams[0];
-          // play() should resolve immediately — user gesture already consumed
           void this.audioEl.play().catch(() => {
             // Autoplay blocked despite unlock; non-fatal — audio will resume
           });
+
+          const remoteCtx = getSharedAudioContext();
+          const remoteSource = remoteCtx.createMediaStreamSource(ev.streams[0]);
+          const outTap = getVoiceAudioMeter().tapPlayback(remoteCtx, remoteSource);
+          const outSilent = remoteCtx.createGain();
+          outSilent.gain.value = 0;
+          outTap.connect(outSilent);
+          outSilent.connect(remoteCtx.destination);
         }
       };
 
@@ -216,6 +240,8 @@ export class WebRTCVoiceSession {
       track.stop();
     }
     this.micStream = null;
+    this.micFilterDispose?.();
+    this.micFilterDispose = null;
     this.dc?.close();
     this.dc = null;
     this.pc?.close();
@@ -239,11 +265,11 @@ export class WebRTCVoiceSession {
     if (!res.ok) {
       throw new Error(`Token mint failed: ${await readHttpError(res)}`);
     }
-    const data = (await res.json()) as TokenPayload & Partial<{ wakeWords: WakeWords }>;
+    const data = (await res.json()) as TokenPayload;
     return {
       token: data.token,
       model: data.model,
-      wakeWords: data.wakeWords ?? DEFAULT_WAKE_WORDS,
+      wakeWords: data.wakeWords,
     };
   }
 
@@ -330,9 +356,6 @@ export class WebRTCVoiceSession {
             this.cb.onUserTranscript(text);
             if (isStartPhrase(text, this.wakeWords.start)) {
               this.cb.onActivated?.(this.wakeWords.start);
-            }
-            if (isStopPhrase(text, this.wakeWords.stop)) {
-              this.cb.onDeactivated?.(this.wakeWords.stop);
             }
           }
           break;

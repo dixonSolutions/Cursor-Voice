@@ -26,6 +26,7 @@ actual work on projects hosted on a home machine.
 | [`11-mcp-tool-surface.md`](./11-mcp-tool-surface.md) | Complete MCP tool inventory (18 tools, 8 groups) — full args, returns, ACP/CLI backing, what was excluded and why, source module layout | Implementing the MCP server |
 | [`12-stream-json-watcher.md`](./12-stream-json-watcher.md) | Stream-JSON watcher & monitoring engine — NDJSON event classification, NarrationEvent cadence, narrator injection into realtime session, mid-run progress for Dad | Implementing the executor + narrator |
 | [`13-voice-providers.md`](./13-voice-providers.md) | Multi-provider voice config — catalog, `.env` viability, `config.json` preferences, Settings API | Configuring OpenAI / Gemini / Anthropic / Bedrock |
+| [`14-prompts.md`](./14-prompts.md) | Voice system prompts — `prompts/` folder, manifest, markdown editing, blind-accessibility persona | Tuning what the voice model says and how it behaves |
 
 ## One-paragraph summary
 

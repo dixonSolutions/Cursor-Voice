@@ -44,7 +44,6 @@ export interface CatalogProvider {
 
 export interface WakeWords {
   start: string;
-  stop: string;
 }
 
 export interface VoiceProvidersResponse {

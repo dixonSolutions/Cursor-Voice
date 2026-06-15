@@ -11,8 +11,15 @@
 import { submitJob, askQuestion } from '../../executor/jobManager.js';
 import { childLogger } from '../../log.js';
 import { resolveProjectOrThrow } from './project.js';
-import { looksLikeReadOnlyQuestion, looksLikeMutationRequest } from './questionDetect.js';
-import { setLastAsk, truncateForVoice } from '../../state/lastAsk.js';
+import {
+  looksLikeReadOnlyQuestion,
+  looksLikeMutationRequest,
+  isMetaVoiceBridgeQuestion,
+  normalizeAskQuestion,
+  isReadOnlyResearchIntent,
+} from './questionDetect.js';
+import { isAgentBusy, getActiveAgentRun } from '../../executor/agentSingleton.js';
+import { getLastAsk, setLastAsk, truncateForVoice } from '../../state/lastAsk.js';
 
 const log = childLogger('tool:execute');
 
@@ -47,13 +54,13 @@ export async function handleCursorSubmit(
 ): Promise<SubmitResult> {
   const project = resolveProjectOrThrow(args.project, activeProject);
 
-  if (looksLikeReadOnlyQuestion(args.prompt)) {
+  if (looksLikeReadOnlyQuestion(args.prompt) || isReadOnlyResearchIntent(args.prompt)) {
     log.info(
       { project: project.name, prompt: args.prompt.slice(0, 100) },
       'cursor_submit redirected to cursor_ask (read-only question)',
     );
     const ask = await handleCursorAsk(
-      { question: args.prompt, project: args.project },
+      { question: normalizeAskQuestion(args.prompt), project: args.project },
       sessionKey,
       activeProject,
     );
@@ -63,7 +70,7 @@ export async function handleCursorSubmit(
       has_more: ask.has_more,
       project: ask.project,
       message:
-        'Read-only question — answered via cursor_ask. Read the answer field to the user now.',
+        'Read-only question answered. Summarize the answer field for the user in a few sentences.',
     };
   }
 
@@ -90,6 +97,7 @@ export interface AskResult {
   answer: string;
   project: string;
   has_more: boolean;
+  message?: string;
 }
 
 /**
@@ -103,17 +111,62 @@ export async function handleCursorAsk(
   activeProject: string | null,
 ): Promise<AskResult> {
   const project = resolveProjectOrThrow(args.project, activeProject);
+  const question = normalizeAskQuestion(args.question.trim());
+  const qKey = question.toLowerCase();
 
-  if (looksLikeMutationRequest(args.question)) {
+  if (looksLikeMutationRequest(question)) {
     throw new Error(
       'This request changes the repo (commit, PR, merge, implement, etc.) — use cursor_submit, not cursor_ask.',
     );
   }
 
-  const fullAnswer = await askQuestion(project, sessionKey, args.question);
+  if (isMetaVoiceBridgeQuestion(question)) {
+    const last = getLastAsk(sessionKey);
+    if (last) {
+      const voiceAnswer = truncateForVoice(last.answer);
+      return {
+        answer: voiceAnswer,
+        project: last.project,
+        has_more: voiceAnswer.length < last.answer.length,
+        message:
+          'The user likely heard TTS echo — do not ask Cursor about setting up agents. ' +
+          'Summarize the previous answer about implementation steps instead.',
+      };
+    }
+    throw new Error(
+      'That question is about the voice bridge, not this codebase. Ask about the project implementation instead.',
+    );
+  }
+
+  if (isAgentBusy()) {
+    const active = getActiveAgentRun();
+    if (active?.kind === 'ask') {
+      throw new Error(
+        'Cursor is still researching your question. Use cursor_status for live progress — do not call cursor_ask again yet.',
+      );
+    }
+  }
+
+  const last = getLastAsk(sessionKey);
+  if (last && last.question.trim().toLowerCase() === qKey) {
+    const ageMs = Date.now() - new Date(last.completedAt).getTime();
+    if (ageMs < 5 * 60_000) {
+      log.info({ sessionKey, question: question.slice(0, 80) }, 'cursor_ask cache hit');
+      const voiceAnswer = truncateForVoice(last.answer);
+      return {
+        answer: voiceAnswer,
+        project: last.project,
+        has_more: voiceAnswer.length < last.answer.length,
+        message:
+          'This question was just answered — read the answer field aloud for the user in 2–4 sentences.',
+      };
+    }
+  }
+
+  const fullAnswer = await askQuestion(project, sessionKey, question);
 
   setLastAsk(sessionKey, {
-    question: args.question,
+    question,
     answer: fullAnswer,
     project: project.name,
   });
@@ -123,5 +176,8 @@ export async function handleCursorAsk(
     answer: voiceAnswer,
     project: project.name,
     has_more: voiceAnswer.length < fullAnswer.length,
+    message:
+      'Cursor finished. You MUST speak now: summarize the answer field in 3–5 short sentences for the user. ' +
+      'Do not stay silent. If they later ask to summarize or repeat, use cursor_recall_answer.',
   };
 }
