@@ -33,6 +33,11 @@ export type StreamJsonEvent =
       success?: boolean;
     }
   | { type: 'assistant'; message?: { content?: Array<{ text?: string }> } }
+  | {
+      type: 'tool_call';
+      subtype: 'started' | 'completed';
+      tool_call: Record<string, unknown>;
+    }
   | { type: 'result'; session_id?: string; usage?: unknown; message?: unknown }
   | { type: 'error'; message?: string }
   | { type: string; [key: string]: unknown };
@@ -85,19 +90,31 @@ function classifyToolCall(toolCall: Record<string, unknown>): {
   for (const key of keys) {
     const lower = key.toLowerCase();
     const val = toolCall[key] as Record<string, unknown> | null;
+    const args = (val?.['args'] ?? val) as Record<string, unknown> | undefined;
 
     if (lower.includes('write')) {
-      const path = val && typeof val['path'] === 'string' ? val['path'] : undefined;
+      const path = args && typeof args['path'] === 'string' ? args['path'] : undefined;
       return { kind: 'write', label: path ? `wrote ${path}` : 'wrote a file', path };
     }
     if (lower.includes('read')) {
-      const path = val && typeof val['path'] === 'string' ? val['path'] : undefined;
-      return { kind: 'read', label: path ? `read ${path}` : 'read a file', path };
+      const path = args && typeof args['path'] === 'string' ? args['path'] : undefined;
+      return { kind: 'read', label: path ? `reading ${path}` : 'reading a file', path };
+    }
+    if (lower.includes('glob')) {
+      const pattern =
+        (args && typeof args['globPattern'] === 'string' ? args['globPattern'] : undefined) ??
+        'project files';
+      return { kind: 'read', label: `searching ${pattern}`, path: pattern };
+    }
+    if (lower.includes('grep') || lower.includes('search')) {
+      const pattern =
+        (args && typeof args['pattern'] === 'string' ? args['pattern'] : undefined) ?? 'codebase';
+      return { kind: 'read', label: `searching for "${pattern}"`, path: pattern };
     }
     if (lower.includes('shell') || lower.includes('bash') || lower.includes('cmd')) {
       const cmd =
-        val && typeof val['command'] === 'string'
-          ? (val['command'] as string).slice(0, 60)
+        args && typeof args['command'] === 'string'
+          ? (args['command'] as string).slice(0, 60)
           : undefined;
       return { kind: 'shell', label: cmd ? `ran: ${cmd}` : 'ran a command', cmd };
     }
@@ -106,30 +123,30 @@ function classifyToolCall(toolCall: Record<string, unknown>): {
   return { kind: 'other', label: 'called a tool' };
 }
 
-/** Detect Task/subagent/explore spawns — budget-burning "ghost agent" pattern. */
+/** Detect Task/subagent spawns — budget-burning "ghost agent" pattern. */
 export function isGhostToolCall(toolCall: Record<string, unknown>): {
   ghost: boolean;
   reason: string | null;
 } {
   for (const key of Object.keys(toolCall)) {
     const lower = key.toLowerCase();
+    // Match explicit Task/subagent tool keys only — not grep/glob args containing "explore".
     if (
-      lower.includes('task') ||
-      lower.includes('subagent') ||
-      lower.includes('explore') ||
-      lower === 'tasktoolcall'
+      (lower.includes('task') && lower.includes('tool')) ||
+      lower.includes('subagent')
     ) {
       return { ghost: true, reason: key };
     }
   }
 
-  const blob = JSON.stringify(toolCall).toLowerCase();
-  if (
-    blob.includes('subagent_type') ||
-    blob.includes('"explore"') ||
-    blob.includes('subagent_type":"explore')
-  ) {
-    return { ghost: true, reason: 'subagent_spawn' };
+  // Structured subagent spawn inside a Task tool payload.
+  for (const val of Object.values(toolCall)) {
+    if (typeof val !== 'object' || val === null) continue;
+    const payload = val as Record<string, unknown>;
+    const subagentType = payload['subagent_type'] ?? payload['subagentType'];
+    if (typeof subagentType === 'string' && subagentType.length > 0) {
+      return { ghost: true, reason: 'subagent_spawn' };
+    }
   }
 
   return { ghost: false, reason: null };
@@ -148,11 +165,22 @@ export class Watcher {
   private cadenceMs: number;
   private cadenceTimer: ReturnType<typeof setTimeout> | null = null;
   private ghostTriggered = false;
+  private lastActivityLabel: string | null = null;
 
-  constructor(jobId: string, projectName: string, onGhostDetected?: () => void) {
+  private readonly recordEvents: boolean;
+  private readonly inMemoryEvents: Array<{ ts: string; kind: string; text: string | null }> =
+    [];
+
+  constructor(
+    jobId: string,
+    projectName: string,
+    onGhostDetected?: () => void,
+    recordEvents = true,
+  ) {
     this.jobId = jobId;
     this.projectName = projectName;
     this.onGhostDetected = onGhostDetected ?? null;
+    this.recordEvents = recordEvents;
     this.summary = {
       filesRead: [],
       filesWritten: [],
@@ -171,6 +199,27 @@ export class Watcher {
     this.listeners.push(cb);
   }
 
+  /** Recent progress lines (in-memory when recordEvents is false). */
+  getRecentProgress(limit = 12): Array<{ ts: string; kind: string; text: string | null }> {
+    return this.inMemoryEvents.slice(-limit);
+  }
+
+  private trackEvent(kind: string, payload?: unknown): void {
+    let text: string | null = null;
+    if (payload !== undefined) {
+      try {
+        text = typeof payload === 'string' ? payload : JSON.stringify(payload);
+      } catch {
+        text = String(payload);
+      }
+    }
+    this.inMemoryEvents.push({ ts: new Date().toISOString(), kind, text });
+    if (this.inMemoryEvents.length > 40) this.inMemoryEvents.shift();
+    if (this.recordEvents) {
+      addJobEvent(this.jobId, kind as import('../state/jobs.js').JobEventKind, payload);
+    }
+  }
+
   /** Process one parsed stream-json event. */
   process(event: StreamJsonEvent): void {
     this.summary.elapsedMs = Date.now() - this.summary.startedAt.getTime();
@@ -178,7 +227,7 @@ export class Watcher {
     // ── system:init ────────────────────────────────────────────────────
     if (event.type === 'system' && 'subtype' in event && event.subtype === 'init') {
       log.debug({ jobId: this.jobId, sessionId: event.session_id }, 'job started');
-      addJobEvent(this.jobId, 'system_init', { sessionId: event.session_id });
+      this.trackEvent('system_init', { sessionId: event.session_id });
       this.emit({
         kind: 'job_started',
         text: `Cursor started working on ${this.projectName}.`,
@@ -187,40 +236,21 @@ export class Watcher {
       return;
     }
 
-    // ── tool_use_start ────────────────────────────────────────────────
+    // ── tool_use_start (legacy) ───────────────────────────────────────
     if (event.type === 'assistant' && 'subtype' in event && event.subtype === 'tool_use_start') {
-      const toolCall = (event as { type: 'assistant'; subtype: 'tool_use_start'; tool_call: Record<string, unknown> }).tool_call;
+      this.handleToolCallStart(
+        (event as { type: 'assistant'; subtype: 'tool_use_start'; tool_call: Record<string, unknown> })
+          .tool_call,
+      );
+      return;
+    }
 
-      const ghost = isGhostToolCall(toolCall);
-      if (ghost.ghost && !this.ghostTriggered) {
-        this.ghostTriggered = true;
-        this.stopCadenceTicks();
-        const reason = ghost.reason ?? 'subagent';
-        log.warn({ jobId: this.jobId, reason }, 'ghost agent tool detected — killing job');
-        addJobEvent(this.jobId, 'ghost_killed', { reason });
-        this.emit({
-          kind: 'ghost_killed',
-          text: `Stopped — Cursor tried to spawn extra agents (${reason}). Budget protection kicked in.`,
-        });
-        this.onGhostDetected?.();
-        return;
-      }
-
-      const { kind, label, path, cmd } = classifyToolCall(toolCall);
-
-      if (kind === 'write' && path) {
-        this.summary.filesWritten.push(path);
-        addJobEvent(this.jobId, 'file_write', { path });
-        this.emit({ kind: 'file_write', text: `Cursor just wrote ${path}.` });
-      } else if (kind === 'read' && path) {
-        this.summary.filesRead.push(path);
-        addJobEvent(this.jobId, 'file_read', { path });
-        // Reads don't warrant an immediate narration — they're too frequent.
-      } else if (kind === 'shell') {
-        if (cmd) this.summary.shellCommands.push(cmd);
-        addJobEvent(this.jobId, 'shell_run', { cmd, label });
-        this.emit({ kind: 'shell_run', text: `Cursor is running: ${label}.` });
-      }
+    // ── tool_call (current CLI) ───────────────────────────────────────
+    if (event.type === 'tool_call' && 'subtype' in event && event.subtype === 'started') {
+      this.handleToolCallStart(
+        (event as { type: 'tool_call'; subtype: 'started'; tool_call: Record<string, unknown> })
+          .tool_call,
+      );
       return;
     }
 
@@ -232,7 +262,7 @@ export class Watcher {
         filesChanged > 0
           ? `Done — Cursor changed ${filesChanged} file${filesChanged !== 1 ? 's' : ''}. Want to see the diff?`
           : 'Done — Cursor finished with no file changes.';
-      addJobEvent(this.jobId, 'job_done', { summary: doneText });
+      this.trackEvent('job_done', { summary: doneText });
       this.emit({ kind: 'job_done', text: doneText });
       return;
     }
@@ -244,7 +274,7 @@ export class Watcher {
         typeof (event as { type: 'error'; message?: string }).message === 'string'
           ? (event as { type: 'error'; message: string }).message
           : 'an unknown error';
-      addJobEvent(this.jobId, 'job_error', { message: msg });
+      this.trackEvent('job_error', { message: msg });
       this.emit({ kind: 'job_error', text: `Something went wrong. Cursor said: ${msg}` });
       return;
     }
@@ -252,6 +282,7 @@ export class Watcher {
 
   /** Human-readable snapshot of what the agent is doing right now. */
   getActivitySummary(): string {
+    if (this.lastActivityLabel) return this.lastActivityLabel;
     const s = this.getSummary();
     const parts: string[] = [];
     if (s.filesWritten.length > 0) {
@@ -262,13 +293,49 @@ export class Watcher {
       const last = s.shellCommands[s.shellCommands.length - 1];
       parts.push(`last ran ${last}`);
     }
-    if (s.filesRead.length > 0 && parts.length === 0) {
-      parts.push(`read ${s.filesRead.length} file${s.filesRead.length !== 1 ? 's' : ''} so far`);
+    if (s.filesRead.length > 0) {
+      const last = s.filesRead[s.filesRead.length - 1];
+      parts.push(
+        s.filesRead.length === 1 ? `reading ${last}` : `read ${s.filesRead.length} files, last ${last}`,
+      );
     }
     if (parts.length === 0) {
-      return 'Cursor started but no file activity yet.';
+      return 'Cursor CLI is researching the codebase…';
     }
     return parts.join('; ');
+  }
+
+  private handleToolCallStart(toolCall: Record<string, unknown>): void {
+    const ghost = isGhostToolCall(toolCall);
+    if (ghost.ghost && !this.ghostTriggered) {
+      this.ghostTriggered = true;
+      this.stopCadenceTicks();
+      const reason = ghost.reason ?? 'subagent';
+      log.warn({ jobId: this.jobId, reason }, 'ghost agent tool detected — killing job');
+      this.trackEvent('ghost_killed', { reason });
+      this.emit({
+        kind: 'ghost_killed',
+        text: `Stopped — Cursor tried to spawn extra agents (${reason}). Budget protection kicked in.`,
+      });
+      this.onGhostDetected?.();
+      return;
+    }
+
+    const { kind, label, path, cmd } = classifyToolCall(toolCall);
+    this.lastActivityLabel = label;
+
+    if (kind === 'write' && path) {
+      this.summary.filesWritten.push(path);
+      this.trackEvent('file_write', { path });
+      this.emit({ kind: 'file_write', text: `Cursor just wrote ${path}.` });
+    } else if (kind === 'read') {
+      if (path) this.summary.filesRead.push(path);
+      this.trackEvent('file_read', { path: path ?? label });
+    } else if (kind === 'shell') {
+      if (cmd) this.summary.shellCommands.push(cmd);
+      this.trackEvent('shell_run', { cmd, label });
+      this.emit({ kind: 'shell_run', text: `Cursor is running: ${label}.` });
+    }
   }
 
   /** Return a snapshot of the current rolling summary. */

@@ -146,3 +146,28 @@ export function toolResultEvents(
 export function sessionEndEvent(): string {
   return novaEvent({ sessionEnd: {} });
 }
+
+/** Cross-modal status line — Nova speaks it aloud (see prompts/messenger/). */
+export function narrationInputEvents(
+  promptName: string,
+  contentName: string,
+  text: string,
+): string[] {
+  const content = `[Speak to user]: ${text}`;
+  return [
+    novaEvent({
+      contentStart: {
+        promptName,
+        contentName,
+        type: 'TEXT',
+        interactive: true,
+        role: 'USER',
+        textInputConfiguration: { mediaType: 'text/plain' },
+      },
+    }),
+    novaEvent({
+      textInput: { promptName, contentName, content },
+    }),
+    novaEvent({ contentEnd: { promptName, contentName } }),
+  ];
+}

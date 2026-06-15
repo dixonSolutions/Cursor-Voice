@@ -16,14 +16,13 @@
 
 import { z } from 'zod';
 import { readFileSync, existsSync } from 'node:fs';
-import { resolve, dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
 import {
   PROVIDER_IDS,
   getProviderDefinition,
   type ProviderId,
 } from './realtime/provider_keys.js';
-import { DEFAULT_WAKE_WORDS } from './realtime/wakeWords.js';
+import { DEFAULT_SYSTEM_PROMPTS, loadVoiceSystemPrompt } from './state/promptLoader.js';
 import { childLogger } from './log.js';
 
 const log = childLogger('config');
@@ -61,22 +60,22 @@ export const VoiceProviderConfigSchema = z.object({
 
 export const WakeWordsSchema = z.object({
   start: z.string().min(1).max(100),
-  stop: z.string().min(1).max(100),
 });
 
-/** Voice model system prompt — editable in config.json (not hardcoded in session.ts). */
+/** Resolved voice system prompt (loaded from prompts/ at startup). */
 export const VoiceSystemPromptSchema = z.object({
-  /** Template with {{ACTIVATION_RULES}}, {{PROJECT_CATALOG}}, {{WAKE_START}}, {{WAKE_STOP}}. */
+  /** Template with {{ACTIVATION_RULES}}, {{PROJECT_CATALOG}}, {{WAKE_START}}. */
   template: z.string().min(1).max(65_536),
-  /** Activation block with {{WAKE_START}} / {{WAKE_STOP}}; injected into {{ACTIVATION_RULES}}. */
+  /** Activation block with {{WAKE_START}}; injected into {{ACTIVATION_RULES}}. */
   activationRules: z.string().min(1).max(16_384),
 });
 
 export const VoiceSettingsSchema = z.object({
   defaultProvider: z.enum(PROVIDER_IDS),
   providers: z.record(z.enum(PROVIDER_IDS), VoiceProviderConfigSchema),
-  wakeWords: WakeWordsSchema.default(DEFAULT_WAKE_WORDS),
-  systemPrompt: VoiceSystemPromptSchema,
+  wakeWords: WakeWordsSchema,
+  /** Paths to prompt manifests, relative to config.json (see prompts/systemprompts.json). */
+  systemPrompts: z.array(z.string().min(1)).min(1).default(['prompts/systemprompts.json']),
 });
 
 // ── Run mode (test vs serve) ────────────────────────────────────────────────
@@ -85,7 +84,7 @@ export const RUN_MODES = ['test', 'serve'] as const;
 export type RunMode = (typeof RUN_MODES)[number];
 
 const TestRunModeSchema = z.object({
-  backendPort: z.number().int().min(1024).max(65535).default(8000),
+  backendPort: z.number().int().min(1024).max(65535).default(3000),
   webPort: z.number().int().min(1024).max(65535).default(4200),
 });
 
@@ -155,9 +154,15 @@ export type VoiceModel = z.infer<typeof VoiceModelSchema>;
 export type WakeWords = z.infer<typeof WakeWordsSchema>;
 export type VoiceSystemPrompt = z.infer<typeof VoiceSystemPromptSchema>;
 export type VoiceProviderConfig = z.infer<typeof VoiceProviderConfigSchema>;
-export type VoiceSettings = z.infer<typeof VoiceSettingsSchema>;
+export type VoiceSettingsInput = z.infer<typeof VoiceSettingsSchema>;
+export type VoiceSettings = VoiceSettingsInput & {
+  /** Populated at load time from systemPrompts manifests — not stored in config.json. */
+  systemPrompt: VoiceSystemPrompt;
+};
 export type RunModes = z.infer<typeof RunModesSchema>;
-export type Settings = z.infer<typeof SettingsSchema>;
+export type Settings = Omit<z.infer<typeof SettingsSchema>, 'voice'> & {
+  voice: VoiceSettings;
+};
 export type ProjectConfig = z.infer<typeof ProjectConfigSchema>;
 export type ConfigFile = z.infer<typeof ConfigFileSchema>;
 
@@ -165,21 +170,6 @@ export interface AppConfig {
   env: AppEnv;
   settings: Settings;
   projects: ProjectConfig[];
-}
-
-// ── Voice prompt defaults (config/voice-system-prompt.json — not in session.ts) ─
-
-const _moduleDir = dirname(fileURLToPath(import.meta.url));
-const VOICE_PROMPT_DEFAULTS_PATH = join(_moduleDir, '..', 'config', 'voice-system-prompt.json');
-
-export function loadDefaultVoiceSystemPrompt(): VoiceSystemPrompt {
-  if (!existsSync(VOICE_PROMPT_DEFAULTS_PATH)) {
-    throw new Error(
-      `Missing ${VOICE_PROMPT_DEFAULTS_PATH} — required for voice systemPrompt defaults`,
-    );
-  }
-  const raw = JSON.parse(readFileSync(VOICE_PROMPT_DEFAULTS_PATH, 'utf-8')) as unknown;
-  return VoiceSystemPromptSchema.parse(raw);
 }
 
 // ── Migration ─────────────────────────────────────────────────────────────────
@@ -206,51 +196,34 @@ function migrateRawConfig(raw: unknown): unknown {
   const s = settings as Record<string, unknown>;
   if ('voice' in s && s['voice'] !== undefined) {
     const voice = s['voice'] as Record<string, unknown>;
-    if (!voice['wakeWords']) {
-      voice['wakeWords'] = { ...DEFAULT_WAKE_WORDS };
+    if (typeof voice['wakeWords'] === 'object' && voice['wakeWords'] !== null) {
+      const ww = voice['wakeWords'] as Record<string, unknown>;
+      delete ww['stop'];
     }
-    if (!voice['systemPrompt']) {
-      voice['systemPrompt'] = loadDefaultVoiceSystemPrompt();
+    if (!voice['wakeWords'] || typeof voice['wakeWords'] !== 'object') {
+      throw new Error(
+        'config.json must include settings.voice.wakeWords.start — see config.example.json',
+      );
+    }
+    if ('systemPrompt' in voice) {
+      delete voice['systemPrompt'];
+      log.info('Migrated legacy inline settings.voice.systemPrompt → settings.voice.systemPrompts');
+    }
+    if (!voice['systemPrompts']) {
+      voice['systemPrompts'] = [...DEFAULT_SYSTEM_PROMPTS];
     }
     return raw;
   }
 
-  const legacy = LegacySettingsSchema.safeParse(s);
-  const legacyProvider = legacy.success ? legacy.data.voiceProvider : undefined;
-  const legacyModel = legacy.success ? legacy.data.realtimeModel : undefined;
-
-  const providerId: ProviderId =
-    legacyProvider === 'gemini' ? 'gemini' : 'openai';
-
-  const voice: VoiceSettings = {
-    defaultProvider: providerId,
-    providers: {
-      [providerId]: seedProviderConfig(providerId, legacyModel),
-    },
-    wakeWords: { ...DEFAULT_WAKE_WORDS },
-    systemPrompt: loadDefaultVoiceSystemPrompt(),
-  };
-
-  const { voiceProvider: _vp, realtimeModel: _rm, ...rest } = s;
-  void _vp;
-  void _rm;
-  return {
-    ...obj,
-    settings: {
-      ...rest,
-      voice,
-    },
-  };
+  throw new Error(
+    'Missing settings.voice in config.json — see config.example.json (include wakeWords.start).',
+  );
 }
 
-function defaultVoiceSettings(): VoiceSettings {
+function resolveVoiceSettings(configPath: string, voice: VoiceSettingsInput): VoiceSettings {
   return {
-    defaultProvider: 'openai',
-    providers: {
-      openai: seedProviderConfig('openai'),
-    },
-    wakeWords: { ...DEFAULT_WAKE_WORDS },
-    systemPrompt: loadDefaultVoiceSystemPrompt(),
+    ...voice,
+    systemPrompt: loadVoiceSystemPrompt(configPath, voice.systemPrompts),
   };
 }
 
@@ -295,13 +268,14 @@ function loadFromDisk(): AppConfig {
 
   const configFile = cfgResult.data;
 
-  if (!configFile.settings.voice) {
-    configFile.settings.voice = defaultVoiceSettings();
-  }
+  const voice = resolveVoiceSettings(configPath, configFile.settings.voice);
 
   return {
     env,
-    settings: configFile.settings,
+    settings: {
+      ...configFile.settings,
+      voice,
+    },
     projects: configFile.projects,
   };
 }

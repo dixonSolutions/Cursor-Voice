@@ -8,10 +8,8 @@
 
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
-import fastifyStatic from '@fastify/static';
 import fastifyWebsocket from '@fastify/websocket';
 import { resolve } from 'node:path';
-import { existsSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { randomUUID } from 'node:crypto';
@@ -31,6 +29,7 @@ import { mintToken, hasViableVoiceProvider } from './realtime/token.js';
 import { getNarrator, PhoneRelaySession } from './executor/narrator.js';
 import { registerVoiceProviderRoutes } from './routes/voiceProviders.js';
 import { registerBedrockVoiceWebSocket } from './realtime/bedrock/ws.js';
+import { attachDevWebProxy, registerProductionWeb } from './webDispatch.js';
 
 const execFileAsync = promisify(execFile);
 const log = childLogger('server');
@@ -56,8 +55,8 @@ export async function buildServer(): Promise<FastifyInstance> {
   const { settings } = getConfig();
   const run = getRunModeInfo(settings);
 
-  // Test mode: allow cross-origin API calls when the PWA uses an explicit Bridge URL
-  // (e.g. http://127.0.0.1:8000 from http://localhost:4200). WebSocket auth is unaffected.
+  // Test mode: allow cross-origin API calls when the PWA is opened directly on the
+  // Angular dev port (http://localhost:4200) instead of the unified port.
   if (run.useDevWebServer) {
     const devOrigins = new Set([
       run.webUrl,
@@ -82,13 +81,7 @@ export async function buildServer(): Promise<FastifyInstance> {
   await app.register(fastifyWebsocket);
 
   const webDistPath = resolve('web/dist');
-  if (existsSync(webDistPath)) {
-    await app.register(fastifyStatic, {
-      root: webDistPath,
-      prefix: '/',
-      index: 'index.html',
-    });
-  }
+  const isDevelopment = process.env.NODE_ENV === 'development';
 
   // ── Unauthenticated routes ─────────────────────────────────────────────
 
@@ -236,8 +229,8 @@ export async function buildServer(): Promise<FastifyInstance> {
   app.register(async (wsApp) => {
     wsApp.get('/ws/control', { websocket: true }, (socket, _req) => {
       let authenticated = false;
-      // Unique session key per WS connection — used for session state lookup.
-      const sessionKey = randomUUID();
+      // Voice tools share session state on the `default` key (same as /api/active-project).
+      const sessionKey = 'default';
       let relaySession: PhoneRelaySession | null = null;
 
       log.debug({ sessionKey }, 'ws connection attempt');
@@ -329,15 +322,28 @@ export async function buildServer(): Promise<FastifyInstance> {
 
   registerBedrockVoiceWebSocket(app);
 
+  // ── Web dispatch (after /api/* and /ws/* routes) ───────────────────────
+  //
+  // Development: proxy everything else to the Angular dev server (HMR).
+  // Production: serve web/dist with SPA index.html fallback.
+  if (isDevelopment) {
+    attachDevWebProxy(app, run.webPort);
+  } else {
+    await registerProductionWeb(app, webDistPath);
+  }
+
   app.setErrorHandler((err, req, reply) => {
     log.error({ err, url: req.url }, 'unhandled route error');
     reply.code(500).send({ error: 'Internal server error' });
   });
 
-  const webServing = existsSync(webDistPath)
-    ? 'enabled'
-    : 'disabled (run npm run build:web first)';
-  log.info(`static web serving: ${webServing}`);
+  log.info(
+    {
+      webDispatch: isDevelopment ? 'dev-proxy' : 'static',
+      webDistPath: isDevelopment ? null : webDistPath,
+    },
+    'web dispatch configured',
+  );
 
   return app;
 }

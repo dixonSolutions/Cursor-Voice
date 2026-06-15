@@ -19,7 +19,6 @@ import {
   type ProviderId,
 } from './provider_keys.js';
 import { getConfig, reloadConfig, type VoiceProviderConfig, type VoiceSettings, type WakeWords } from '../config.js';
-import { DEFAULT_WAKE_WORDS } from './wakeWords.js';
 import { isProviderViable, getProviderKeyStatus } from '../state/envFile.js';
 import { readConfigFile, writeConfigFile } from '../state/configFile.js';
 import { resetVoiceProvider } from './token.js';
@@ -137,7 +136,7 @@ export function getVoiceProvidersView(): VoiceProvidersResponse {
 
   return {
     defaultProvider: voice.defaultProvider,
-    wakeWords: voice.wakeWords ?? DEFAULT_WAKE_WORDS,
+    wakeWords: voice.wakeWords,
     catalog: getCatalog(),
     providers,
     availableToRegister,
@@ -285,17 +284,18 @@ export function removeProviderModel(id: string, modelId: string): VoiceProviders
 
 const WakeWordsBodySchema = z.object({
   start: z.string().min(1).max(100),
-  stop: z.string().min(1).max(100),
 });
 
 export function setWakeWords(raw: unknown): VoiceProvidersResponse {
   const parsed = WakeWordsBodySchema.safeParse(raw);
-  if (!parsed.success) throw new Error('Invalid wake words — start and stop are required');
+  if (!parsed.success) throw new Error('Invalid wake phrase — start is required');
 
-  const { start, stop } = parsed.data;
+  const startTrim = parsed.data.start.trim();
+  if (!startTrim) throw new Error('Activation phrase cannot be empty');
+
   persistVoiceUpdate((voice) => {
-    voice.wakeWords = { start: start.trim(), stop: stop.trim() };
-  }, `wake words → start="${start.trim()}" stop="${stop.trim()}"`);
+    voice.wakeWords = { start: startTrim };
+  }, `wake phrase → start="${startTrim}"`);
 
   return getVoiceProvidersView();
 }

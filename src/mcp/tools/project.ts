@@ -91,9 +91,16 @@ export function handleSetProject(
   const resolved = resolveProject(args.project);
 
   if (!resolved) {
-    const available = listProjects().map((p) => `"${p.name}"`).join(', ');
+    const available = listProjects()
+      .map((p) => {
+        const aliasHint =
+          p.aliases.length > 0 ? ` (say "${p.aliases[0]}" or "${p.name}")` : '';
+        return `"${p.name}"${aliasHint}`;
+      })
+      .join(', ');
     throw new Error(
-      `Project "${args.project}" not found. Available: ${available || 'none registered'}.`,
+      `Project "${args.project}" not found. Available: ${available || 'none registered'}. ` +
+        'Speech may mishear "cursor" as "casa" — try the exact name from the list.',
     );
   }
 
@@ -121,7 +128,7 @@ export function resolveProjectOrThrow(
 
   if (!input) {
     throw new Error(
-      'No active project set. Use cursor_set_project first, or specify `project` in this call.',
+      'No active project. The user must select a project in the app dropdown before starting voice.',
     );
   }
 

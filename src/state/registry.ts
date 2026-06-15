@@ -14,6 +14,7 @@ import { existsSync } from 'node:fs';
 import { getDb } from './db.js';
 import { getConfig, type ProjectConfig } from '../config.js';
 import { childLogger } from '../log.js';
+import { foldedProjectMatch, projectMatchScore } from './projectMatch.js';
 
 const log = childLogger('registry');
 
@@ -151,6 +152,7 @@ export function listProjects(): Omit<Project, 'path'>[] {
  *   1. Exact name match (case-insensitive).
  *   2. Exact alias match (case-insensitive).
  *   3. Fuzzy/contains fallback on name + aliases (returns null on multiple matches).
+ *   4. STT-normalized fold (e.g. "casa voice" → cursorvoice).
  */
 export function resolveProject(input: string): Project | null {
   const db = getDb();
@@ -169,13 +171,29 @@ export function resolveProject(input: string): Project | null {
   const byAlias = projects.find((p) => p.aliases.some((a) => a.toLowerCase() === norm));
   if (byAlias) return byAlias;
 
-  // Pass 3: fuzzy contains (name or any alias contains the input)
+  // Pass 3: STT-normalized fold (casa voice → cursorvoice)
+  const byFold = projects.filter((p) => foldedProjectMatch(norm, p.name, p.aliases));
+  if (byFold.length === 1) return byFold[0] ?? null;
+
+  // Pass 4: fuzzy contains (name or any alias contains the input)
   const fuzzy = projects.filter(
     (p) =>
       p.name.toLowerCase().includes(norm) ||
       p.aliases.some((a) => a.toLowerCase().includes(norm)),
   );
   if (fuzzy.length === 1) return fuzzy[0] ?? null;
+
+  // Pass 5: best single match by similarity score (STT typos)
+  if (projects.length > 0) {
+    const scored = projects
+      .map((p) => ({ p, score: projectMatchScore(norm, p.name, p.aliases) }))
+      .filter((x) => x.score >= 0.72)
+      .sort((a, b) => b.score - a.score);
+    if (scored.length === 1) return scored[0]!.p;
+    if (scored.length > 1 && scored[0]!.score - scored[1]!.score >= 0.12) {
+      return scored[0]!.p;
+    }
+  }
 
   return null;
 }

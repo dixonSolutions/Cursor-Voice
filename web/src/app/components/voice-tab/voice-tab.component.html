@@ -1,4 +1,4 @@
-<p-card header="Push to talk">
+<p-card header="Voice">
   <p-fluid>
     <p-iftalabel>
       <p-select
@@ -21,70 +21,72 @@
         @if (activeModelLabel(); as model) {
           <p-tag [value]="model" severity="secondary" />
         }
-        <span class="cv-voice-summary-hint">Change in Providers &amp; Models.</span>
       </div>
+      <p-message
+        severity="secondary"
+        variant="simple"
+        text="Research runs via headless cursor-agent CLI on this machine — not the Cursor IDE Agents sidebar." />
     } @else {
       <p-message
         severity="warn"
         variant="simple"
-        text="No voice provider configured. Add keys and register a provider under Providers &amp; Models." />
+        text="No voice provider configured. Add keys under Providers &amp; Models." />
     }
 
-    <p-toolbar [style]="{ border: 'none', background: 'transparent', padding: '0.5rem 0 1rem' }">
-      <ng-template #center>
-        <p-button
-          [icon]="pttIcon()"
-          [attr.aria-label]="pttAriaLabel()"
-          [loading]="voiceSession.sessionConnecting()"
-          [rounded]="true"
-          size="large"
-          [severity]="pttSeverity()"
-          [outlined]="appState.state() === 'idle'"
-          [disabled]="pttDisabled()"
-          [style]="{
-            width: '8.5rem',
-            height: '8.5rem',
-            'border-radius': '50%',
-            padding: '0'
-          }"
-          (onClick)="handlePtt()" />
-      </ng-template>
-    </p-toolbar>
-
-    <p-message severity="secondary" variant="simple" [text]="wakeHint()" />
+    <div
+      class="cv-voice-orb-stage"
+      [class.cv-voice-orb-stage--session]="
+        voiceSession.conversationActive() || voiceSession.sessionConnecting()
+      ">
+      @if (voiceSession.toolActivity(); as tool) {
+        <div
+          class="cv-voice-tool-activity"
+          [class.cv-voice-tool-activity--active]="tool.phase === 'start'"
+          [class.cv-voice-tool-activity--error]="tool.phase === 'error'">
+          <span class="cv-voice-tool-activity-kicker">Live</span>
+          <span class="cv-voice-tool-activity-label">{{ tool.label }}</span>
+        </div>
+      }
+      <button
+        type="button"
+        class="cv-voice-orb-btn"
+        [attr.aria-label]="pttAriaLabel()"
+        [disabled]="pttDisabled()"
+        (click)="handlePtt()">
+        <cv-voice-orb
+          [spectrum]="voiceSession.audioSpectrum()"
+          [live]="voiceSession.conversationActive()"
+          [dimmed]="pttDisabled()"
+          [expanded]="
+            voiceSession.conversationActive() || voiceSession.sessionConnecting()
+          " />
+      </button>
+      <p class="cv-voice-orb-caption">{{ orbStateLabel() }}</p>
+      <p class="cv-voice-orb-hint">{{ wakeHint() }}</p>
+    </div>
   </p-fluid>
 </p-card>
 
-<p-card header="Wake words">
+<p-card header="Activation phrase">
   <p-fluid>
     <p-message
       severity="secondary"
       variant="simple"
-      text="Start phrase activates listening; stop phrase pauses listening (session stays open). Tap mic to hang up." />
+      text="Say this phrase to activate the assistant after tapping the orb. Only tapping the orb ends the call — no spoken stop word." />
 
-    <p-fieldset legend="Phrases">
+    <p-fieldset legend="Phrase">
       <p-iftalabel>
         <input
           pInputText
           id="wake-start"
           [(ngModel)]="wakeStart"
-          placeholder="cursor listen"
+          placeholder="From config.json"
           [disabled]="!isBridgeConnected()" />
-        <label for="wake-start">Start (activate)</label>
-      </p-iftalabel>
-
-      <p-iftalabel>
-        <input
-          pInputText
-          id="wake-stop"
-          [(ngModel)]="wakeStop"
-          placeholder="cursor stop"
-          [disabled]="!isBridgeConnected()" />
-        <label for="wake-stop">Stop (end session)</label>
+        <label for="wake-start">Activation phrase</label>
       </p-iftalabel>
 
       <p-button
-        label="Save wake words"
+        label="Save activation phrase"
         icon="pi pi-save"
         [loading]="savingWakeWords"
         [disabled]="!isBridgeConnected()"

@@ -75,8 +75,8 @@ export function buildArgs(opts: SpawnOptions): string[] {
     args.push('--model', session.activeModel);
   }
 
-  // Resume session if one exists for this project.
-  if (project.resumeId && !oneShot) {
+  // Resume session for submit jobs only — ask mode always starts fresh research.
+  if (project.resumeId && !oneShot && mode !== 'ask') {
     args.push('--resume', project.resumeId);
   }
 

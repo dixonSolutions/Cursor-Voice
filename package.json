@@ -7,15 +7,15 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "tsup && npm run build:web",
-    "build:bridge": "tsup",
-    "build:web": "ng build cursor-voice-web",
-    "dev": "tsx watch src/index.ts",
+    "build": "npm run build:backend && npm run build:web",
+    "build:backend": "tsup",
+    "build:web": "ng build cursor-voice-web --configuration production",
+    "dev": "NODE_ENV=development concurrently -n web,server -c cyan,magenta \"ng serve cursor-voice-web\" \"nodemon\"",
     "dev:web": "ng serve cursor-voice-web",
     "gen-icons": "node scripts/gen-icons.mjs",
     "lint": "eslint src web/src",
     "typecheck": "tsc --noEmit && npx tsc --noEmit -p web/tsconfig.app.json",
-    "start": "node dist/index.js"
+    "start": "NODE_ENV=production node dist/index.js"
   },
   "dependencies": {
     "@angular/animations": "^22.0.1",
@@ -47,8 +47,12 @@
     "@angular/cli": "^22.0.1",
     "@angular/compiler-cli": "^22.0.1",
     "@types/better-sqlite3": "^7.0.0",
+    "@types/http-proxy": "^1.17.16",
     "@types/node": "^22.0.0",
+    "concurrently": "^9.2.1",
     "eslint": "^9.0.0",
+    "http-proxy": "^1.18.1",
+    "nodemon": "^3.1.11",
     "pino-pretty": "^11.0.0",
     "tsup": "^8.0.0",
     "tsx": "^4.0.0",

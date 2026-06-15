@@ -5,14 +5,21 @@
  * and InvokeModelWithBidirectionalStream on the server.
  */
 
-import { unlockAudioContext } from './audio.js';
+import {
+  unlockAudioContext,
+  captureMicStream,
+  createMicProcessingChain,
+  applyMicNoiseGate,
+  getSharedAudioContext,
+  type MicProcessingChain,
+} from './audio.js';
+import { getVoiceAudioMeter } from './voice-audio-meter.js';
 import type { SessionCallbacks } from './webrtc.js';
 import {
-  DEFAULT_WAKE_WORDS,
   isStartPhrase,
-  isStopPhrase,
   type WakeWords,
 } from './wake-words.js';
+import { speakTtsNow, stopAllTts } from './tts-fallback.js';
 
 export type VoiceTransport = 'webrtc' | 'bedrock_ws';
 
@@ -27,20 +34,25 @@ export interface MintTokenResponse {
 
 const INPUT_RATE = 16_000;
 const OUTPUT_RATE = 24_000;
+/** Below this RMS after gating, do not uplink — avoids Bedrock treating HVAC/noise as user speech. */
+const UPLINK_SPEECH_RMS = 0.012;
 
 export class BedrockVoiceSession {
   private ws: WebSocket | null = null;
   private micStream: MediaStream | null = null;
+  private micChain: MicProcessingChain | null = null;
   private audioCtx: AudioContext | null = null;
   private processor: ScriptProcessorNode | null = null;
   private playbackCtx: AudioContext | null = null;
   private nextPlayTime = 0;
   private closed = false;
-  private wakeWords: WakeWords = DEFAULT_WAKE_WORDS;
-  private _serverDeactivated = false;
+  private wakeWords: WakeWords = { start: '' };
+  /** Drop mic uplink until wake phrase; while assistant speaks; or when input is only noise. */
+  private voiceActivated = false;
   /** Drop mic uplink while assistant audio is playing (prevents TTS echo loops). */
   private serverSpeaking = false;
   private playbackEndTimer: ReturnType<typeof setTimeout> | null = null;
+  private playbackBus: GainNode | null = null;
 
   constructor(
     private readonly bridgeBase: string,
@@ -51,17 +63,31 @@ export class BedrockVoiceSession {
   async start(): Promise<void> {
     this.cb.onState('connecting');
     const mint = await this.mintToken();
-    this.wakeWords = mint.wakeWords ?? DEFAULT_WAKE_WORDS;
+    this.wakeWords = mint.wakeWords ?? { start: '' };
 
     await unlockAudioContext();
-    this.micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    this.micStream = await captureMicStream();
     this.playbackCtx = new AudioContext({ sampleRate: OUTPUT_RATE });
+    if (this.playbackCtx.state === 'suspended') {
+      await this.playbackCtx.resume();
+    }
+    this.playbackBus = this.playbackCtx.createGain();
+    const meter = getVoiceAudioMeter();
+    const outTap = meter.tapPlayback(this.playbackCtx, this.playbackBus);
+    outTap.connect(this.playbackCtx.destination);
 
     const wsUrl = `${this.bridgeBase.replace(/^http/, 'ws')}/ws/voice`;
     this.ws = new WebSocket(wsUrl);
 
     await new Promise<void>((resolve, reject) => {
       const ws = this.ws!;
+      let settled = false;
+      const finish = (fn: () => void) => {
+        if (settled) return;
+        settled = true;
+        fn();
+      };
+
       ws.addEventListener('open', () => {
         ws.send(
           JSON.stringify({
@@ -71,10 +97,24 @@ export class BedrockVoiceSession {
           }),
         );
       });
-      ws.addEventListener('message', (ev) => this.handleMessage(ev.data as string, resolve));
-      ws.addEventListener('error', () => reject(new Error('Bedrock voice WebSocket error')));
-      ws.addEventListener('close', () => {
+      ws.addEventListener('message', (ev) =>
+        this.handleMessage(ev.data as string, {
+          onConnected: () => finish(resolve),
+          onError: (message) => finish(() => reject(new Error(message))),
+        }),
+      );
+      ws.addEventListener('error', () =>
+        finish(() => reject(new Error('Bedrock voice WebSocket error'))),
+      );
+      ws.addEventListener('close', (ev) => {
         if (!this.closed) this.cb.onClosed();
+        finish(() =>
+          reject(
+            new Error(
+              ev.reason?.trim() || `Bedrock voice WebSocket closed (${ev.code})`,
+            ),
+          ),
+        );
       });
     });
 
@@ -91,16 +131,20 @@ export class BedrockVoiceSession {
     this.micStream = null;
     this.processor?.disconnect();
     this.processor = null;
+    this.micChain?.dispose();
+    this.micChain = null;
     if (this.playbackEndTimer) clearTimeout(this.playbackEndTimer);
     this.playbackEndTimer = null;
     void this.audioCtx?.close();
     this.audioCtx = null;
     void this.playbackCtx?.close();
     this.playbackCtx = null;
+    this.playbackBus = null;
   }
 
-  injectNarration(_text: string): void {
-    // Nova Sonic narration injection via bridge control WS — future hook.
+  injectNarration(text: string): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN || !text.trim()) return;
+    this.ws.send(JSON.stringify({ type: 'narration', content: text.trim() }));
   }
 
   private async mintToken(): Promise<MintTokenResponse> {
@@ -118,7 +162,10 @@ export class BedrockVoiceSession {
     return res.json() as Promise<MintTokenResponse>;
   }
 
-  private handleMessage(raw: string, onConnected: () => void): void {
+  private handleMessage(
+    raw: string,
+    hooks: { onConnected: () => void; onError: (message: string) => void },
+  ): void {
     let msg: Record<string, unknown>;
     try {
       msg = JSON.parse(raw) as Record<string, unknown>;
@@ -129,29 +176,31 @@ export class BedrockVoiceSession {
     switch (msg['type']) {
       case 'connected':
         this.cb.onState('connected');
-        onConnected();
+        hooks.onConnected();
         break;
       case 'user_transcript':
         if (typeof msg['text'] === 'string') {
           const text = msg['text'];
           this.cb.onUserTranscript(text);
           if (isStartPhrase(text, this.wakeWords.start)) {
+            this.voiceActivated = true;
             this.cb.onActivated?.(this.wakeWords.start);
           }
-          if (isStopPhrase(text, this.wakeWords.stop)) {
-            // Server also emits deactivated — avoid duplicate handling.
-            if (!this._serverDeactivated) {
-              this.cb.onDeactivated?.(this.wakeWords.stop);
-            }
-            this._serverDeactivated = false;
-          }
+        }
+        break;
+      case 'speak':
+        if (typeof msg['text'] === 'string') {
+          speakTtsNow(msg['text']);
         }
         break;
       case 'assistant_transcript':
         if (typeof msg['text'] === 'string') this.cb.onAssistantTranscript(msg['text']);
         break;
       case 'audio_out':
-        if (typeof msg['content'] === 'string') this.playPcmBase64(msg['content']);
+        if (typeof msg['content'] === 'string') {
+          stopAllTts();
+          this.playPcmBase64(msg['content']);
+        }
         break;
       case 'speaking':
         if (typeof msg['value'] === 'boolean') {
@@ -164,34 +213,51 @@ export class BedrockVoiceSession {
         }
         break;
       case 'working':
-        if (typeof msg['value'] === 'boolean') this.cb.onWorking(msg['value']);
-        break;
-      case 'deactivated':
-        this._serverDeactivated = true;
-        this.cb.onDeactivated?.(
-          typeof msg['phrase'] === 'string' ? msg['phrase'] : this.wakeWords.stop,
-        );
+        if (typeof msg['value'] === 'boolean') {
+          this.cb.onWorking(msg['value']);
+        }
         break;
       case 'error':
         this.cb.onState('error');
+        hooks.onError(
+          typeof msg['message'] === 'string' ? msg['message'] : 'Voice connection failed',
+        );
+        break;
+      case 'tool_activity':
+        if (typeof msg['tool'] === 'string' && typeof msg['label'] === 'string') {
+          const phase = msg['phase'];
+          if (phase === 'start' || phase === 'done' || phase === 'error') {
+            this.cb.onToolActivity?.({
+              tool: msg['tool'],
+              phase,
+              label: msg['label'],
+              detail: typeof msg['detail'] === 'string' ? msg['detail'] : undefined,
+            });
+          }
+        }
         break;
     }
   }
 
   private startMicCapture(): void {
     if (!this.micStream) return;
-    this.audioCtx = new AudioContext();
-    const source = this.audioCtx.createMediaStreamSource(this.micStream);
+    this.audioCtx = getSharedAudioContext();
+    this.micChain = createMicProcessingChain(this.micStream);
     this.processor = this.audioCtx.createScriptProcessor(4096, 1, 1);
     this.processor.onaudioprocess = (ev) => {
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
       if (this.isMicInputBlocked()) return;
       const input = ev.inputBuffer.getChannelData(0);
-      const pcm16 = downsampleTo16k(input, this.audioCtx!.sampleRate);
+      const gated = new Float32Array(input);
+      applyMicNoiseGate(this.micChain!, gated);
+      if (computeRms(gated) < UPLINK_SPEECH_RMS) return;
+      const pcm16 = downsampleTo16k(gated, this.audioCtx!.sampleRate);
       const b64 = pcm16ToBase64(pcm16);
       this.ws.send(JSON.stringify({ type: 'audio', content: b64 }));
     };
-    source.connect(this.processor);
+    const meter = getVoiceAudioMeter();
+    const micTap = meter.tapMic(this.audioCtx, this.micChain.output);
+    micTap.connect(this.processor);
     this.processor.connect(this.audioCtx.destination);
   }
 
@@ -207,7 +273,7 @@ export class BedrockVoiceSession {
     buffer.copyToChannel(samples, 0);
     const src = this.playbackCtx.createBufferSource();
     src.buffer = buffer;
-    src.connect(this.playbackCtx.destination);
+    src.connect(this.playbackBus ?? this.playbackCtx.destination);
     const start = Math.max(this.playbackCtx.currentTime, this.nextPlayTime);
     src.start(start);
     this.nextPlayTime = start + buffer.duration;
@@ -216,11 +282,12 @@ export class BedrockVoiceSession {
     this.schedulePlaybackEndCheck();
   }
 
-  /** Block mic while server TTS is active or local playback queue has not drained. */
+  /** Block mic until wake phrase, during assistant playback, or while TTS queue drains. */
   private isMicInputBlocked(): boolean {
+    if (!this.voiceActivated) return true;
     if (this.serverSpeaking) return true;
     if (!this.playbackCtx) return false;
-    return this.nextPlayTime > this.playbackCtx.currentTime + 0.15;
+    return this.nextPlayTime > this.playbackCtx.currentTime + 0.35;
   }
 
   private schedulePlaybackEndCheck(): void {
@@ -244,6 +311,15 @@ export class BedrockVoiceSession {
       this.cb.onSpeaking(false);
     }, delayMs);
   }
+}
+
+function computeRms(samples: Float32Array): number {
+  let sumSq = 0;
+  for (let i = 0; i < samples.length; i++) {
+    const s = samples[i] ?? 0;
+    sumSq += s * s;
+  }
+  return Math.sqrt(sumSq / Math.max(samples.length, 1));
 }
 
 function downsampleTo16k(input: Float32Array, inputRate: number): Int16Array {

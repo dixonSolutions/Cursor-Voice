@@ -1,34 +1,16 @@
 /**
- * Standing instructions prepended to every cursor-agent job prompt.
- * Kept in one module so guardrails stay consistent and easy to tune.
+ * Standing instructions prepended to cursor-agent prompts.
+ * Keep minimal — Cursor handles the work; we only pass the user's words through.
  */
 
-/** Budget-safe rules — no subagent spawning, single focused session. */
-export const AGENT_GUARDRAILS = `You are running a single focused coding job via CursorVoice.
-
-MANDATORY:
-- Do NOT use the Task tool or spawn subagents, explore agents, or parallel research sessions.
-- Read files and implement directly in this session only.
-- Ask clarifying questions in your output if something is ambiguous — do not spawn helpers.
-- Keep changes minimal and scoped to the request.
+/** Submit jobs — block budget-burning Task/subagent spawns (watcher enforces too). */
+export const AGENT_GUARDRAILS = `Do not use the Task tool or spawn subagents. Work in this session only.
 
 USER REQUEST:`;
 
-/** Read-only ask — answer in this session; CLI Task schema lacks explore/subagent types. */
-export const ASK_GUARDRAILS = `You are answering a read-only question via CursorVoice.
+/** Ask — pass the question through; no extra rules for Cursor. */
+export const ASK_GUARDRAILS = `QUESTION:`;
 
-MANDATORY:
-- Answer directly in this session — read files with your own tools as needed.
-- Do NOT use the Task tool or spawn subagents (explore, generalPurpose, etc.).
-- If you must delegate, use subagent_type generalPurpose only — never explore.
-- Keep the answer concise and factual.
-
-QUESTION:`;
-
-/**
- * Wrap the caller's prompt with guardrails.
- * Replaces the old "make reasonable assumptions" preamble that caused budget-burning ghost agents.
- */
 export function buildAgentPrompt(userPrompt: string): string {
   return `${AGENT_GUARDRAILS}\n\n${userPrompt.trim()}`;
 }

@@ -6,13 +6,17 @@
 
 import { getJob, getJobEvents } from '../../state/jobs.js';
 import {
-  getActiveJobActivity,
+  getActiveCursorActivity,
   getActiveJobIdForSession,
   getJobRunAgeMs,
   JOB_STOP_GRACE_MS,
   stopJob,
 } from '../../executor/jobManager.js';
 import { getActiveAgentRun } from '../../executor/agentSingleton.js';
+import { getSessionState } from '../../state/registry.js';
+import { childLogger } from '../../log.js';
+
+const log = childLogger('tool:job');
 
 // ── cursor_status ─────────────────────────────────────────────────────────
 
@@ -35,25 +39,89 @@ export interface StatusResult {
   summary: string | null;
   /** What Cursor is doing right now (live, for running jobs). */
   activity: string | null;
+  /** Headless cursor-agent process id when running. */
+  cli_pid?: number | null;
   diffstat: string | null;
   error: string | null;
   started_at: string;
   finished_at: string | null;
   progress: ProgressEntry[];
+  /** True when returned from cache — do not speak aloud again. */
+  rate_limited?: boolean;
 }
 
-function resolveJobId(args: StatusArgs, sessionKey: string): string {
-  const jobId = args.job_id ?? getActiveJobIdForSession(sessionKey);
-  if (!jobId) {
-    throw new Error(
-      'No active job. Pass job_id or start work with cursor_submit first.',
-    );
-  }
-  return jobId;
+function resolveJobId(args: StatusArgs, sessionKey: string): string | null {
+  return args.job_id ?? getActiveJobIdForSession(sessionKey);
 }
+
+function syntheticStatus(status: string, activity: string): StatusResult {
+  return {
+    job_id: '',
+    status,
+    project: '',
+    model: null,
+    session_id: null,
+    summary: null,
+    activity,
+    diffstat: null,
+    error: null,
+    started_at: new Date().toISOString(),
+    finished_at: null,
+    progress: [],
+  };
+}
+
+const STATUS_MIN_INTERVAL_MS = 20_000;
+const lastStatusBySession = new Map<string, { at: number; result: StatusResult }>();
 
 export function handleCursorStatus(args: StatusArgs, sessionKey: string): StatusResult {
+  const active = getActiveAgentRun();
+  if (active?.kind === 'ask' && active.sessionKey === sessionKey) {
+    const cached = lastStatusBySession.get(sessionKey);
+    if (cached && Date.now() - cached.at < STATUS_MIN_INTERVAL_MS) {
+      return {
+        ...cached.result,
+        activity:
+          `${cached.result.activity ?? 'Still researching.'} ` +
+          `(checked ${Math.round((Date.now() - cached.at) / 1000)}s ago — wait before calling again)`,
+        rate_limited: true,
+      };
+    }
+    const session = getSessionState(sessionKey);
+    const activity =
+      getActiveCursorActivity(sessionKey) ?? 'Cursor is researching your question.';
+    const progress = (active.watcher?.getRecentProgress() ?? []).map((e) => ({
+      ts: e.ts,
+      kind: e.kind,
+      text: e.text,
+    }));
+    const result: StatusResult = {
+      job_id: 'ask',
+      status: 'asking',
+      project: session.activeProject ?? '',
+      model: session.activeModel,
+      session_id: null,
+      summary: null,
+      activity,
+      cli_pid: active.pid,
+      diffstat: null,
+      error: null,
+      started_at:
+        active.watcher?.getSummary().startedAt.toISOString() ?? new Date().toISOString(),
+      finished_at: null,
+      progress,
+    };
+    lastStatusBySession.set(sessionKey, { at: Date.now(), result });
+    return result;
+  }
+
   const jobId = resolveJobId(args, sessionKey);
+  if (!jobId) {
+    return syntheticStatus(
+      'idle',
+      'Nothing is running. cursor_ask and cursor_submit both report live progress while active.',
+    );
+  }
   const job = getJob(jobId);
   if (!job) {
     throw new Error(`Job "${jobId}" not found.`);
@@ -81,7 +149,7 @@ export function handleCursorStatus(args: StatusArgs, sessionKey: string): Status
   });
 
   const activity =
-    job.status === 'running' ? getActiveJobActivity(sessionKey) : null;
+    job.status === 'running' ? getActiveCursorActivity(sessionKey) : null;
 
   return {
     job_id: job.id,
@@ -141,6 +209,9 @@ export function handleCursorStop(args: StopArgs, sessionKey: string): StopResult
     }
 
     const stopped = stopJob(jobId);
+    if (stopped) {
+      log.info({ jobId, sessionKey }, 'cursor_stop invoked — job killed');
+    }
     return {
       status: stopped ? 'stopped' : 'not_running',
       job_id: jobId,

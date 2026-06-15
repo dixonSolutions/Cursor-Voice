@@ -19,12 +19,22 @@ export interface ActiveAgentRun {
   sessionKey: string;
   pid: number;
   handle: AgentHandle;
+  /** Live stream watcher (cursor_ask and cursor_submit). */
+  watcher?: import('./watcher.js').Watcher;
 }
 
 let active: ActiveAgentRun | null = null;
 
 export function getActiveAgentRun(): Readonly<ActiveAgentRun> | null {
   return active;
+}
+
+/** Human-readable snapshot of what cursor-agent is doing right now, if any. */
+export function getActiveAgentActivity(): string | null {
+  if (!active?.watcher) return null;
+  const summary = active.watcher.getSummary();
+  const elapsedSec = Math.round((Date.now() - summary.startedAt.getTime()) / 1000);
+  return `${active.watcher.getActivitySummary()} (${elapsedSec}s elapsed)`;
 }
 
 export function isAgentBusy(): boolean {
@@ -37,7 +47,7 @@ export function assertAgentAvailable(): void {
   const label = active.kind === 'ask' ? 'answering a question' : 'running a job';
   const hint =
     active.kind === 'ask'
-      ? 'Wait for the answer — do not call cursor_stop or retry cursor_ask.'
+      ? 'Wait for the answer — use cursor_status for live progress; do not retry cursor_ask.'
       : 'Wait for it to finish or call cursor_stop to cancel the job.';
   throw new Error(`Cursor is already busy (${label}, pid ${active.pid}). ${hint}`);
 }
@@ -48,6 +58,7 @@ export function registerAgentRun(params: {
   refId: string;
   sessionKey: string;
   handle: AgentHandle;
+  watcher?: import('./watcher.js').Watcher;
 }): void {
   if (active) {
     throw new Error('Agent singleton race — slot already held');
@@ -58,6 +69,7 @@ export function registerAgentRun(params: {
     sessionKey: params.sessionKey,
     pid: params.handle.pid,
     handle: params.handle,
+    watcher: params.watcher,
   };
   log.info(
     { kind: params.kind, refId: params.refId, pid: params.handle.pid },
@@ -67,6 +79,7 @@ export function registerAgentRun(params: {
 
 export function releaseAgentRun(handle: AgentHandle): void {
   if (active?.handle !== handle) return;
+  active.watcher?.destroy();
   log.info({ kind: active.kind, refId: active.refId, pid: active.pid }, 'agent slot released');
   active = null;
 }
@@ -76,6 +89,7 @@ export function killActiveAgent(reason: string): boolean {
   if (!active) return false;
   const { pid, kind, refId } = active;
   log.warn({ pid, kind, refId, reason }, 'killing active cursor-agent');
+  active.watcher?.destroy();
   active.handle.kill();
   active = null;
   return true;

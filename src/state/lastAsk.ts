@@ -24,8 +24,8 @@ export function clearLastAsk(sessionKey: string): void {
   cache.delete(sessionKey);
 }
 
-/** Trim long answers for voice read-back — keeps bullet boundaries when possible. */
-export function truncateForVoice(text: string, maxLen = 1200): string {
+/** Trim long answers for voice tool payloads — full text stays in lastAsk cache. */
+export function truncateForVoice(text: string, maxLen = 450): string {
   const trimmed = text.trim();
   if (trimmed.length <= maxLen) return trimmed;
 

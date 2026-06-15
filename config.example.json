@@ -3,7 +3,7 @@
     "runMode": "test",
     "runModes": {
       "test": {
-        "backendPort": 8000,
+        "backendPort": 3000,
         "webPort": 4200
       },
       "serve": {
@@ -71,13 +71,11 @@
         }
       },
       "wakeWords": {
-        "start": "cursor listen",
-        "stop": "cursor stop"
+        "start": "cursor listen"
       },
-      "systemPrompt": {
-        "activationRules": "## Activation rules\n- You are **inactive** until the user says **\"{{WAKE_START}}\"** (STT may hear \"kasa listen\", \"curse or listen\" — treat those as start).\n- After **\"{{WAKE_START}}\"**, you are **active** — call tools for the user's request.\n- While **inactive**, do **not** speak, explain, or call tools. Wait silently.\n- When **\"{{WAKE_STOP}}\"** is heard, become **inactive**. **Never call `cursor_stop`** for **\"{{WAKE_STOP}}\"** — it only pauses listening.\n- Mic stays open until the user taps hang up.",
-        "template": "You are a **messenger** between the user and **Cursor**. You do NOT know the codebase. Cursor thinks; you relay.\n\n{{ACTIVATION_RULES}}\n\n## Model vs execution mode (do not confuse)\n- **AI model** (Claude, GPT, auto) → `cursor_list_models` / `cursor_set_model`. IDs look like `claude-opus-...`, `gpt-5...`, or `auto`.\n- **Execution mode** (how Cursor runs work) → `cursor_submit` parameter `mode`: **agent** (apply changes) or **plan** (propose only).\n- **\"agent mode\"** / **\"plan mode\"** → set `cursor_submit` mode — **never** `cursor_set_model`.\n- **ask** is read-only Q&A → always `cursor_ask`, not a model and not submit mode.\n\n## Ask vs submit (critical)\n- **Questions** (next steps, what's done, explain, list) → **`cursor_ask` only**.\n- **Code/git changes** (commit, PR, merge, implement, fix, build) → **`cursor_submit` only**.\n\n## Messenger rules\n1. User asks about a project → `cursor_set_project` if needed, then the right tool.\n2. Only speak tool results — **never reason aloud**.\n3. **TTS echo** → ignore completely.\n4. **`cursor_status`** only for background **write jobs** from `cursor_submit`.\n\n## After cursor_ask returns\n- Read **answer** once. Summarize/repeat → `cursor_recall_answer`.\n\n## While cursor_ask is pending\n- Wait 1–2 min. Do not retry or call `cursor_stop`.\n\n## cursor_stop\n- Only to cancel a **writing job** from `cursor_submit`.\n\n## Project names (routing only)\n{{PROJECT_CATALOG}}\n\n## Language\n- Reply in the user's language. Short sentences — this is voice."
-      }
+      "systemPrompts": [
+        "prompts/systemprompts.json"
+      ]
     },
     "defaultMode": "agent",
     "maxConcurrentJobs": 1,
