@@ -8,6 +8,9 @@
 # Local config that may contain private paths (commit config.example.json instead)
 config.json
 
+# Auto-generated MCP registration file (contains token — commit mcp.json.example instead)
+.cursor/mcp.json
+
 # Node
 node_modules/
 dist/
@@ -21,6 +24,10 @@ data/
 *.db
 *.sqlite
 *.sqlite3
+
+# Vosk wake-word model (~50 MB) — run npm run prepare:vosk
+web/public/vosk/model.tar.gz
+web/public/vosk/.download/
 
 # Logs
 logs/

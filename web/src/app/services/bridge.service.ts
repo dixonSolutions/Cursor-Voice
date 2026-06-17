@@ -3,11 +3,61 @@ import { Subject } from 'rxjs';
 
 export type WsStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
+export type WorkflowId = 'cursor_native' | 'llm_intelligence' | 's2s_voice';
+
+export interface AppSettings {
+  workflow: {
+    default: WorkflowId;
+    llmIntelligence: {
+      model: string;
+      region: string;
+    };
+  };
+  wakeWords?: { start: string; end: string };
+  turnSubmit?: { silenceMs: number };
+}
+
 export interface Project {
   name: string;
   description: string | null;
   aliases: string[];
   enabled: boolean;
+}
+
+/** Sentinel value for "start a fresh cursor-agent thread on voice start". */
+export const NEW_CURSOR_SESSION_ID = '__new__';
+
+export interface CursorSessionEntry {
+  session_id: string;
+  last_prompt: string;
+  last_status: string;
+  last_run_at: string;
+  job_count: number;
+}
+
+export interface CursorSessionsResponse {
+  project: string;
+  active_session_id: string | null;
+  sessions: CursorSessionEntry[];
+}
+
+export interface VoiceSessionLogEvent {
+  phase: string;
+  level: 'info' | 'warn' | 'error';
+  message: string;
+  at: string;
+}
+
+export interface VoiceSessionPrepareResult {
+  ok: boolean;
+  project: string;
+  scope?: 'global';
+  message: string;
+  mcpPath?: string;
+  userRoot?: string;
+  hostOs?: string;
+  action?: string;
+  version?: string;
 }
 
 export interface NarrationEvent {
@@ -41,6 +91,7 @@ export class BridgeService {
   readonly apiStatus = signal<'ok' | 'error'>('ok');
   readonly projects = signal<Project[]>([]);
   readonly activeProject = signal<string | null>(null);
+  readonly settings = signal<AppSettings | null>(null);
 
   // ── Narration observable ───────────────────────────────────────────────
 
@@ -181,6 +232,158 @@ export class BridgeService {
     localStorage.setItem('cv_active_project', name);
   }
 
+  async loadCursorSessions(project: string): Promise<CursorSessionsResponse> {
+    const q = new URLSearchParams({ project });
+    return this.apiFetch<CursorSessionsResponse>(`/api/cursor-sessions?${q}`);
+  }
+
+  async selectCursorSession(project: string, sessionId: string): Promise<void> {
+    await this.apiFetch('/api/cursor-sessions/select', {
+      method: 'POST',
+      body: JSON.stringify({ project, session_id: sessionId }),
+    });
+    localStorage.setItem(this._sessionStorageKey(project), sessionId);
+  }
+
+  async createNewCursorSession(
+    project: string,
+  ): Promise<{ active_session_id: string | null; message: string }> {
+    const result = await this.apiFetch<{
+      active_session_id: string | null;
+      message: string;
+    }>('/api/cursor-sessions/new', {
+      method: 'POST',
+      body: JSON.stringify({ project }),
+    });
+    if (result.active_session_id) {
+      localStorage.setItem(this._sessionStorageKey(project), result.active_session_id);
+    } else {
+      localStorage.setItem(this._sessionStorageKey(project), NEW_CURSOR_SESSION_ID);
+    }
+    return result;
+  }
+
+  getStoredCursorSession(project: string): string | null {
+    return localStorage.getItem(this._sessionStorageKey(project));
+  }
+
+  storeCursorSessionPreference(project: string, sessionId: string): void {
+    localStorage.setItem(this._sessionStorageKey(project), sessionId);
+  }
+
+  /**
+   * Apply the user's session choice before voice / submit work begins.
+   * "New session" creates a fresh thread; otherwise resume_id is set on the project.
+   */
+  async ensureCursorSessionReady(project: string): Promise<string | null> {
+    const stored = this.getStoredCursorSession(project);
+    if (!stored || stored === NEW_CURSOR_SESSION_ID) {
+      const created = await this.createNewCursorSession(project);
+      return created.active_session_id;
+    }
+    await this.selectCursorSession(project, stored);
+    return stored;
+  }
+
+  /**
+   * Stream live voice session prep logs (global MCP install / version check / enable).
+   * Resolves when the backend sends the `complete` SSE event.
+   */
+  async prepareVoiceSession(
+    project: string,
+    onLog: (event: VoiceSessionLogEvent) => void,
+  ): Promise<VoiceSessionPrepareResult> {
+    const res = await fetch(`${this._bridgeBase}/api/voice-session/prepare`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${this._appToken}`,
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
+      },
+      body: JSON.stringify({ project }),
+    });
+
+    if (!res.ok) {
+      let detail = `${res.status} ${res.statusText}`;
+      try {
+        const body = (await res.json()) as { error?: string };
+        if (body.error) detail = body.error;
+      } catch {
+        // ignore
+      }
+      throw new Error(detail);
+    }
+
+    if (!res.body) {
+      throw new Error('Prepare stream missing response body');
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let complete: VoiceSessionPrepareResult | null = null;
+
+    const processBlock = (block: string): void => {
+      const lines = block.split('\n');
+      let eventName = 'message';
+      let dataLine = '';
+      for (const line of lines) {
+        if (line.startsWith('event:')) eventName = line.slice(6).trim();
+        else if (line.startsWith('data:')) dataLine += line.slice(5).trim();
+      }
+      if (!dataLine) return;
+      const payload = JSON.parse(dataLine) as Record<string, unknown>;
+      if (eventName === 'session_log') {
+        onLog(payload as unknown as VoiceSessionLogEvent);
+      } else if (eventName === 'complete') {
+        complete = {
+          ok: Boolean(payload['ok']),
+          project: String(payload['project'] ?? project),
+          message: String(payload['message'] ?? ''),
+          mcpPath: typeof payload['mcpPath'] === 'string' ? payload['mcpPath'] : undefined,
+          action: typeof payload['action'] === 'string' ? payload['action'] : undefined,
+          version: typeof payload['version'] === 'string' ? payload['version'] : undefined,
+        };
+      }
+    };
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split('\n\n');
+      buffer = parts.pop() ?? '';
+      for (const part of parts) {
+        if (part.trim()) processBlock(part);
+      }
+    }
+
+    if (buffer.trim()) processBlock(buffer);
+
+    if (!complete) {
+      throw new Error('Prepare stream ended without completion');
+    }
+    const result: VoiceSessionPrepareResult = complete;
+    if (!result.ok) {
+      throw new Error(result.message || 'Voice session preparation failed');
+    }
+    return result;
+  }
+
+  private _sessionStorageKey(project: string): string {
+    return `cv_cursor_session_${project}`;
+  }
+
+  async loadSettings(): Promise<void> {
+    try {
+      const data = await this.apiFetch<AppSettings>('/api/settings');
+      this.settings.set(data);
+      this.apiStatus.set('ok');
+    } catch {
+      this.apiStatus.set('error');
+    }
+  }
+
   // ── Tool-call relay ────────────────────────────────────────────────────
 
   /**
@@ -222,6 +425,7 @@ export class BridgeService {
         this.wsStatus.set('connected');
         this.apiStatus.set('ok');
         void this.loadProjects();
+        void this.loadSettings();
         break;
 
       case 'narration': {

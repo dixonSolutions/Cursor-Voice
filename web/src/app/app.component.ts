@@ -16,9 +16,11 @@ import { Toast } from 'primeng/toast';
 import { Toolbar } from 'primeng/toolbar';
 
 import { ConnectionTabComponent } from './components/connection-tab/connection-tab.component';
+import { LiveLogPanelComponent } from './components/live-log-panel/live-log-panel.component';
 import { LogsTabComponent } from './components/logs-tab/logs-tab.component';
 import { ProvidersTabComponent } from './components/providers-tab/providers-tab.component';
 import { VoiceTabComponent } from './components/voice-tab/voice-tab.component';
+import { WakeWordTestComponent } from './components/wake-word-test/wake-word-test.component';
 import { AppStateService } from './services/app-state.service';
 import { BridgeService } from './services/bridge.service';
 import { LogService } from './services/log.service';
@@ -26,7 +28,7 @@ import { ToastService } from './services/toast.service';
 import { VoiceProvidersService } from './services/voice-providers.service';
 import { VoiceSessionService } from './services/voice-session.service';
 
-export type AppTab = 'voice' | 'providers' | 'connection' | 'logs';
+export type AppTab = 'voice' | 'wake' | 'providers' | 'connection' | 'logs';
 
 type TagSeverity = 'success' | 'info' | 'warn' | 'danger' | 'secondary' | 'contrast' | undefined;
 
@@ -53,7 +55,9 @@ interface TabItem {
     Tag,
     Toast,
     Toolbar,
+    LiveLogPanelComponent,
     VoiceTabComponent,
+    WakeWordTestComponent,
     ProvidersTabComponent,
     ConnectionTabComponent,
     LogsTabComponent,
@@ -73,10 +77,18 @@ export class AppComponent implements OnInit, OnDestroy {
 
   protected readonly tabs: TabItem[] = [
     { id: 'voice', label: 'Voice', icon: 'pi pi-microphone' },
+    { id: 'wake', label: 'Wake test', icon: 'pi pi-bolt' },
     { id: 'providers', label: 'Providers & Models', icon: 'pi pi-sliders-h' },
     { id: 'connection', label: 'Connection', icon: 'pi pi-link' },
     { id: 'logs', label: 'Logs', icon: 'pi pi-list' },
   ];
+
+  /** S2S provider settings — only shown when legacy speech-to-speech workflow is active. */
+  protected readonly visibleTabs = computed(() => {
+    const workflow = this.bridge.settings()?.workflow.default ?? 'cursor_native';
+    if (workflow === 's2s_voice') return this.tabs;
+    return this.tabs.filter((t) => t.id !== 'providers');
+  });
 
   protected readonly statusLabel = computed(() => {
     const ws = this.bridge.wsStatus();
@@ -120,7 +132,10 @@ export class AppComponent implements OnInit, OnDestroy {
   constructor() {
     this._connectEffect = effect(() => {
       if (this.bridge.wsStatus() === 'connected') {
-        void this.voiceProviders.refresh();
+        const workflow = this.bridge.settings()?.workflow.default ?? 'cursor_native';
+        if (workflow === 's2s_voice') {
+          void this.voiceProviders.refresh();
+        }
       }
       if (this.bridge.apiStatus() === 'error' && !this._apiWarned) {
         this._apiWarned = true;

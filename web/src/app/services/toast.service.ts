@@ -12,9 +12,9 @@ export class ToastService {
     this.logs.append('info', 'system', summary, detail);
   }
 
-  success(summary: string, detail?: string): void {
+  success(summary: string, detail?: string, logToPanel = true): void {
     this.messages.add({ severity: 'success', summary, detail, life: 3500 });
-    this.logs.append('info', 'system', summary, detail);
+    if (logToPanel) this.logs.append('info', 'system', summary, detail);
   }
 
   warn(summary: string, detail?: string): void {

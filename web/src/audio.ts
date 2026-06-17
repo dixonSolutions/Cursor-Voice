@@ -188,3 +188,14 @@ export function createAudioElement(): HTMLAudioElement {
   document.body.appendChild(el);
   return el;
 }
+
+/**
+ * ScriptProcessor nodes must be connected to the graph to run, but mic taps
+ * must never play through speakers (causes echo and breaks wake-word detection).
+ */
+export function connectSilentSink(ctx: AudioContext, node: AudioNode): void {
+  const silent = ctx.createGain();
+  silent.gain.value = 0;
+  node.connect(silent);
+  silent.connect(ctx.destination);
+}

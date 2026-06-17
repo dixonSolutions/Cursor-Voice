@@ -13,6 +13,8 @@ const TAU = Math.PI * 2;
 const SILENT = 0.028;
 const VIZ_BINS = 32;
 
+export type OrbColorMode = 'blue' | 'red' | 'green';
+
 @Component({
   selector: 'cv-voice-orb',
   standalone: true,
@@ -21,7 +23,9 @@ const VIZ_BINS = 32;
       class="cv-voice-orb"
       [class.cv-voice-orb--dim]="dimmed()"
       [class.cv-voice-orb--live]="live()"
-      [class.cv-voice-orb--expanded]="expanded()">
+      [class.cv-voice-orb--expanded]="expanded()"
+      [class.cv-voice-orb--red]="colorMode() === 'red'"
+      [class.cv-voice-orb--green]="colorMode() === 'green'">
       <canvas #canvas aria-hidden="true"></canvas>
       <div class="cv-voice-orb-glow" [style.opacity]="glowOpacity()" aria-hidden="true"></div>
     </div>
@@ -69,11 +73,30 @@ const VIZ_BINS = 32;
         z-index: 0;
         pointer-events: none;
         opacity: 0.2;
-        transition: opacity 0.12s ease;
+        transition: opacity 0.12s ease, background 0.25s ease;
       }
 
       .cv-voice-orb--live .cv-voice-orb-glow {
         opacity: 0.35;
+      }
+
+      .cv-voice-orb--red .cv-voice-orb-glow {
+        background: radial-gradient(
+          circle,
+          rgba(239, 68, 68, 0.55) 0%,
+          rgba(220, 38, 38, 0.2) 45%,
+          transparent 70%
+        );
+        animation: cv-orb-pulse-red 1.6s ease-in-out infinite;
+      }
+
+      .cv-voice-orb--green .cv-voice-orb-glow {
+        background: radial-gradient(
+          circle,
+          rgba(34, 197, 94, 0.55) 0%,
+          rgba(22, 163, 74, 0.2) 45%,
+          transparent 70%
+        );
       }
 
       .cv-voice-orb--dim .cv-voice-orb-glow {
@@ -82,6 +105,16 @@ const VIZ_BINS = 32;
 
       .cv-voice-orb--dim canvas {
         opacity: 0.55;
+      }
+
+      @keyframes cv-orb-pulse-red {
+        0%,
+        100% {
+          opacity: 0.45;
+        }
+        50% {
+          opacity: 0.72;
+        }
       }
     `,
   ],
@@ -97,6 +130,7 @@ export class VoiceOrbComponent implements OnDestroy {
   readonly live = input(false);
   readonly dimmed = input(false);
   readonly expanded = input(false);
+  readonly colorMode = input<OrbColorMode>('blue');
 
   protected glowOpacity = (): number => {
     const lv = this.spectrum().active;
@@ -168,16 +202,39 @@ export class VoiceOrbComponent implements OnDestroy {
     const speaking = level >= SILENT || this.maxBin() >= 0.06;
     const userTalk = mic > out && mic >= SILENT;
 
-    const highlight = userTalk ? '#e0f2fe' : '#bae6fd';
-    const mid = userTalk ? '#38bdf8' : '#60a5fa';
-    const deep = userTalk ? '#1d4ed8' : '#1e3a8a';
+    const mode = this.colorMode();
+    let highlight: string;
+    let mid: string;
+    let deep: string;
+    let bloomInner: string;
+    let bloomOuter: string;
+
+    if (mode === 'red') {
+      highlight = '#fca5a5';
+      mid = '#dc2626';
+      deep = '#7f1d1d';
+      bloomInner = '239, 68, 68';
+      bloomOuter = '220, 38, 38';
+    } else if (mode === 'green') {
+      highlight = userTalk ? '#d9f99d' : '#bbf7d0';
+      mid = userTalk ? '#4ade80' : '#22c55e';
+      deep = '#14532d';
+      bloomInner = '34, 197, 94';
+      bloomOuter = '22, 163, 74';
+    } else {
+      highlight = userTalk ? '#e0f2fe' : '#bae6fd';
+      mid = userTalk ? '#38bdf8' : '#60a5fa';
+      deep = userTalk ? '#1d4ed8' : '#1e3a8a';
+      bloomInner = '96, 165, 250';
+      bloomOuter = '37, 99, 235';
+    }
 
     ctx.clearRect(0, 0, w, h);
 
     const glow = speaking ? 0.35 + level * 0.65 : this.live() ? 0.22 : 0.12;
     const bloom = ctx.createRadialGradient(cx, cy, baseR * 0.2, cx, cy, baseR * 1.35);
-    bloom.addColorStop(0, `rgba(96, 165, 250, ${0.18 * glow})`);
-    bloom.addColorStop(0.55, `rgba(37, 99, 235, ${0.06 * glow})`);
+    bloom.addColorStop(0, `rgba(${bloomInner}, ${0.18 * glow})`);
+    bloom.addColorStop(0.55, `rgba(${bloomOuter}, ${0.06 * glow})`);
     bloom.addColorStop(1, 'rgba(15, 23, 42, 0)');
     ctx.fillStyle = bloom;
     ctx.fillRect(0, 0, w, h);
@@ -207,6 +264,12 @@ export class VoiceOrbComponent implements OnDestroy {
       const minR = coreR * 0.12;
       const maxR = coreR * 0.92;
 
+      // Fill blob — color-matched to mode.
+      let fillRgb: string;
+      if (mode === 'green') fillRgb = '187, 247, 208';
+      else if (mode === 'red') fillRgb = '254, 202, 202';
+      else fillRgb = '224, 242, 254';
+
       ctx.beginPath();
       for (let i = 0; i <= VIZ_BINS; i++) {
         const bin = this.displayBins[i % VIZ_BINS] ?? 0;
@@ -218,18 +281,30 @@ export class VoiceOrbComponent implements OnDestroy {
         else ctx.lineTo(x, y);
       }
       ctx.closePath();
-      ctx.fillStyle = `rgba(224, 242, 254, ${0.1 + level * 0.18})`;
+      ctx.fillStyle = `rgba(${fillRgb}, ${0.1 + level * 0.18})`;
       ctx.fill();
+
+      // Concentric rings.
+      let ringRgb: string;
+      if (mode === 'green') ringRgb = '134, 239, 172';
+      else if (mode === 'red') ringRgb = '252, 165, 165';
+      else ringRgb = '186, 230, 253';
 
       for (let ring = 1; ring <= 3; ring++) {
         const ringBin = this.avgBinSlice(ring - 1, 3);
         const ringR = coreR * (0.28 + (ring / 4) * 0.55) + ringBin * coreR * 0.12;
         ctx.beginPath();
         ctx.arc(cx, cy, ringR, 0, TAU);
-        ctx.strokeStyle = `rgba(186, 230, 253, ${0.08 + ringBin * 0.22 + level * 0.12})`;
+        ctx.strokeStyle = `rgba(${ringRgb}, ${0.08 + ringBin * 0.22 + level * 0.12})`;
         ctx.lineWidth = Math.max(1, w * 0.006);
         ctx.stroke();
       }
+
+      // Outline wave stroke.
+      let strokeRgb: string;
+      if (mode === 'green') strokeRgb = userTalk ? '187, 247, 208' : '134, 239, 172';
+      else if (mode === 'red') strokeRgb = '252, 165, 165';
+      else strokeRgb = userTalk ? '224, 242, 254' : '186, 230, 253';
 
       ctx.beginPath();
       for (let i = 0; i <= VIZ_BINS; i++) {
@@ -242,9 +317,7 @@ export class VoiceOrbComponent implements OnDestroy {
         else ctx.lineTo(x, y);
       }
       ctx.closePath();
-      ctx.strokeStyle = userTalk
-        ? `rgba(224, 242, 254, ${0.2 + level * 0.35})`
-        : `rgba(186, 230, 253, ${0.18 + level * 0.3})`;
+      ctx.strokeStyle = `rgba(${strokeRgb}, ${0.2 + level * 0.35})`;
       ctx.lineWidth = Math.max(1.5, w * 0.005);
       ctx.stroke();
     }
@@ -266,7 +339,13 @@ export class VoiceOrbComponent implements OnDestroy {
 
     ctx.beginPath();
     ctx.arc(cx, cy, coreR, 0, TAU);
-    ctx.strokeStyle = `rgba(186, 230, 253, ${speaking ? 0.22 + level * 0.3 : 0.14})`;
+    const rim =
+      mode === 'green'
+        ? `rgba(187, 247, 208, ${speaking ? 0.22 + level * 0.3 : 0.18})`
+        : mode === 'red'
+          ? `rgba(252, 165, 165, ${speaking ? 0.22 + level * 0.3 : 0.16})`
+          : `rgba(186, 230, 253, ${speaking ? 0.22 + level * 0.3 : 0.14})`;
+    ctx.strokeStyle = rim;
     ctx.lineWidth = Math.max(1, w * 0.004);
     ctx.stroke();
   }

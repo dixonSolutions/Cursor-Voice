@@ -87,6 +87,15 @@ Server-side helpers (not in prompts):
 
 Restart the bridge and start a **new voice session** after prompt changes.
 
+## Workflow-specific prompts
+
+| Workflow | Manifest path | Used by |
+| --- | --- | --- |
+| `llm_intelligence` (default) | `prompts/llm-intelligence/systemprompts.json` | Bedrock Claude orchestrator |
+| `s2s_voice` | `prompts/systemprompts.json` | OpenAI / Nova voice models |
+
+Configure via `config.json` → `settings.workflow`. See [`15-llm-intelligence-workflow.md`](./15-llm-intelligence-workflow.md).
+
 ## Related docs
 
 - [`13-voice-providers.md`](./13-voice-providers.md) — provider config and token mint

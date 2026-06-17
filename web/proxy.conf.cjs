@@ -1,0 +1,35 @@
+/**
+ * Angular dev-server proxy — browser entry is :4200; /api and /ws go to the bridge.
+ * Backend port comes from config.json → settings.runModes.test.backendPort.
+ */
+const { readFileSync, existsSync } = require('node:fs');
+const { resolve } = require('node:path');
+
+function readBackendPort() {
+  const configPath = resolve(process.cwd(), 'config.json');
+  if (!existsSync(configPath)) return 3000;
+  try {
+    const cfg = JSON.parse(readFileSync(configPath, 'utf8'));
+    return cfg.settings?.runModes?.test?.backendPort ?? 3000;
+  } catch {
+    return 3000;
+  }
+}
+
+const port = readBackendPort();
+const target = `http://127.0.0.1:${port}`;
+const wsTarget = `ws://127.0.0.1:${port}`;
+
+module.exports = {
+  '/api': {
+    target,
+    secure: false,
+    logLevel: 'warn',
+  },
+  '/ws': {
+    target: wsTarget,
+    ws: true,
+    secure: false,
+    logLevel: 'warn',
+  },
+};

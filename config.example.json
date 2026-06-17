@@ -11,6 +11,37 @@
         "publicBaseUrl": "https://your-machine.tailnet-name.ts.net"
       }
     },
+    "workflow": {
+      "default": "cursor_native",
+      "llmIntelligence": {
+        "llm": {
+          "provider": "bedrock",
+          "model": "us.anthropic.claude-sonnet-4-20250514-v1:0",
+          "region": "us-east-1",
+          "maxTokens": 4096
+        },
+        "systemPrompts": [
+          "prompts/llm-intelligence/systemprompts.json"
+        ],
+        "memory": {
+          "maxTurns": 10,
+          "keepTurns": 4,
+          "summarySentences": 3
+        },
+        "readOutputMaxChars": 8000,
+        "audio": {
+          "preferWebkit": true,
+          "pollyVoiceId": "Joanna",
+          "pollyEngine": "neural",
+          "transcribeLanguageCode": "en-US"
+        }
+      },
+      "s2sVoice": {
+        "systemPrompts": [
+          "prompts/systemprompts.json"
+        ]
+      }
+    },
     "voice": {
       "defaultProvider": "openai",
       "providers": {
@@ -71,7 +102,11 @@
         }
       },
       "wakeWords": {
-        "start": "cursor listen"
+        "start": "cursor listen",
+        "end": "cursor send"
+      },
+      "turnSubmit": {
+        "silenceMs": 1500
       },
       "systemPrompts": [
         "prompts/systemprompts.json"

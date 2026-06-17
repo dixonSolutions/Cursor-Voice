@@ -44,11 +44,17 @@ export interface CatalogProvider {
 
 export interface WakeWords {
   start: string;
+  end: string;
+}
+
+export interface TurnSubmit {
+  silenceMs: number;
 }
 
 export interface VoiceProvidersResponse {
   defaultProvider: ProviderId;
   wakeWords: WakeWords;
+  turnSubmit: TurnSubmit;
   catalog: CatalogProvider[];
   providers: ProviderView[];
   availableToRegister: ProviderId[];

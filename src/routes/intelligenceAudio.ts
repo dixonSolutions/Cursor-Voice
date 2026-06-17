@@ -1,0 +1,77 @@
+/**
+ * HTTP routes for intelligence audio fallbacks (Polly TTS, Transcribe STT).
+ *
+ * Security: all /api/* routes require Bearer APP_TOKEN (see server preHandler).
+ */
+
+import type { FastifyInstance } from 'fastify';
+import { isAmazonAudioAvailable } from '../intelligence/audio/awsClient.js';
+import { synthesizePollyMp3 } from '../intelligence/audio/polly.js';
+import { transcribePcm16 } from '../intelligence/audio/transcribe.js';
+import { getConfig } from '../config.js';
+
+export async function registerIntelligenceAudioRoutes(app: FastifyInstance): Promise<void> {
+  /** GET /api/intelligence/audio — capabilities for the PWA. */
+  app.get('/api/intelligence/audio', async () => {
+    const { audio } = getConfig().settings.workflow.llmIntelligence;
+    const amazonAvailable = isAmazonAudioAvailable();
+    return {
+      preferWebkit: audio.preferWebkit,
+      amazonAvailable,
+      sttFallback: amazonAvailable ? 'amazon_transcribe' : null,
+      ttsFallback: amazonAvailable ? 'amazon_polly' : null,
+      pollyVoiceId: audio.pollyVoiceId,
+      transcribeLanguageCode: audio.transcribeLanguageCode,
+    };
+  });
+
+  /** POST /api/intelligence/tts { text } → MP3 audio. */
+  app.post<{ Body: { text?: string } }>(
+    '/api/intelligence/tts',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['text'],
+          properties: { text: { type: 'string', minLength: 1, maxLength: 3000 } },
+        },
+      },
+    },
+    async (req, reply) => {
+      if (!isAmazonAudioAvailable()) {
+        return reply.code(503).send({ error: 'Amazon Polly not configured — set IAM keys in .env' });
+      }
+      const { audio, contentType } = await synthesizePollyMp3(req.body.text ?? '');
+      return reply.header('Content-Type', contentType).send(audio);
+    },
+  );
+
+  /** POST /api/intelligence/transcribe { pcm: base64 } → { text }. */
+  app.post<{ Body: { pcm?: string } }>(
+    '/api/intelligence/transcribe',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['pcm'],
+          properties: { pcm: { type: 'string', minLength: 1 } },
+        },
+      },
+    },
+    async (req, reply) => {
+      if (!isAmazonAudioAvailable()) {
+        return reply.code(503).send({ error: 'Amazon Transcribe not configured — set IAM keys in .env' });
+      }
+
+      let pcm: Buffer;
+      try {
+        pcm = Buffer.from(req.body.pcm ?? '', 'base64');
+      } catch {
+        return reply.code(400).send({ error: 'Invalid base64 PCM payload' });
+      }
+
+      const text = await transcribePcm16(pcm);
+      return { text };
+    },
+  );
+}

@@ -4,6 +4,7 @@
 
 export interface WakeWords {
   start: string;
+  end: string;
 }
 
 export function normalizeForWakeMatch(text: string): string {
