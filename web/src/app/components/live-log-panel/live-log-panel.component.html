@@ -1,0 +1,52 @@
+@if (visible()) {
+  <section class="cv-live-log-panel" aria-live="polite" aria-label="Live session logs">
+    <div class="cv-live-log-panel-header">
+      <span class="cv-live-log-panel-title">Session logs</span>
+      <div class="cv-live-log-panel-actions">
+        @if (voiceSession.sessionPrepActive()) {
+          <p-tag value="Preparing…" severity="info" />
+        } @else if (voiceSession.sessionConnecting()) {
+          <p-tag value="Connecting…" severity="info" />
+        } @else if (voiceSession.conversationActive()) {
+          <p-tag value="Live" severity="success" />
+        }
+        <p-button
+          label="Clear"
+          icon="pi pi-trash"
+          severity="secondary"
+          [text]="true"
+          size="small"
+          [disabled]="sessionEntries().length === 0"
+          (onClick)="clearLogs()" />
+      </div>
+    </div>
+
+    <div #viewport class="cv-live-log-viewport" (scroll)="onScroll($event)">
+      @if (sessionEntries().length === 0) {
+        <p class="cv-live-log-empty">Waiting for session activity…</p>
+      } @else {
+        <div class="cv-live-log-spacer" [style.height.px]="virtualSlice().totalHeight">
+          <div
+            class="cv-live-log-window"
+            [style.transform]="'translateY(' + virtualSlice().offsetY + 'px)'">
+            @for (entry of virtualSlice().items; track trackEntry($index, entry)) {
+              <div
+                class="cv-live-log-row"
+                [class.cv-live-log-row--warn]="entry.level === 'warn'"
+                [class.cv-live-log-row--error]="entry.level === 'error'">
+                <time class="cv-live-log-time">{{ formatTime(entry.at) }}</time>
+                <span class="cv-live-log-category">{{ entry.category }}</span>
+                <span class="cv-live-log-message" [title]="entry.detail ?? ''">
+                  {{ entry.summary }}
+                  @if (entry.detail) {
+                    <span class="cv-live-log-detail"> — {{ entry.detail }}</span>
+                  }
+                </span>
+              </div>
+            }
+          </div>
+        </div>
+      }
+    </div>
+  </section>
+}

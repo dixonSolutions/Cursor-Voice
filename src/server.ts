@@ -1,8 +1,15 @@
 /**
- * Fastify server — serves the PWA, exposes /api routes, and runs the
- * authenticated control WebSocket for tool-call relay.
+ * Fastify server — serves the PWA, exposes /api routes, runs the authenticated
+ * control WebSocket for tool-call relay, and hosts the MCP SSE server.
  *
- * All /api/* routes require a valid Bearer token (see auth.ts).
+ * Route groups:
+ *   GET  /healthz            — unauthenticated health check
+ *   /api/*                   — Bearer-authenticated REST endpoints
+ *   /ws/control              — authenticated control WebSocket (voice model relay)
+ *   /ws/intelligence         — authenticated WebSocket (llm_intelligence workflow)
+ *   GET|POST|DELETE /mcp     — MCP Streamable HTTP server (Cursor registers this)
+ *
+ * All /api/* and /mcp routes require a valid Bearer token (see auth.ts).
  * Security is enforced at the API level on every request and WS frame.
  */
 
@@ -29,7 +36,18 @@ import { mintToken, hasViableVoiceProvider } from './realtime/token.js';
 import { getNarrator, PhoneRelaySession } from './executor/narrator.js';
 import { registerVoiceProviderRoutes } from './routes/voiceProviders.js';
 import { registerBedrockVoiceWebSocket } from './realtime/bedrock/ws.js';
+import { registerIntelligenceWebSocket } from './intelligence/ws.js';
+import { registerIntelligenceAudioRoutes } from './routes/intelligenceAudio.js';
+import { registerCursorSessionRoutes } from './routes/cursorSessions.js';
+import { registerVoiceSessionPrepareRoutes } from './routes/voiceSessionPrepare.js';
+import { registerMcpServer } from './mcp/server/index.js';
 import { attachDevWebProxy, registerProductionWeb } from './webDispatch.js';
+
+/** Required for vosk-browser SharedArrayBuffer (wake-word WASM). */
+const CROSS_ORIGIN_ISOLATION_HEADERS = {
+  'Cross-Origin-Opener-Policy': 'same-origin',
+  'Cross-Origin-Embedder-Policy': 'require-corp',
+} as const;
 
 const execFileAsync = promisify(execFile);
 const log = childLogger('server');
@@ -51,9 +69,21 @@ async function getCursorAgentVersion(): Promise<string | null> {
 // ── Server factory ────────────────────────────────────────────────────────
 
 export async function buildServer(): Promise<FastifyInstance> {
-  const app = Fastify({ logger: false });
+  const app = Fastify({ logger: false, bodyLimit: 10 * 1024 * 1024 });
   const { settings } = getConfig();
   const run = getRunModeInfo(settings);
+
+  app.addHook('onSend', async (req, reply, payload) => {
+    // COOP/COEP are required for the PWA (Vosk WASM SharedArrayBuffer).
+    // Do NOT send them on /mcp — Cursor's MCP process is not a browser and
+    // some SSE clients reject responses with COEP/COOP set.
+    if (!req.url.startsWith('/mcp')) {
+      for (const [key, value] of Object.entries(CROSS_ORIGIN_ISOLATION_HEADERS)) {
+        reply.header(key, value);
+      }
+    }
+    return payload;
+  });
 
   // Test mode: allow cross-origin API calls when the PWA is opened directly on the
   // Angular dev port (http://localhost:4200) instead of the unified port.
@@ -189,6 +219,9 @@ export async function buildServer(): Promise<FastifyInstance> {
   });
 
   await registerVoiceProviderRoutes(app);
+  await registerIntelligenceAudioRoutes(app);
+  await registerCursorSessionRoutes(app);
+  await registerVoiceSessionPrepareRoutes(app);
 
   /** GET /api/settings — non-secret operational settings. */
   app.get('/api/settings', async () => {
@@ -203,11 +236,24 @@ export async function buildServer(): Promise<FastifyInstance> {
       defaultVoiceProvider: s.voice.defaultProvider,
       defaultVoiceModel: s.voice.providers[s.voice.defaultProvider]?.defaultModel ?? null,
       wakeWords: s.voice.wakeWords,
+      turnSubmit: s.voice.turnSubmit,
       defaultMode: s.defaultMode,
       maxConcurrentJobs: s.maxConcurrentJobs,
       planFirst: s.planFirst,
       narratorEnabled: s.narratorEnabled,
       narratorCadenceMs: s.narratorCadenceMs,
+      workflow: {
+        default: s.workflow.default,
+        llmIntelligence: {
+          model: s.workflow.llmIntelligence.llm.model,
+          region: s.workflow.llmIntelligence.llm.region,
+          audio: {
+            preferWebkit: s.workflow.llmIntelligence.audio.preferWebkit,
+            pollyVoiceId: s.workflow.llmIntelligence.audio.pollyVoiceId,
+            transcribeLanguageCode: s.workflow.llmIntelligence.audio.transcribeLanguageCode,
+          },
+        },
+      },
     };
   });
 
@@ -321,6 +367,8 @@ export async function buildServer(): Promise<FastifyInstance> {
   });
 
   registerBedrockVoiceWebSocket(app);
+  registerIntelligenceWebSocket(app);
+  registerMcpServer(app);
 
   // ── Web dispatch (after /api/* and /ws/* routes) ───────────────────────
   //
@@ -358,9 +406,12 @@ export async function startServer(app: FastifyInstance): Promise<string> {
       address,
       runMode: run.runMode,
       webUrl: run.webUrl,
+      angularDev: run.useDevWebServer ? `http://127.0.0.1:${run.webPort} (internal)` : null,
       useDevWebServer: run.useDevWebServer,
     },
-    'bridge listening',
+    run.useDevWebServer
+      ? `bridge listening on :${run.backendPort} — open ${run.webUrl} (PWA; proxies /api + /ws to bridge)`
+      : 'bridge listening',
   );
   return address;
 }

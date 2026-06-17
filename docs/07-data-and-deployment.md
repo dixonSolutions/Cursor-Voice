@@ -122,13 +122,13 @@ startup; invalid config fails fast with a clear error.
 
 | Mode | Purpose | Backend | Web app |
 | --- | --- | --- | --- |
-| **`test`** | Local development | `127.0.0.1:3000` (default) | Same port — `npm run dev` proxies to Angular on `:4200` |
+| **`test`** | Local development | `backendPort` (e.g. 8000) — bridge only | **`webPort` (4200)** — open in browser; proxies `/api` + `/ws` to bridge |
 | **`serve`** | Production / Tailscale | `127.0.0.1:8787` (default) | Same origin — bridge serves `web/dist` |
 
 ```json
 "runMode": "test",
 "runModes": {
-  "test": { "backendPort": 3000, "webPort": 4200 },
+  "test": { "backendPort": 8000, "webPort": 4200 },
   "serve": {
     "backendPort": 8787,
     "publicBaseUrl": "https://your-machine.tailnet-name.ts.net"
@@ -136,7 +136,18 @@ startup; invalid config fails fast with a clear error.
 }
 ```
 
-- **`test`:** run `npm run dev` — starts the hot-reloading backend and Angular dev server together. Open `http://localhost:3000` (unified port). Leave Bridge URL blank in the PWA — API and WebSocket traffic use the same origin.
+**Dev routing** (`npm run dev`):
+
+```
+Browser → http://localhost:4200/     (ng serve — entry point)
+  ├─ /api/*              → proxied to bridge :backendPort
+  ├─ /ws/*               → proxied to bridge :backendPort
+  └─ /*                  → Angular (HMR)
+
+Bridge → http://127.0.0.1:<backendPort>   (API + WebSockets only in test mode)
+```
+
+- **`test`:** run `npm run dev`. Open **`http://localhost:4200`**. Leave Bridge URL blank in the PWA.
 - **`serve`:** `npm run build && npm start`. Open `publicBaseUrl` (or `127.0.0.1:8787` locally). Set `runMode` to `"serve"` before deploying.
 
 `GET /healthz` returns `runMode`, `backendUrl`, `webUrl`, and `useDevWebServer` for quick sanity checks.

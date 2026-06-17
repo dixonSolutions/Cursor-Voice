@@ -18,7 +18,7 @@ import {
   type KnownModel,
   type ProviderId,
 } from './provider_keys.js';
-import { getConfig, reloadConfig, type VoiceProviderConfig, type VoiceSettings, type WakeWords } from '../config.js';
+import { getConfig, reloadConfig, type TurnSubmit, type VoiceProviderConfig, type VoiceSettings, type VoiceSettingsInput, type WakeWords } from '../config.js';
 import { isProviderViable, getProviderKeyStatus } from '../state/envFile.js';
 import { readConfigFile, writeConfigFile } from '../state/configFile.js';
 import { resetVoiceProvider } from './token.js';
@@ -63,6 +63,7 @@ export interface ProviderView {
 export interface VoiceProvidersResponse {
   defaultProvider: ProviderId;
   wakeWords: WakeWords;
+  turnSubmit: TurnSubmit;
   catalog: CatalogProvider[];
   providers: ProviderView[];
   availableToRegister: ProviderId[];
@@ -137,6 +138,7 @@ export function getVoiceProvidersView(): VoiceProvidersResponse {
   return {
     defaultProvider: voice.defaultProvider,
     wakeWords: voice.wakeWords,
+    turnSubmit: voice.turnSubmit,
     catalog: getCatalog(),
     providers,
     availableToRegister,
@@ -144,7 +146,7 @@ export function getVoiceProvidersView(): VoiceProvidersResponse {
 }
 
 function persistVoiceUpdate(
-  mutate: (voice: VoiceSettings) => void,
+  mutate: (voice: VoiceSettingsInput) => void,
   auditReason: string,
 ): VoiceSettings {
   const file = readConfigFile();
@@ -284,6 +286,8 @@ export function removeProviderModel(id: string, modelId: string): VoiceProviders
 
 const WakeWordsBodySchema = z.object({
   start: z.string().min(1).max(100),
+  end: z.string().max(100).optional(),
+  silenceMs: z.number().int().min(500).max(30_000).optional(),
 });
 
 export function setWakeWords(raw: unknown): VoiceProvidersResponse {
@@ -291,11 +295,18 @@ export function setWakeWords(raw: unknown): VoiceProvidersResponse {
   if (!parsed.success) throw new Error('Invalid wake phrase — start is required');
 
   const startTrim = parsed.data.start.trim();
+  const endTrim = parsed.data.end?.trim();
   if (!startTrim) throw new Error('Activation phrase cannot be empty');
 
   persistVoiceUpdate((voice) => {
-    voice.wakeWords = { start: startTrim };
-  }, `wake phrase → start="${startTrim}"`);
+    voice.wakeWords = {
+      start: startTrim,
+      end: parsed.data.end !== undefined ? endTrim ?? '' : (voice.wakeWords.end ?? 'send'),
+    };
+    if (parsed.data.silenceMs !== undefined) {
+      voice.turnSubmit = { silenceMs: parsed.data.silenceMs };
+    }
+  }, `wake phrase → start="${startTrim}" end="${endTrim ?? '(unchanged)'}"`);
 
   return getVoiceProvidersView();
 }

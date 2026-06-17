@@ -46,7 +46,7 @@ export class BedrockVoiceSession {
   private playbackCtx: AudioContext | null = null;
   private nextPlayTime = 0;
   private closed = false;
-  private wakeWords: WakeWords = { start: '' };
+  private wakeWords: WakeWords = { start: '', end: 'send' };
   /** Drop mic uplink until wake phrase; while assistant speaks; or when input is only noise. */
   private voiceActivated = false;
   /** Drop mic uplink while assistant audio is playing (prevents TTS echo loops). */
@@ -63,7 +63,7 @@ export class BedrockVoiceSession {
   async start(): Promise<void> {
     this.cb.onState('connecting');
     const mint = await this.mintToken();
-    this.wakeWords = mint.wakeWords ?? { start: '' };
+    this.wakeWords = mint.wakeWords ?? { start: '', end: 'send' };
 
     await unlockAudioContext();
     this.micStream = await captureMicStream();

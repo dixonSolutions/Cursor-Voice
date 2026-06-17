@@ -22,7 +22,12 @@ import {
   getProviderDefinition,
   type ProviderId,
 } from './realtime/provider_keys.js';
-import { DEFAULT_SYSTEM_PROMPTS, loadVoiceSystemPrompt } from './state/promptLoader.js';
+import {
+  DEFAULT_LLM_INTELLIGENCE_PROMPTS,
+  DEFAULT_SYSTEM_PROMPTS,
+  loadVoiceSystemPrompt,
+  loadWorkflowSystemPrompt,
+} from './state/promptLoader.js';
 import { childLogger } from './log.js';
 
 const log = childLogger('config');
@@ -60,6 +65,12 @@ export const VoiceProviderConfigSchema = z.object({
 
 export const WakeWordsSchema = z.object({
   start: z.string().min(1).max(100),
+  end: z.string().max(100).default('send'),
+});
+
+export const TurnSubmitSchema = z.object({
+  /** Ms of silence after last STT final before auto-submitting the buffered turn. */
+  silenceMs: z.number().int().min(500).max(30_000).default(1500),
 });
 
 /** Resolved voice system prompt (loaded from prompts/ at startup). */
@@ -74,6 +85,7 @@ export const VoiceSettingsSchema = z.object({
   defaultProvider: z.enum(PROVIDER_IDS),
   providers: z.record(z.enum(PROVIDER_IDS), VoiceProviderConfigSchema),
   wakeWords: WakeWordsSchema,
+  turnSubmit: TurnSubmitSchema.default({}),
   /** Paths to prompt manifests, relative to config.json (see prompts/systemprompts.json). */
   systemPrompts: z.array(z.string().min(1)).min(1).default(['prompts/systemprompts.json']),
 });
@@ -99,12 +111,66 @@ const RunModesSchema = z.object({
   serve: ServeRunModeSchema.default({}),
 });
 
+// ── Workflow config (llm_intelligence vs s2s_voice) ───────────────────────────
+
+export const WORKFLOW_IDS = ['cursor_native', 'llm_intelligence', 's2s_voice'] as const;
+export type WorkflowId = (typeof WORKFLOW_IDS)[number];
+
+const LlmIntelligenceMemorySchema = z.object({
+  maxTurns: z.number().int().min(4).max(40).default(10),
+  keepTurns: z.number().int().min(2).max(20).default(4),
+  summarySentences: z.number().int().min(1).max(6).default(3),
+});
+
+const LlmIntelligenceLlmSchema = z.object({
+  provider: z.enum(['bedrock']).default('bedrock'),
+  model: z.string().min(1).default('us.anthropic.claude-sonnet-4-20250514-v1:0'),
+  region: z.string().min(1).default('us-east-1'),
+  maxTokens: z.number().int().min(256).max(8192).default(4096),
+});
+
+const LlmIntelligenceAudioSchema = z.object({
+  /** Try WebKit STT/TTS first (iPhone); fall back to Amazon when unavailable. */
+  preferWebkit: z.boolean().default(true),
+  /** AWS region for Polly + Transcribe (defaults to llm.region if omitted at runtime). */
+  region: z.string().min(1).optional(),
+  pollyVoiceId: z.string().min(1).default('Joanna'),
+  pollyEngine: z.enum(['standard', 'neural', 'generative']).default('neural'),
+  transcribeLanguageCode: z.string().min(2).default('en-US'),
+});
+
+export const LlmIntelligenceWorkflowSchema = z.object({
+  llm: LlmIntelligenceLlmSchema.default({}),
+  audio: LlmIntelligenceAudioSchema.default({}),
+  /** Paths relative to config.json — see prompts/llm-intelligence/. */
+  systemPrompts: z
+    .array(z.string().min(1))
+    .min(1)
+    .default([...DEFAULT_LLM_INTELLIGENCE_PROMPTS]),
+  memory: LlmIntelligenceMemorySchema.default({}),
+  /** Max chars returned to Claude from read_output / status payloads. */
+  readOutputMaxChars: z.number().int().min(1000).max(32_768).default(8000),
+});
+
+export const S2sVoiceWorkflowSchema = z.object({
+  systemPrompts: z.array(z.string().min(1)).min(1).default(['prompts/systemprompts.json']),
+});
+
+export const WorkflowSettingsSchema = z.object({
+  /** Active voice pipeline — cursor_native (default), llm_intelligence, or legacy s2s_voice. */
+  default: z.enum(WORKFLOW_IDS).default('cursor_native'),
+  llmIntelligence: LlmIntelligenceWorkflowSchema.default({}),
+  s2sVoice: S2sVoiceWorkflowSchema.default({}),
+});
+
 // ── config.json schema ───────────────────────────────────────────────────────
 
 const SettingsSchema = z.object({
   /** `test` = localhost dev (backend + ng serve). `serve` = production / Tailscale. */
   runMode: z.enum(RUN_MODES).default('test'),
   runModes: RunModesSchema.default({}),
+  /** Voice pipeline selection and per-workflow settings. See docs/15-llm-intelligence-workflow.md. */
+  workflow: WorkflowSettingsSchema.default({}),
   voice: VoiceSettingsSchema,
   defaultMode: z.enum(['agent', 'plan']).default('agent'),
   maxConcurrentJobs: z.number().int().min(1).max(4).default(1),
@@ -152,6 +218,7 @@ const LegacySettingsSchema = z
 export type AppEnv = z.infer<typeof EnvSchema>;
 export type VoiceModel = z.infer<typeof VoiceModelSchema>;
 export type WakeWords = z.infer<typeof WakeWordsSchema>;
+export type TurnSubmit = z.infer<typeof TurnSubmitSchema>;
 export type VoiceSystemPrompt = z.infer<typeof VoiceSystemPromptSchema>;
 export type VoiceProviderConfig = z.infer<typeof VoiceProviderConfigSchema>;
 export type VoiceSettingsInput = z.infer<typeof VoiceSettingsSchema>;
@@ -160,8 +227,16 @@ export type VoiceSettings = VoiceSettingsInput & {
   systemPrompt: VoiceSystemPrompt;
 };
 export type RunModes = z.infer<typeof RunModesSchema>;
-export type Settings = Omit<z.infer<typeof SettingsSchema>, 'voice'> & {
+export type LlmIntelligenceWorkflow = z.infer<typeof LlmIntelligenceWorkflowSchema>;
+export type S2sVoiceWorkflow = z.infer<typeof S2sVoiceWorkflowSchema>;
+export type WorkflowSettings = z.infer<typeof WorkflowSettingsSchema> & {
+  llmIntelligence: LlmIntelligenceWorkflow & {
+    systemPrompt: VoiceSystemPrompt;
+  };
+};
+export type Settings = Omit<z.infer<typeof SettingsSchema>, 'voice' | 'workflow'> & {
   voice: VoiceSettings;
+  workflow: WorkflowSettings;
 };
 export type ProjectConfig = z.infer<typeof ProjectConfigSchema>;
 export type ConfigFile = z.infer<typeof ConfigFileSchema>;
@@ -199,6 +274,12 @@ function migrateRawConfig(raw: unknown): unknown {
     if (typeof voice['wakeWords'] === 'object' && voice['wakeWords'] !== null) {
       const ww = voice['wakeWords'] as Record<string, unknown>;
       delete ww['stop'];
+      if (typeof ww['end'] !== 'string' || !String(ww['end']).trim()) {
+        ww['end'] = 'send';
+      }
+    }
+    if (!voice['turnSubmit'] || typeof voice['turnSubmit'] !== 'object') {
+      voice['turnSubmit'] = { silenceMs: 1500 };
     }
     if (!voice['wakeWords'] || typeof voice['wakeWords'] !== 'object') {
       throw new Error(
@@ -211,6 +292,11 @@ function migrateRawConfig(raw: unknown): unknown {
     }
     if (!voice['systemPrompts']) {
       voice['systemPrompts'] = [...DEFAULT_SYSTEM_PROMPTS];
+    }
+    const settingsObj = s;
+    if (!settingsObj['workflow']) {
+      settingsObj['workflow'] = { default: 'cursor_native' };
+      log.info('Migrated config — added default workflow cursor_native');
     }
     return raw;
   }
@@ -225,6 +311,23 @@ function resolveVoiceSettings(configPath: string, voice: VoiceSettingsInput): Vo
     ...voice,
     systemPrompt: loadVoiceSystemPrompt(configPath, voice.systemPrompts),
   };
+}
+
+function resolveWorkflowSettings(
+  configPath: string,
+  workflow: z.infer<typeof WorkflowSettingsSchema>,
+): WorkflowSettings {
+  const llmIntelligenceRaw = workflow.llmIntelligence;
+  const audioRegion = llmIntelligenceRaw.audio.region ?? llmIntelligenceRaw.llm.region;
+  const llmIntelligence = {
+    ...llmIntelligenceRaw,
+    audio: { ...llmIntelligenceRaw.audio, region: audioRegion },
+    systemPrompt: loadWorkflowSystemPrompt(
+      configPath,
+      llmIntelligenceRaw.systemPrompts,
+    ),
+  };
+  return { ...workflow, llmIntelligence };
 }
 
 // ── Loader (singleton) ────────────────────────────────────────────────────────
@@ -269,12 +372,14 @@ function loadFromDisk(): AppConfig {
   const configFile = cfgResult.data;
 
   const voice = resolveVoiceSettings(configPath, configFile.settings.voice);
+  const workflow = resolveWorkflowSettings(configPath, configFile.settings.workflow);
 
   return {
     env,
     settings: {
       ...configFile.settings,
       voice,
+      workflow,
     },
     projects: configFile.projects,
   };
@@ -290,6 +395,7 @@ export function loadConfig(): AppConfig {
       projectCount: _config.projects.length,
       runMode: _config.settings.runMode,
       defaultVoiceProvider: _config.settings.voice.defaultProvider,
+      defaultWorkflow: _config.settings.workflow.default,
       logLevel: _config.settings.logLevel,
     },
     'config loaded',

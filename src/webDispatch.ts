@@ -1,9 +1,10 @@
 /**
  * Web traffic dispatch — development proxy vs production static SPA.
  *
- * Development (NODE_ENV=development):
- *   - HTTP: proxy unmatched routes to the Angular dev server (HMR).
- *   - WebSocket upgrades (except /ws/voice and /ws/control) proxy to Angular.
+ * Development (unified port — see settings.runModes.test.backendPort):
+ *   - User opens ONE URL (e.g. http://localhost:8000).
+ *   - /api/* and /ws/* are handled by the bridge.
+ *   - Everything else is proxied to ng serve on webPort (HMR, internal only).
  *
  * Production:
  *   - Serve compiled assets from web/dist with SPA index.html fallback.
@@ -17,7 +18,13 @@ import { childLogger } from './log.js';
 
 const log = childLogger('web-dispatch');
 
-const BACKEND_WS_PATHS = ['/ws/voice', '/ws/control'] as const;
+/** SharedArrayBuffer isolation — required for vosk-browser wake-word WASM. */
+const CROSS_ORIGIN_ISOLATION_HEADERS = {
+  'Cross-Origin-Opener-Policy': 'same-origin',
+  'Cross-Origin-Embedder-Policy': 'require-corp',
+} as const;
+
+const BACKEND_WS_PATHS = ['/ws/voice', '/ws/control', '/ws/intelligence'] as const;
 
 function pathnameOf(url: string): string {
   return url.split('?')[0] ?? url;
@@ -36,14 +43,26 @@ export function attachDevWebProxy(app: FastifyInstance, webPort: number): void {
   const target = `http://127.0.0.1:${webPort}`;
   const proxy = httpProxy.createProxyServer({ target, ws: true, changeOrigin: true });
 
+  proxy.on('proxyRes', (proxyRes) => {
+    for (const [key, value] of Object.entries(CROSS_ORIGIN_ISOLATION_HEADERS)) {
+      proxyRes.headers[key.toLowerCase()] = value;
+    }
+  });
+
   proxy.on('error', (err, req, res) => {
     log.warn({ err, url: req.url }, 'dev web proxy error');
     const response = res as import('node:http').ServerResponse | undefined;
-    if (response && !response.headersSent) {
+    if (response && typeof response.writeHead === 'function' && !response.headersSent) {
       response.writeHead(502, { 'Content-Type': 'text/plain' });
       response.end(
         'Angular dev server unavailable — ensure ng serve is running on port ' + webPort,
       );
+      return;
+    }
+    // WebSocket upgrade failures pass a Socket — not a ServerResponse.
+    const socket = res as import('node:net').Socket | undefined;
+    if (socket && typeof socket.destroy === 'function') {
+      socket.destroy();
     }
   });
 

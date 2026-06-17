@@ -24,6 +24,7 @@ const PromptManifestSchema = z
   });
 
 const DEFAULT_SYSTEM_PROMPTS = ['prompts/systemprompts.json'];
+const DEFAULT_LLM_INTELLIGENCE_PROMPTS = ['prompts/llm-intelligence/systemprompts.json'];
 
 function readPromptFile(baseDir: string, relativePath: string): string {
   const filePath = resolve(baseDir, relativePath);
@@ -70,4 +71,15 @@ export function loadVoiceSystemPrompt(configPath: string, systemPrompts?: string
   return loadSystemPromptManifest(manifestPath);
 }
 
-export { DEFAULT_SYSTEM_PROMPTS };
+/** Load workflow-specific system prompts (e.g. llm_intelligence orchestrator). */
+export function loadWorkflowSystemPrompt(
+  configPath: string,
+  systemPrompts?: string[],
+): VoiceSystemPrompt {
+  const configDir = dirname(resolve(configPath));
+  const paths = systemPrompts?.length ? systemPrompts : DEFAULT_LLM_INTELLIGENCE_PROMPTS;
+  const manifestPath = join(configDir, paths[0]!);
+  return loadSystemPromptManifest(manifestPath);
+}
+
+export { DEFAULT_SYSTEM_PROMPTS, DEFAULT_LLM_INTELLIGENCE_PROMPTS };

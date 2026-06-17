@@ -48,7 +48,7 @@ export interface TokenResponse {
   provider: string;
   model: string;
   transport: 'webrtc' | 'bedrock_ws';
-  wakeWords: { start: string };
+  wakeWords: { start: string; end: string };
 }
 
 export async function mintToken(voice?: string): Promise<TokenResponse> {

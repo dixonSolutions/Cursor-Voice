@@ -234,3 +234,72 @@ export function getLatestJobForProject(projectName: string): Job | null {
     .get(projectName) as JobRow | undefined;
   return row ? rowToJob(row) : null;
 }
+
+export interface CursorSessionSummary {
+  sessionId: string;
+  lastPrompt: string;
+  lastStatus: JobStatus;
+  lastRunAt: string;
+  jobCount: number;
+}
+
+/**
+ * Distinct cursor-agent session threads for a project (from job.session_id).
+ * Newest activity first. Used by the Voice tab session picker.
+ */
+export function listCursorSessionsForProject(
+  projectName: string,
+  limit = 40,
+): CursorSessionSummary[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT
+         j.session_id AS session_id,
+         MAX(j.started_at) AS last_run_at,
+         COUNT(*) AS job_count,
+         (
+           SELECT prompt FROM job j2
+           WHERE j2.project = j.project AND j2.session_id = j.session_id
+           ORDER BY j2.started_at DESC LIMIT 1
+         ) AS last_prompt,
+         (
+           SELECT status FROM job j2
+           WHERE j2.project = j.project AND j2.session_id = j.session_id
+           ORDER BY j2.started_at DESC LIMIT 1
+         ) AS last_status
+       FROM job j
+       WHERE j.project = @project
+         AND j.session_id IS NOT NULL
+         AND TRIM(j.session_id) != ''
+       GROUP BY j.session_id
+       ORDER BY last_run_at DESC
+       LIMIT @limit`,
+    )
+    .all({ project: projectName, limit }) as {
+      session_id: string;
+      last_run_at: string;
+      job_count: number;
+      last_prompt: string;
+      last_status: string;
+    }[];
+
+  return rows.map((r) => ({
+    sessionId: r.session_id,
+    lastPrompt: r.last_prompt,
+    lastStatus: r.last_status as JobStatus,
+    lastRunAt: r.last_run_at,
+    jobCount: r.job_count,
+  }));
+}
+
+/** True if this session id has been used on a job for the project. */
+export function projectHasCursorSession(projectName: string, sessionId: string): boolean {
+  const row = getDb()
+    .prepare(
+      `SELECT 1 AS ok FROM job
+       WHERE project = @project AND session_id = @sessionId
+       LIMIT 1`,
+    )
+    .get({ project: projectName, sessionId }) as { ok: number } | undefined;
+  return Boolean(row?.ok);
+}

@@ -50,4 +50,11 @@ export class LogService {
   clear(): void {
     this.entries.set([]);
   }
+
+  /** Clear voice/transcript lines from the live session panel only. */
+  clearVoiceSession(): void {
+    this.entries.update((list) =>
+      list.filter((e) => e.category !== 'voice' && e.category !== 'transcript'),
+    );
+  }
 }

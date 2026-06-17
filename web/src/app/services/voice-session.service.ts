@@ -1,5 +1,6 @@
 import { Injectable, inject, signal } from '@angular/core';
 import { BedrockVoiceSession } from '../../bedrock-voice.js';
+import { LlmIntelligenceSession } from '../../llm-intelligence-session.js';
 import { WebRTCVoiceSession, type SessionCallbacks } from '../../webrtc.js';
 import {
   disposeVoiceAudioMeter,
@@ -11,7 +12,8 @@ import { BridgeService } from './bridge.service';
 import { LogService } from './log.service';
 import { ToastService } from './toast.service';
 import { VoiceProvidersService } from './voice-providers.service';
-import { cancelTtsFallback, scheduleTtsFallback, speakTtsNow, stopAllTts } from '../../tts-fallback.js';
+import { cancelTtsFallback, scheduleTtsFallback, stopAllTts } from '../../tts-fallback.js';
+import type { SttBackend, TtsBackend } from '../../intelligence-audio.js';
 
 export interface TranscriptEntry {
   id: number;
@@ -30,7 +32,7 @@ export interface ToolActivityState {
 const MAX_ENTRIES = 50;
 let _nextId = 0;
 
-type ActiveSession = WebRTCVoiceSession | BedrockVoiceSession;
+type ActiveSession = WebRTCVoiceSession | BedrockVoiceSession | LlmIntelligenceSession;
 
 @Injectable({ providedIn: 'root' })
 export class VoiceSessionService {
@@ -44,12 +46,21 @@ export class VoiceSessionService {
   private readonly _voiceActivated = signal(false);
   private readonly _speaking = signal(false);
   private readonly _jobRunning = signal(false);
+  private readonly _micMuted = signal(false);
 
   readonly transcript = signal<TranscriptEntry[]>([]);
   readonly toolActivity = signal<ToolActivityState | null>(null);
   readonly conversationActive = signal(false);
   readonly sessionConnecting = signal(false);
+  /** True while MCP install / version check runs before mic opens. */
+  readonly sessionPrepActive = signal(false);
   readonly speaking = this._speaking.asReadonly();
+  readonly voiceActivated = this._voiceActivated.asReadonly();
+  readonly micMuted = this._micMuted.asReadonly();
+  /** Vosk end-phrase spotter active (say end word to submit). */
+  readonly endPhraseArmed = signal(false);
+  /** Heard end phrase — flushing STT and submitting. */
+  readonly submittingTurn = signal(false);
 
   private readonly _audioSpectrum = signal<AudioSpectrum>({
     bins: new Array(32).fill(0),
@@ -59,6 +70,9 @@ export class VoiceSessionService {
   });
   readonly audioSpectrum = this._audioSpectrum.asReadonly();
 
+  private readonly _audioBackends = signal<{ stt: SttBackend; tts: TtsBackend } | null>(null);
+  readonly audioBackends = this._audioBackends.asReadonly();
+
   /** @deprecated use audioSpectrum */
   readonly audioLevels = this.audioSpectrum;
 
@@ -66,6 +80,14 @@ export class VoiceSessionService {
 
   isVoiceActivated(): boolean {
     return this._voiceActivated();
+  }
+
+  toggleMicMute(): void {
+    const next = !this._micMuted();
+    this._micMuted.set(next);
+    if (this._session instanceof LlmIntelligenceSession) {
+      this._session.setMicMuted(next);
+    }
   }
 
   notifyJobRunning(running: boolean): void {
@@ -83,19 +105,63 @@ export class VoiceSessionService {
     }
 
     this.sessionConnecting.set(true);
+    this.sessionPrepActive.set(true);
     this._voiceActivated.set(false);
     this._jobRunning.set(false);
+    this._micMuted.set(false);
 
     try {
       await this.bridge.setActiveProject(project);
+      await this.bridge.prepareVoiceSession(project, (event) => {
+        this.logs.append(
+          event.level === 'error' ? 'error' : event.level === 'warn' ? 'warn' : 'info',
+          'voice',
+          event.message,
+        );
+      });
+      await this.bridge.ensureCursorSessionReady(project);
+      if (!this.bridge.settings()) {
+        await this.bridge.loadSettings();
+      }
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
-      this.toast.error('Could not set active project', detail);
+      this.toast.error('Could not prepare voice session', detail);
       this.sessionConnecting.set(false);
+      this.sessionPrepActive.set(false);
       return;
+    } finally {
+      this.sessionPrepActive.set(false);
     }
 
     const callbacks = this.buildCallbacks();
+    const workflow = this.bridge.settings()?.workflow.default ?? 'cursor_native';
+
+    if (workflow === 'cursor_native' || workflow === 'llm_intelligence') {
+      const intelSession = new LlmIntelligenceSession(
+        this.bridge.bridgeBase,
+        this.bridge.appToken,
+        callbacks,
+      );
+      this._session = intelSession;
+      try {
+        await intelSession.start();
+        this._audioBackends.set(intelSession.getAudioBackends());
+        const startMsg =
+          workflow === 'cursor_native'
+            ? 'Cursor voice session started — run the voice agent in Cursor IDE, then say the wake phrase'
+            : 'Intelligence session started — say wake phrase to activate';
+        this.logs.append('info', 'voice', startMsg);
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        this.logs.append('error', 'voice', 'Could not start intelligence session', detail);
+        this.toast.error('Could not start voice', detail);
+        this.stopSession();
+      } finally {
+        this.sessionConnecting.set(false);
+      }
+      return;
+    }
+
     const transport = this.resolveTransport();
 
     const session =
@@ -122,14 +188,19 @@ export class VoiceSessionService {
     this._session?.close();
     this._session = null;
     this.sessionConnecting.set(false);
+    this.sessionPrepActive.set(false);
     this._voiceActivated.set(false);
     this._speaking.set(false);
     this._jobRunning.set(false);
+    this._micMuted.set(false);
     this.bridge.sendSpeakingState(false);
     this.stopMeterPoll();
     this.conversationActive.set(false);
     this.transcript.set([]);
     this.toolActivity.set(null);
+    this.endPhraseArmed.set(false);
+    this.submittingTurn.set(false);
+    this._audioBackends.set(null);
     cancelTtsFallback();
     stopAllTts();
     this.appState.transitionTo('idle');
@@ -139,6 +210,20 @@ export class VoiceSessionService {
     if (!this.conversationActive()) return;
     this._session?.injectNarration(text);
     this.addEntry(text, 'assistant');
+  }
+
+  /** Typed message for llm_intelligence (desktop dev / no mic STT). */
+  async sendTextMessage(text: string): Promise<void> {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+
+    if (!this._session && !this.sessionConnecting()) {
+      await this.startSession();
+    }
+    const session = this._session;
+    if (session instanceof LlmIntelligenceSession) {
+      session.sendTextTurn(trimmed);
+    }
   }
 
   addEntry(text: string, role: TranscriptEntry['role']): void {
@@ -152,7 +237,9 @@ export class VoiceSessionService {
   private syncAppState(): void {
     if (this._jobRunning()) {
       this.appState.transitionTo('working');
-    } else if (this._voiceActivated()) {
+      return;
+    }
+    if (this._voiceActivated()) {
       this.appState.transitionTo('listening');
     } else if (this.conversationActive()) {
       this.appState.transitionTo('inactive');
@@ -189,8 +276,12 @@ export class VoiceSessionService {
         this.bridge.sendSpeakingState(speaking);
       },
       onWorking: (working) => {
-        if (working) this.appState.transitionTo('working');
-        this.syncAppState();
+        this._jobRunning.set(working);
+        if (working) {
+          this.appState.transitionTo('working');
+        } else {
+          this.syncAppState();
+        }
       },
       onToolActivity: (event) => {
         this.toolActivity.set({ ...event, at: Date.now() });
@@ -203,11 +294,63 @@ export class VoiceSessionService {
           this.syncAppState();
         }
       },
-      onClosed: () => this.stopSession(),
+      onClosed: (reason) => {
+        if (reason) {
+          this.toast.warn('Voice disconnected', reason);
+        }
+        this.stopSession();
+      },
       onActivated: (phrase) => {
-        this.logs.append('info', 'voice', `Activated — "${phrase}"`);
+        this.logs.append('info', 'voice', `Wake phrase heard — "${phrase}"`);
         this._voiceActivated.set(true);
+        this.endPhraseArmed.set(false);
         this.syncAppState();
+        if (phrase !== '(typed input)') {
+          this.toast.success('Listening', 'Activation phrase heard — speak your request.', false);
+        }
+      },
+      onDeactivated: () => {
+        this._voiceActivated.set(false);
+        this.endPhraseArmed.set(false);
+        this.syncAppState();
+      },
+      onWakeRejected: (heard, expectedWake) => {
+        this.logs.append('info', 'voice', `Wake rejected — heard "${heard}"`);
+        this.toast.warn(
+          `Say "${expectedWake}" first`,
+          `Heard: "${heard.slice(0, 80)}". Other speech is ignored until you activate.`,
+        );
+      },
+      onSttError: (message) => {
+        this.logs.append('error', 'voice', 'STT error', message);
+        this.toast.error('Speech input error', message);
+      },
+      onTurnError: (message) => {
+        this.logs.append('error', 'voice', 'Request failed', message);
+        this.toast.error('Request failed', message);
+      },
+      onTurnComplete: () => {
+        this.toolActivity.set(null);
+        this.submittingTurn.set(false);
+      },
+      onEndPhraseArmed: (phrase) => {
+        this.endPhraseArmed.set(true);
+        this.submittingTurn.set(false);
+        this.logs.append('info', 'voice', `End phrase armed — say "${phrase}" when finished`);
+      },
+      onEndPhraseDetected: (phrase) => {
+        this.endPhraseArmed.set(false);
+        this.submittingTurn.set(true);
+        this.logs.append('info', 'voice', `End phrase heard — "${phrase}" (stopping mic, submitting)`);
+      },
+      onTurnSubmitted: (reason) => {
+        this.submittingTurn.set(false);
+        this.endPhraseArmed.set(false);
+        this.logs.append(
+          'info',
+          'voice',
+          reason === 'end_word' ? 'Turn sent (end phrase)' : 'Turn sent (silence)',
+        );
       },
       relayToolCall: async (callId, name, args) => {
         this.onToolActivityLocal(name, 'start', args);

@@ -18,9 +18,8 @@ body {
 }
 
 .cv-topbar {
-  position: sticky;
-  top: 0;
-  z-index: 10;
+  position: relative;
+  z-index: 1;
 }
 
 .cv-tabnav {
@@ -47,6 +46,135 @@ body {
   align-items: center;
   gap: 0.5rem;
   margin-bottom: 0.75rem;
+}
+
+.cv-voice-project-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.cv-voice-project-col,
+.cv-voice-session-col {
+  min-width: 0;
+}
+
+@media (max-width: 520px) {
+  .cv-voice-project-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.cv-shell-header {
+  position: sticky;
+  top: 0;
+  z-index: 1200;
+  background: var(--p-surface-ground, #0f172a);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.cv-topbar {
+  border-bottom: none;
+}
+
+.cv-live-log-panel {
+  border-top: 1px solid rgba(59, 130, 246, 0.14);
+  background: rgba(15, 23, 42, 0.92);
+}
+
+.cv-live-log-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.4rem 0.75rem;
+}
+
+.cv-live-log-panel-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.8;
+}
+
+.cv-live-log-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.cv-live-log-viewport {
+  height: 9rem;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+}
+
+.cv-live-log-empty {
+  margin: 0;
+  padding: 0.75rem;
+  font-size: 0.8125rem;
+  opacity: 0.65;
+  text-align: center;
+}
+
+.cv-live-log-spacer {
+  position: relative;
+  width: 100%;
+}
+
+.cv-live-log-window {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+}
+
+.cv-live-log-row {
+  display: grid;
+  grid-template-columns: 4.5rem 3.5rem 1fr;
+  align-items: center;
+  gap: 0.5rem;
+  height: 28px;
+  padding: 0 0.75rem;
+  font-size: 0.8125rem;
+  line-height: 28px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cv-live-log-time {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.65;
+  font-size: 0.75rem;
+}
+
+.cv-live-log-category {
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  opacity: 0.55;
+}
+
+.cv-live-log-message {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cv-live-log-detail {
+  opacity: 0.75;
+}
+
+.cv-live-log-row--warn .cv-live-log-message {
+  color: #fbbf24;
+}
+
+.cv-live-log-row--error .cv-live-log-message {
+  color: #f87171;
 }
 
 .cv-voice-summary-hint {
@@ -167,6 +295,10 @@ body {
   font-weight: 600;
   letter-spacing: 0.02em;
   color: var(--p-surface-0, #f8fafc);
+}
+
+.cv-voice-orb-caption--active {
+  color: #bbf7d0;
 }
 
 .cv-voice-orb-hint {

@@ -13,11 +13,11 @@ export interface RunModeInfo {
   webPort: number;
   /** Local bind URL for the bridge (always 127.0.0.1). */
   backendUrl: string;
-  /** URL the user opens in the browser. */
+  /** URL the user opens in the browser (test mode: Angular dev server). */
   webUrl: string;
   /** Tailscale / public HTTPS origin (serve mode only, when set). */
   publicBaseUrl?: string;
-  /** In test mode Angular runs on webPort; the unified entry URL is backendPort. */
+  /** In test mode Angular runs on webPort; user opens webUrl, API/WS proxy to backendPort. */
   useDevWebServer: boolean;
 }
 
@@ -33,7 +33,7 @@ export function getRunModeInfo(settings: Settings): RunModeInfo {
       backendPort: test.backendPort,
       webPort: test.webPort,
       backendUrl: `http://127.0.0.1:${test.backendPort}`,
-      webUrl: `http://localhost:${test.backendPort}`,
+      webUrl: `http://localhost:${test.webPort}`,
       useDevWebServer: true,
     };
   }

@@ -1,36 +1,57 @@
 <p-card header="Voice">
   <p-fluid>
-    <p-iftalabel>
-      <p-select
-        inputId="project-select"
-        [options]="projectOptions()"
-        [(ngModel)]="selectedProject"
-        optionLabel="label"
-        optionValue="value"
-        placeholder="Select a project…"
-        [disabled]="projectOptions().length === 0 || !isBridgeConnected()"
-        (onChange)="onProjectChange(selectedProject)"
-        [fluid]="true" />
-      <label for="project-select">Active project</label>
-    </p-iftalabel>
+    <div class="cv-voice-project-row">
+      <p-iftalabel class="cv-voice-project-col">
+        <p-select
+          inputId="project-select"
+          [options]="projectOptions()"
+          [(ngModel)]="selectedProject"
+          optionLabel="label"
+          optionValue="value"
+          placeholder="Select a project…"
+          [disabled]="projectOptions().length === 0 || !isBridgeConnected()"
+          (onChange)="onProjectChange(selectedProject)"
+          [fluid]="true" />
+        <label for="project-select">Project</label>
+      </p-iftalabel>
 
-    @if (activeProviderLabel(); as provider) {
+      <p-iftalabel class="cv-voice-session-col">
+        <p-multiselect
+          inputId="session-select"
+          [options]="sessionOptions()"
+          [(ngModel)]="selectedSessionIds"
+          optionLabel="label"
+          optionValue="value"
+          placeholder="Cursor session…"
+          [disabled]="!selectedProject || !isBridgeConnected() || loadingSessions()"
+          [loading]="loadingSessions()"
+          [selectionLimit]="1"
+          [showToggleAll]="false"
+          [maxSelectedLabels]="1"
+          display="chip"
+          [filter]="sessionOptions().length > 6"
+          (ngModelChange)="onSessionChange($event)"
+          [fluid]="true" />
+        <label for="session-select">Cursor session</label>
+      </p-iftalabel>
+    </div>
+
+    <p-message severity="secondary" variant="simple" [text]="sessionHint()" />
+
+    @if (workflowLabel(); as label) {
       <div class="cv-voice-summary">
-        <span>Using</span>
-        <p-tag [value]="provider" severity="info" />
-        @if (activeModelLabel(); as model) {
-          <p-tag [value]="model" severity="secondary" />
+        <span>Workflow</span>
+        <p-tag [value]="label" severity="info" />
+        @if (audioBackendLabel(); as audio) {
+          <p-tag [value]="audio" severity="secondary" />
         }
       </div>
-      <p-message
-        severity="secondary"
-        variant="simple"
-        text="Research runs via headless cursor-agent CLI on this machine — not the Cursor IDE Agents sidebar." />
+      <p-message severity="secondary" variant="simple" [text]="workflowHint()" />
     } @else {
       <p-message
         severity="warn"
         variant="simple"
-        text="No voice provider configured. Add keys under Providers &amp; Models." />
+        text="Bridge settings not loaded. Check connection under Connection tab." />
     }
 
     <div
@@ -57,40 +78,112 @@
           [spectrum]="voiceSession.audioSpectrum()"
           [live]="voiceSession.conversationActive()"
           [dimmed]="pttDisabled()"
+          [colorMode]="orbColorMode()"
           [expanded]="
             voiceSession.conversationActive() || voiceSession.sessionConnecting()
           " />
       </button>
-      <p class="cv-voice-orb-caption">{{ orbStateLabel() }}</p>
-      <p class="cv-voice-orb-hint">{{ wakeHint() }}</p>
+      @if (orbActiveStatus(); as activeStatus) {
+        <p class="cv-voice-orb-caption cv-voice-orb-caption--active">{{ activeStatus }}</p>
+      } @else if (showOrbCaption()) {
+        <p class="cv-voice-orb-caption">{{ orbStateLabel() }}</p>
+      }
+      @if (wakeHint(); as hint) {
+        <p class="cv-voice-orb-hint">{{ hint }}</p>
+      }
+      @if (voiceSession.conversationActive()) {
+        <p-button
+          [icon]="voiceSession.micMuted() ? 'pi pi-volume-off' : 'pi pi-microphone'"
+          [label]="voiceSession.micMuted() ? 'Unmute' : 'Mute'"
+          [severity]="voiceSession.micMuted() ? 'warn' : 'secondary'"
+          [outlined]="true"
+          size="small"
+          (onClick)="toggleMicMute()" />
+      }
     </div>
+
+    @if (showTextInput()) {
+      <p-fieldset legend="Type to test">
+        <p-fluid>
+          @if (!voiceSession.conversationActive()) {
+            <p-message
+              severity="info"
+              variant="simple"
+              text="Send starts a session automatically — no wake phrase needed for typed messages." />
+          }
+          <p-iftalabel>
+            <input
+              pInputText
+              id="typed-message"
+              [(ngModel)]="typedMessage"
+              placeholder="Ask Cursor something…"
+              (keydown.enter)="sendTypedMessage()" />
+            <label for="typed-message">Message</label>
+          </p-iftalabel>
+          <p-button
+            label="Send"
+            icon="pi pi-send"
+            [disabled]="!typedMessage.trim() || appState.state() === 'working'"
+            (onClick)="sendTypedMessage()" />
+        </p-fluid>
+      </p-fieldset>
+    }
   </p-fluid>
 </p-card>
 
-<p-card header="Activation phrase">
+<p-card header="Voice phrases & submit">
   <p-fluid>
     <p-message
       severity="secondary"
       variant="simple"
-      text="Say this phrase to activate the assistant after tapping the orb. Only tapping the orb ends the call — no spoken stop word." />
+      text="Start phrase activates the mic (Vosk, offline). After that, speech is buffered until silence or the submit phrase (also Vosk). Tap the orb to hang up." />
 
-    <p-fieldset legend="Phrase">
+    <p-fieldset legend="Start phrase (wake)">
       <p-iftalabel>
         <input
           pInputText
           id="wake-start"
           [(ngModel)]="wakeStart"
-          placeholder="From config.json"
+          placeholder="cursor listen"
           [disabled]="!isBridgeConnected()" />
         <label for="wake-start">Activation phrase</label>
       </p-iftalabel>
-
-      <p-button
-        label="Save activation phrase"
-        icon="pi pi-save"
-        [loading]="savingWakeWords"
-        [disabled]="!isBridgeConnected()"
-        (onClick)="onSaveWakeWords()" />
     </p-fieldset>
+
+    <p-fieldset legend="Submit">
+      <p-iftalabel>
+        <input
+          pInputText
+          id="wake-end"
+          [(ngModel)]="wakeEnd"
+          placeholder="cursor send"
+          [disabled]="!isBridgeConnected()" />
+        <label for="wake-end">Submit phrase (blank = silence only)</label>
+      </p-iftalabel>
+
+      <p-iftalabel>
+        <input
+          pInputText
+          id="silence-submit"
+          type="number"
+          min="500"
+          max="30000"
+          step="100"
+          [(ngModel)]="silenceSubmitMs"
+          [disabled]="!isBridgeConnected()" />
+        <label for="silence-submit">Silence submit (ms)</label>
+      </p-iftalabel>
+      <p-message
+        severity="secondary"
+        variant="simple"
+        text="Auto-send after this many milliseconds of silence following your last speech. Whichever comes first — silence or submit phrase — sends the turn." />
+    </p-fieldset>
+
+    <p-button
+      label="Save voice phrases"
+      icon="pi pi-save"
+      [loading]="savingWakeWords"
+      [disabled]="!isBridgeConnected()"
+      (onClick)="onSaveWakeWords()" />
   </p-fluid>
 </p-card>

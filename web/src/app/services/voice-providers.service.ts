@@ -69,10 +69,14 @@ export class VoiceProvidersService {
     });
   }
 
-  async updateWakeWords(start: string): Promise<void> {
+  async updateWakeWords(start: string, end?: string, silenceMs?: number): Promise<void> {
     await this.mutate('/api/voice/wake-words', {
       method: 'PATCH',
-      body: JSON.stringify({ start }),
+      body: JSON.stringify({
+        start,
+        ...(end !== undefined ? { end } : {}),
+        ...(silenceMs !== undefined ? { silenceMs } : {}),
+      }),
     });
   }
 
