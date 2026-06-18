@@ -1,8 +1,11 @@
 /**
  * Browser TTS fallback when assistant text arrives without active playback.
+ * WebKit speechSynthesis first; Amazon Polly when WebKit is unavailable.
  */
 
-import { stopAmazonTts } from './amazon-tts.js';
+import { speakAmazonPolly, stopAmazonTts } from './amazon-tts.js';
+import { resolveTtsBackend, type IntelligenceAudioConfig } from './intelligence-audio.js';
+import { canUseWebkitTts } from './webkit-capabilities.js';
 import type { TtsInterruptSnapshot, TtsPlayContext, TtsPlayFn } from './tts-interrupt.js';
 
 const SPEAK_PREFIX = /^\[Speak to user\]:\s*/i;
@@ -12,8 +15,25 @@ let pendingTimer: ReturnType<typeof setTimeout> | null = null;
 let lastSpokenText = '';
 let lastSpokenAt = 0;
 let voicesPrimed = false;
+let transcriptTtsConfig: {
+  bridgeBase: string;
+  appToken: string;
+  audio: IntelligenceAudioConfig;
+} | null = null;
 
 export type { TtsPlayContext, TtsPlayFn } from './tts-interrupt.js';
+
+export function configureTranscriptTts(opts: {
+  bridgeBase: string;
+  appToken: string;
+  audio: IntelligenceAudioConfig;
+}): void {
+  transcriptTtsConfig = opts;
+}
+
+export function clearTranscriptTts(): void {
+  transcriptTtsConfig = null;
+}
 
 export function stripSpeakPrefix(text: string): string {
   return text.replace(SPEAK_PREFIX, '').trim();
@@ -165,7 +185,7 @@ export class TtsPile {
 
 function playWebkitLine(text: string, ctx?: TtsPlayContext): Promise<void> {
   return new Promise((resolve) => {
-    if (typeof window === 'undefined' || !window.speechSynthesis) {
+    if (!canUseWebkitTts()) {
       resolve();
       return;
     }
@@ -195,20 +215,41 @@ function playWebkitLine(text: string, ctx?: TtsPlayContext): Promise<void> {
       ctx?.onStart();
     };
     utter.onend = () => {
-      // Cancel after onend to prevent Chrome's ghost-restart loop where the
-      // browser replays the utterance silently after the synthesis queue closes.
       window.speechSynthesis.cancel();
       finish();
     };
     utter.onerror = () => finish();
-    // Cancel any lingering synthesis before starting — prevents Chrome overlap.
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(utter);
   });
 }
 
-/** WebKit-only pile for llm_intelligence transcript fallback. */
-const webkitPile = new TtsPile((text, ctx) => playWebkitLine(text, ctx));
+async function playTranscriptLine(text: string, ctx?: TtsPlayContext): Promise<void> {
+  const cfg = transcriptTtsConfig;
+  const backend = cfg ? resolveTtsBackend(cfg.audio) : canUseWebkitTts() ? 'webkit' : 'none';
+
+  if (backend === 'webkit') {
+    await playWebkitLine(text, ctx);
+    return;
+  }
+  if (backend === 'amazon_polly' && cfg) {
+    await speakAmazonPolly(text, cfg.bridgeBase, cfg.appToken, ctx);
+    lastSpokenAt = Date.now();
+    lastSpokenText = text;
+    return;
+  }
+  if (canUseWebkitTts()) {
+    await playWebkitLine(text, ctx);
+    return;
+  }
+  if (cfg?.audio.amazonAvailable) {
+    await speakAmazonPolly(text, cfg.bridgeBase, cfg.appToken, ctx);
+    lastSpokenAt = Date.now();
+    lastSpokenText = text;
+  }
+}
+
+const transcriptPile = new TtsPile((text, ctx) => playTranscriptLine(text, ctx));
 
 function prepareSpeechSynthesis(): void {
   if (typeof window === 'undefined' || !window.speechSynthesis) return;
@@ -219,6 +260,12 @@ function prepareSpeechSynthesis(): void {
   }
 }
 
+function canPlayTranscriptTts(): boolean {
+  if (canUseWebkitTts()) return true;
+  const cfg = transcriptTtsConfig;
+  return Boolean(cfg?.audio.amazonAvailable && cfg.audio.ttsFallback === 'amazon_polly');
+}
+
 /** Enqueue browser TTS — lines pile and play sequentially. */
 export function speakTtsNow(text: string): void {
   if (pendingTimer) {
@@ -227,10 +274,10 @@ export function speakTtsNow(text: string): void {
   }
 
   const clean = textForSpeech(text);
-  if (!clean || typeof window === 'undefined' || !window.speechSynthesis) return;
+  if (!clean || !canPlayTranscriptTts()) return;
   if (clean === lastSpokenText && Date.now() - lastSpokenAt < 10_000) return;
 
-  webkitPile.enqueue(clean);
+  transcriptPile.enqueue(clean);
 }
 
 /**
@@ -238,7 +285,7 @@ export function speakTtsNow(text: string): void {
  */
 export function scheduleTtsFallback(text: string, isSpeaking: () => boolean): void {
   const trimmed = text.trim();
-  if (!trimmed || typeof window === 'undefined' || !window.speechSynthesis) return;
+  if (!trimmed || !canPlayTranscriptTts()) return;
 
   if (pendingTimer) clearTimeout(pendingTimer);
   pendingTimer = setTimeout(() => {
@@ -258,5 +305,5 @@ export function cancelTtsFallback(): void {
 
 export function stopAllTts(): void {
   cancelTtsFallback();
-  webkitPile.interrupt();
+  transcriptPile.interrupt();
 }

@@ -16,6 +16,7 @@
  *   { type: "thinking", value }     Orchestrator / Cursor busy
  *   { type: "turn_complete" }
  *   { type: "tool_activity", tool, phase, label?, detail? }
+ *   { type: "session_log", subcategory, level, summary, detail?, at }
  *   { type: "error", message }
  */
 

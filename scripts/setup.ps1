@@ -143,7 +143,7 @@ Section "Building project"
 
 Info "Installing npm dependencies..."
 npm ci --no-audit --prefer-offline
-if ($LASTEXITCODE -ne 0) { npm install --no-audit }
+if ($LASTEXITCODE -ne 0) { npm install --no-audit --legacy-peer-deps }
 
 Info "Building backend + PWA..."
 npm run build

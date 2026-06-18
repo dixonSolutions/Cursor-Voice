@@ -13,6 +13,7 @@ import { Tag } from 'primeng/tag';
 
 import type { LogEntry } from '../../services/log.service';
 import { LogService } from '../../services/log.service';
+import { ToastService } from '../../services/toast.service';
 import { VoiceSessionService } from '../../services/voice-session.service';
 
 const ITEM_HEIGHT_PX = 28;
@@ -30,6 +31,7 @@ const SCROLL_STICK_EPS_PX = 12;
 export class LiveLogPanelComponent implements AfterViewInit, OnDestroy {
   protected readonly logs = inject(LogService);
   protected readonly voiceSession = inject(VoiceSessionService);
+  private readonly toast = inject(ToastService);
 
   @ViewChild('viewport') private viewport?: ElementRef<HTMLDivElement>;
 
@@ -115,6 +117,21 @@ export class LiveLogPanelComponent implements AfterViewInit, OnDestroy {
       minute: '2-digit',
       second: '2-digit',
     });
+  }
+
+  protected categoryLabel(entry: LogEntry): string {
+    return entry.subcategory ?? entry.category;
+  }
+
+  protected async copyEntry(entry: LogEntry, event: Event): Promise<void> {
+    event.stopPropagation();
+    const text = this.logs.formatEntryLine(entry);
+    try {
+      await navigator.clipboard.writeText(text);
+      this.toast.success('Copied', undefined, false);
+    } catch {
+      this.toast.error('Copy failed', 'Could not access clipboard.');
+    }
   }
 
   protected trackEntry(_index: number, entry: LogEntry): number {

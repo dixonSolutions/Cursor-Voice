@@ -1,5 +1,15 @@
 /** Shared callback types for cursor_native and llm_intelligence voice sessions. */
 
+export type VoiceLogSubcategory = 'stt' | 'tts' | 'tool' | 'pipeline';
+export type VoiceLogLevel = 'info' | 'warn' | 'error' | 'debug';
+
+export interface VoiceSessionLogEvent {
+  subcategory: VoiceLogSubcategory;
+  level: VoiceLogLevel;
+  summary: string;
+  detail?: string;
+}
+
 export interface VoiceAgentStatusEvent {
   runId: string;
   pid: number;
@@ -28,6 +38,7 @@ export interface SessionCallbacks {
   onEndPhraseArmed?(phrase: string): void;
   onEndPhraseDetected?(phrase: string): void;
   onTurnSubmitted?(reason: 'silence' | 'vad' | 'end_word'): void;
+  onVoiceLog?(event: VoiceSessionLogEvent): void;
   relayToolCall(callId: string, name: string, args: unknown): Promise<unknown>;
   onToolActivity?(event: {
     tool: string;

@@ -35,13 +35,22 @@
                 [class.cv-live-log-row--warn]="entry.level === 'warn'"
                 [class.cv-live-log-row--error]="entry.level === 'error'">
                 <time class="cv-live-log-time">{{ formatTime(entry.at) }}</time>
-                <span class="cv-live-log-category">{{ entry.category }}</span>
-                <span class="cv-live-log-message" [title]="entry.detail ?? ''">
-                  {{ entry.summary }}
-                  @if (entry.detail) {
-                    <span class="cv-live-log-detail"> — {{ entry.detail }}</span>
-                  }
-                </span>
+                <span class="cv-live-log-category">{{ categoryLabel(entry) }}</span>
+                <div class="cv-live-log-message-scroll">
+                  <span class="cv-live-log-message">
+                    {{ entry.summary }}
+                    @if (entry.detail) {
+                      <span class="cv-live-log-detail"> — {{ entry.detail }}</span>
+                    }
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  class="cv-live-log-copy"
+                  aria-label="Copy log line"
+                  (click)="copyEntry(entry, $event)">
+                  <i class="pi pi-copy" aria-hidden="true"></i>
+                </button>
               </div>
             }
           </div>

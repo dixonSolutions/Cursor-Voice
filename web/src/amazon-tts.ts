@@ -3,6 +3,7 @@
  */
 
 import type { TtsPlayContext } from './tts-interrupt.js';
+import { canUseWebkitTts } from './webkit-capabilities.js';
 
 const MAX_TTS_CHARS = 3000;
 let currentAudio: HTMLAudioElement | null = null;
@@ -19,8 +20,9 @@ export function stopAmazonTts(): void {
   }
 }
 
+/** @deprecated use canUseWebkitTts — kept for existing imports */
 export function isWebkitTtsSupported(): boolean {
-  return typeof window !== 'undefined' && Boolean(window.speechSynthesis);
+  return canUseWebkitTts();
 }
 
 /** Fetch Polly MP3 from bridge and play; resolves when playback ends or aborts. */

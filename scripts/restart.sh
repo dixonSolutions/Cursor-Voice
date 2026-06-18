@@ -86,7 +86,7 @@ else
   section "Building"
   info "Using NODE_BIN=${NODE_BIN}  NPM_BIN=${NPM_BIN}"
   info "Checking dependencies..."
-  "$NPM_BIN" ci --no-audit --prefer-offline 2>/dev/null || "$NPM_BIN" install --no-audit
+  "$NPM_BIN" ci --no-audit --prefer-offline 2>/dev/null || "$NPM_BIN" install --no-audit --legacy-peer-deps
   "$NPM_BIN" rebuild
 
   info "Building backend + PWA..."
