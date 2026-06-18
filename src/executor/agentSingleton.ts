@@ -1,16 +1,23 @@
 /**
- * Global cursor-agent singleton — at most ONE CLI process for the whole bridge.
+ * cursor-agent process registry.
  *
- * Nova Sonic may emit parallel toolUse events; ask and submit used to spawn
- * independent processes. This gate ensures only one cursor-agent runs at a time.
+ * Tracks two categories of workers:
+ *   - Singleton (active): the primary worker agent for the current session.
+ *     At most one at a time; cursor_ask and cursor_submit share this slot.
+ *   - Worktree pool: additional parallel agents running in isolated git worktrees.
+ *     No concurrency limit beyond maxConcurrentJobs; each uses a separate tree.
+ *
+ * Voice agent (src/executor/voiceAgent.ts) is tracked separately and is always
+ * excluded from these lists — use getActiveVoiceAgent() for the voice loop.
  */
 
 import { childLogger } from '../log.js';
 import type { AgentHandle } from './cursorAgent.js';
+import type { Watcher } from './watcher.js';
 
 const log = childLogger('agent-singleton');
 
-export type AgentRunKind = 'ask' | 'job';
+export type AgentRunKind = 'ask' | 'job' | 'worktree';
 
 export interface ActiveAgentRun {
   kind: AgentRunKind;
@@ -20,8 +27,13 @@ export interface ActiveAgentRun {
   pid: number;
   handle: AgentHandle;
   /** Live stream watcher (cursor_ask and cursor_submit). */
-  watcher?: import('./watcher.js').Watcher;
+  watcher?: Watcher;
+  /** Worktree name, if this is a worktree worker. */
+  worktreeName?: string;
+  startedAt: Date;
 }
+
+// ── Singleton (primary worker) ────────────────────────────────────────────
 
 let active: ActiveAgentRun | null = null;
 
@@ -48,7 +60,7 @@ export function assertAgentAvailable(): void {
   const hint =
     active.kind === 'ask'
       ? 'Wait for the answer — use cursor_status for live progress; do not retry cursor_ask.'
-      : 'Wait for it to finish or call cursor_stop to cancel the job.';
+      : 'Wait for it to finish or call stop_agent, or use spawn_agent with use_worktree: true to run in parallel.';
   throw new Error(`Cursor is already busy (${label}, pid ${active.pid}). ${hint}`);
 }
 
@@ -58,7 +70,7 @@ export function registerAgentRun(params: {
   refId: string;
   sessionKey: string;
   handle: AgentHandle;
-  watcher?: import('./watcher.js').Watcher;
+  watcher?: Watcher;
 }): void {
   if (active) {
     throw new Error('Agent singleton race — slot already held');
@@ -70,6 +82,7 @@ export function registerAgentRun(params: {
     pid: params.handle.pid,
     handle: params.handle,
     watcher: params.watcher,
+    startedAt: new Date(),
   };
   log.info(
     { kind: params.kind, refId: params.refId, pid: params.handle.pid },
@@ -93,4 +106,74 @@ export function killActiveAgent(reason: string): boolean {
   active.handle.kill();
   active = null;
   return true;
+}
+
+// ── Worktree worker pool (parallel agents) ────────────────────────────────
+
+/** jobId → ActiveAgentRun for worktree-isolated parallel workers. */
+const worktreePool = new Map<string, ActiveAgentRun>();
+
+/** Register a worktree worker. Multiple can run concurrently. */
+export function registerWorktreeAgent(params: {
+  refId: string;
+  worktreeName: string;
+  sessionKey: string;
+  handle: AgentHandle;
+  watcher?: Watcher;
+}): void {
+  const run: ActiveAgentRun = {
+    kind: 'worktree',
+    refId: params.refId,
+    sessionKey: params.sessionKey,
+    pid: params.handle.pid,
+    handle: params.handle,
+    watcher: params.watcher,
+    worktreeName: params.worktreeName,
+    startedAt: new Date(),
+  };
+  worktreePool.set(params.refId, run);
+  log.info(
+    { refId: params.refId, worktree: params.worktreeName, pid: params.handle.pid },
+    'worktree agent registered',
+  );
+}
+
+/** Release a worktree worker (called on completion or stop). */
+export function releaseWorktreeAgent(refId: string): void {
+  const run = worktreePool.get(refId);
+  if (!run) return;
+  run.watcher?.destroy();
+  worktreePool.delete(refId);
+  log.info({ refId, worktree: run.worktreeName, pid: run.pid }, 'worktree agent released');
+}
+
+/** Kill a worktree worker by job ID. Returns false if not found. */
+export function killWorktreeAgent(refId: string, reason: string): boolean {
+  const run = worktreePool.get(refId);
+  if (!run) return false;
+  log.warn({ refId, worktree: run.worktreeName, pid: run.pid, reason }, 'killing worktree agent');
+  run.watcher?.destroy();
+  run.handle.kill();
+  worktreePool.delete(refId);
+  return true;
+}
+
+/** Number of worktree agents currently running. */
+export function getWorktreeAgentCount(): number {
+  return worktreePool.size;
+}
+
+// ── Combined view ─────────────────────────────────────────────────────────
+
+/**
+ * Return all currently running worker agents (singleton + all worktree workers).
+ * Excludes the voice agent — call getActiveVoiceAgent() for that.
+ */
+export function getAllActiveRuns(): ReadonlyArray<Readonly<ActiveAgentRun>> {
+  const result: ActiveAgentRun[] = [];
+  if (active) result.push(active);
+  for (const run of worktreePool.values()) {
+    result.push(run);
+  }
+  return result;
 }

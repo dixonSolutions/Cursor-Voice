@@ -1,16 +1,29 @@
 /**
- * MCP SSE server — exposes cursor-voice tools to Cursor via the MCP protocol.
+ * MCP Streamable HTTP server — exposes all cursor-voice tools to Cursor.
  *
  * Cursor registers this bridge as an MCP server via global ~/.cursor/mcp.json.
- * Once connected, Cursor's conversational agent can call:
- *   speak / done / next_voice_turn  — voice I/O
- *   list_agents / get_agent_status / spawn_agent / stop_agent / inject — agent management
- *   set_mode / execute_plan / cursor_diff / cursor_revert — mode & git control
+ * Once connected, Cursor's conversational agent can call every tool listed below.
  *
- * Transport: MCP Streamable HTTP (superset of SSE, preferred over legacy SSE).
+ * Tool groups:
+ *   Voice I/O    — speak, done, next_voice_turn
+ *   Identity     — get_session_ref
+ *   Agents       — list_agents, get_agent_status, get_agent_output,
+ *                  spawn_agent, stop_agent, inject, revert_agent
+ *   Jobs         — list_jobs_history
+ *   Mode         — set_mode, execute_plan
+ *   Project      — cursor_list_projects, cursor_set_project
+ *   Model        — cursor_list_models, cursor_set_model
+ *   Execute      — cursor_submit, cursor_ask, cursor_recall_answer
+ *   Job tracking — cursor_status, cursor_stop
+ *   Session      — cursor_new_session, cursor_session_info
+ *   Git          — cursor_diff, cursor_revert
+ *   System       — cursor_agent_info, cursor_agent_status
+ *   MCP inspect  — cursor_mcp_list, cursor_mcp_tools
+ *
+ * Transport: MCP Streamable HTTP (preferred over legacy SSE).
  * Auth: same Bearer token as /api/*.
  *
- * See docs/16-mcp-server-cursor-as-brain.md.
+ * See docs/16-mcp-server-cursor-as-brain.md and docs/11-mcp-tool-surface.md.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -51,9 +64,9 @@ function buildMcpServer(sessionKey: string): McpServer {
 
   server.tool(
     'speak',
-    'Speak to the user out loud. Call one sentence at a time for low latency. ' +
-      'The user cannot see your text — you must call speak() to communicate.',
-    { text: z.string().min(1).describe('Exact words to speak to the user.') },
+    'Speak to the user out loud. Call one sentence at a time for low first-audio latency. ' +
+      'The user cannot see text — you MUST call speak() to communicate anything.',
+    { text: z.string().min(1).describe('Exact words to speak aloud. One sentence per call.') },
     async ({ text }) => {
       const result = handleSpeak({ text });
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
@@ -63,7 +76,7 @@ function buildMcpServer(sessionKey: string): McpServer {
   server.tool(
     'done',
     'Signal that you have finished speaking. The mic re-arms so the user can respond. ' +
-      'Call after your last speak() in each turn.',
+      'Always call done() after your last speak() in each conversational turn.',
     {},
     async () => {
       const result = handleDone();
@@ -73,10 +86,10 @@ function buildMcpServer(sessionKey: string): McpServer {
 
   server.tool(
     'next_voice_turn',
-    'Receive the next user utterance. Long-polls up to timeout_ms (default 30 s). ' +
-      'Returns { turn: null } on timeout — call again to keep listening. ' +
-      'On barge-in during TTS, tts_interrupt reports what the user actually heard. ' +
-      'Always call done() before next_voice_turn() to re-arm the mic first.',
+    'Wait for and receive the next user utterance. Long-polls up to timeout_ms (default 30 s). ' +
+      'Returns { turn: null } on timeout — call again immediately to keep listening. ' +
+      'Call done() before next_voice_turn() to re-arm the mic first. ' +
+      'On barge-in, tts_interrupt reports what the user actually heard.',
     {
       timeout_ms: z
         .number()
@@ -92,12 +105,27 @@ function buildMcpServer(sessionKey: string): McpServer {
     },
   );
 
+  // ── Identity ───────────────────────────────────────────────────────────
+
+  server.tool(
+    'get_session_ref',
+    'Get your current identity: voice agent run ID, cursor session ID (resume ref), ' +
+      'MCP session ID, active job ID, active project, active model, and preferred spawn mode. ' +
+      'Call this to orient yourself after a resume or when session state is unclear.',
+    {},
+    async () => {
+      const result = agentTools.handleGetSessionRef();
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    },
+  );
+
   // ── Agent management ───────────────────────────────────────────────────
 
   server.tool(
     'list_agents',
-    'Return all running agent sessions with id, kind, pid, and current activity. ' +
-      'Call before answering "what are you working on?".',
+    'Return all running worker agents (singleton + parallel worktree workers) and the voice agent. ' +
+      'Shows id, kind, pid, current activity, elapsed time, and worktree name. ' +
+      'Call before answering "what are you working on?" or before spawning a new worker.',
     {},
     async () => {
       const result = agentTools.handleListAgents();
@@ -107,8 +135,9 @@ function buildMcpServer(sessionKey: string): McpServer {
 
   server.tool(
     'get_agent_status',
-    'Return detailed status — output buffer, mode, elapsed time — for a specific agent.',
-    { id: z.string().min(1).describe('Agent / job id from list_agents or spawn_agent.') },
+    'Get live status for a specific agent: activity, files written/read, shell commands run, and elapsed time. ' +
+      'For completed jobs, returns summary, error, and status from the database.',
+    { id: z.string().min(1).describe('Agent or job ID from list_agents, spawn_agent, or list_jobs_history.') },
     async ({ id }) => {
       const result = await agentTools.handleGetAgentStatus({ id });
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
@@ -116,26 +145,67 @@ function buildMcpServer(sessionKey: string): McpServer {
   );
 
   server.tool(
-    'spawn_agent',
-    "Start a new worker agent session with the given coding instructions. " +
-      "Speak to confirm intent first — don't start silently.",
+    'get_agent_output',
+    'Get the full event log for an agent: tool calls, file writes, shell runs, and output text. ' +
+      'Paginated — use offset/limit for large histories. ' +
+      'For running agents, returns the in-memory rolling event buffer. ' +
+      'For completed agents, reads from the database.',
     {
-      instructions: z.string().min(1).describe("The coding task — use the user's exact words."),
-      mode: z
-        .enum(['agent', 'plan'])
-        .optional()
-        .describe('agent = apply changes immediately; plan = propose only. Default agent.'),
+      id: z.string().min(1).describe('Agent or job ID.'),
+      offset: z.number().int().min(0).optional().describe('Event index to start from (default 0).'),
+      limit: z.number().int().min(1).max(50).optional().describe('Events to return (default 20, max 50).'),
     },
-    async ({ instructions, mode }) => {
-      const result = await agentTools.handleSpawnAgent({ instructions, mode });
+    async ({ id, offset, limit }) => {
+      const result = await agentTools.handleGetAgentOutput({ id, offset, limit });
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    },
+  );
+
+  server.tool(
+    'spawn_agent',
+    'Start a new worker agent with the given coding instructions. ' +
+      'Modes: agent (default, applies changes), plan (proposes then waits), ' +
+      'ask (read-only), debug (instruments and investigates). ' +
+      'Set use_worktree: true to run in an isolated git worktree alongside the current worker ' +
+      '— this enables true parallel execution without working-tree conflicts. ' +
+      "Speak to confirm the task with the user before spawning. Don't start silently.",
+    {
+      instructions: z.string().min(1).describe("The coding task — use the user's words."),
+      mode: z
+        .enum(['agent', 'plan', 'ask', 'debug'])
+        .optional()
+        .describe(
+          'agent = apply changes; plan = propose only; ask = read-only; ' +
+          'debug = agent mode with debugging focus. Default: stored preference or "agent".',
+        ),
+      use_worktree: z
+        .boolean()
+        .optional()
+        .describe(
+          'Run in an isolated git worktree. Allows parallel agents on the same project. ' +
+          'Each worktree is independent — no shared working-tree conflicts.',
+        ),
+      worktree_name: z
+        .string()
+        .optional()
+        .describe('Optional worktree name (auto-generated if not set). Alphanumeric + hyphens.'),
+    },
+    async ({ instructions, mode, use_worktree, worktree_name }) => {
+      const result = await agentTools.handleSpawnAgent({
+        instructions,
+        mode,
+        use_worktree,
+        worktree_name,
+      });
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     },
   );
 
   server.tool(
     'stop_agent',
-    'Terminate a specific worker agent immediately.',
-    { id: z.string().min(1).describe('Agent id from list_agents.') },
+    'Terminate a specific worker agent immediately (SIGTERM → SIGKILL). ' +
+      'Works for both singleton and worktree agents. Use list_agents() to get the id.',
+    { id: z.string().min(1).describe('Agent or job ID from list_agents.') },
     async ({ id }) => {
       const result = await agentTools.handleStopAgent({ id });
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
@@ -144,14 +214,60 @@ function buildMcpServer(sessionKey: string): McpServer {
 
   server.tool(
     'inject',
-    'Send additional context to a running agent (best-effort). ' +
+    'Send additional context to a running agent (best-effort stdin write). ' +
       'If not delivered, fall back to stop_agent() + spawn_agent() with amended instructions.',
     {
-      id: z.string().min(1).describe('Agent id.'),
-      message: z.string().min(1).describe('Context message to inject.'),
+      id: z.string().min(1).describe('Agent ID.'),
+      message: z.string().min(1).describe('Context to inject into the running agent.'),
     },
     async ({ id, message }) => {
       const result = await agentTools.handleInject({ id, message });
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    },
+  );
+
+  server.tool(
+    'revert_agent',
+    'Revert a project to the git checkpoint recorded before a specific job ran. ' +
+      'Uncommitted changes: git stash (safe, reversible). ' +
+      'Agent-committed changes: git reset --hard (destructive — requires confirm: true). ' +
+      'Always confirm with the user before calling with confirm: true.',
+    {
+      id: z
+        .string()
+        .min(1)
+        .describe('Job ID whose pre-run git checkpoint to revert to (from list_jobs_history or spawn_agent result).'),
+      confirm: z
+        .boolean()
+        .optional()
+        .describe(
+          'Must be true for hard reset when the agent made commits. ' +
+          'Obtain explicit user confirmation first.',
+        ),
+    },
+    async ({ id, confirm }) => {
+      const result = await agentTools.handleRevertAgent({ id, confirm });
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    },
+  );
+
+  // ── Job history ────────────────────────────────────────────────────────
+
+  server.tool(
+    'list_jobs_history',
+    'List recent jobs for the active project (or a specified project). ' +
+      'Returns id, mode, prompt, status, files changed, summary, error, and timing. ' +
+      'Use to find job IDs for revert_agent or get_agent_output on completed work.',
+    {
+      project: z.string().optional().describe('Project name (defaults to active project).'),
+      limit: z.number().int().min(1).max(30).optional().describe('Max jobs to return (default 10).'),
+      status_filter: z
+        .enum(['all', 'done', 'error', 'stopped'])
+        .optional()
+        .describe('Filter by status (default: all).'),
+    },
+    async ({ project, limit, status_filter }) => {
+      const result = await agentTools.handleListJobsHistory({ project, limit, status_filter });
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     },
   );
@@ -160,55 +276,302 @@ function buildMcpServer(sessionKey: string): McpServer {
 
   server.tool(
     'set_mode',
-    'Change the mode of a specific agent session. Scoped to that session — never affects global settings.',
+    'Store the preferred spawn mode for this session. ' +
+      'The next spawn_agent() call will use this mode if no explicit mode is given. ' +
+      'Modes: agent (default), plan (propose before apply), ask (read-only), ' +
+      'debug (agent + debugging focus). ' +
+      'Does NOT restart or modify any running agent.',
     {
-      id: z.string().min(1).describe('Agent id.'),
+      id: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Agent context id (informational — mode is session-scoped, not per-agent).'),
       mode: z
         .enum(['ask', 'agent', 'debug', 'plan'])
-        .describe('Target mode for the session.'),
+        .describe('Mode to use for the next spawn_agent call.'),
     },
     async ({ id, mode }) => {
-      const result = await agentTools.handleSetMode({ id, mode });
+      const result = await agentTools.handleSetMode({ id: id ?? 'session', mode });
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     },
   );
 
   server.tool(
     'execute_plan',
-    'Trigger plan execution on an agent that is in plan mode.',
-    { id: z.string().min(1).describe('Agent id of the plan-mode session.') },
+    'Trigger execution on a plan-mode agent — submits a follow-up that applies the proposed plan.',
+    {
+      id: z.string().min(1).describe('Agent ID of the plan-mode session.'),
+    },
     async ({ id }) => {
       const result = await agentTools.handleExecutePlan({ id });
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     },
   );
 
+  // ── Project management ─────────────────────────────────────────────────
+
+  server.tool(
+    'cursor_list_projects',
+    'List all enabled projects in the registry. ' +
+      'Returns name, description, aliases, and which is active. ' +
+      'Use before cursor_set_project or when the user asks "what can I work on?"',
+    {
+      query: z.string().optional().describe('Filter by name, alias, or description (fuzzy contains).'),
+    },
+    async ({ query }) => {
+      const result = await dispatchTool('cursor_list_projects', { query }, sessionKey);
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    },
+  );
+
+  server.tool(
+    'cursor_set_project',
+    'Set the active project for this session. Validates against the registry. ' +
+      'Speak the project description back to the user so a mishear is caught before any edits.',
+    {
+      project: z.string().describe('Project name or alias to set as active.'),
+    },
+    async ({ project }) => {
+      const result = await dispatchTool('cursor_set_project', { project }, sessionKey);
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    },
+  );
+
+  // ── Model management ───────────────────────────────────────────────────
+
+  server.tool(
+    'cursor_list_models',
+    'List available AI models. Returns id, displayName, and the currently active model. ' +
+      'Refreshes from CLI cache (TTL-based). ' +
+      'Use to find a model ID before cursor_set_model.',
+    {
+      query: z.string().optional().describe('Filter by id or display name (e.g. "claude", "fast", "thinking").'),
+    },
+    async ({ query }) => {
+      const result = await dispatchTool('cursor_list_models', { query }, sessionKey);
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    },
+  );
+
+  server.tool(
+    'cursor_set_model',
+    'Set the AI model for this session. Must be a valid model ID from cursor_list_models. ' +
+      'Default is "auto" (Cursor chooses). Change persists until session ends or model is changed again.',
+    {
+      model_id: z.string().describe('Exact model ID (from cursor_list_models, e.g. "claude-opus-4-8-thinking-high").'),
+    },
+    async ({ model_id }) => {
+      const result = await dispatchTool('cursor_set_model', { model_id }, sessionKey);
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    },
+  );
+
+  // ── Execution ──────────────────────────────────────────────────────────
+
+  server.tool(
+    'cursor_submit',
+    'Submit a coding task to cursor-agent (worker). ' +
+      'Returns immediately with a job_id. Track progress with cursor_status or get_agent_status. ' +
+      'Takes a git checkpoint automatically — use revert_agent to undo if needed.',
+    {
+      prompt: z
+        .string()
+        .min(1)
+        .max(32_768)
+        .describe("The coding task — relay the user's intent with minimal editing."),
+      project: z.string().optional().describe('Target project (defaults to active project).'),
+      mode: z
+        .enum(['agent', 'plan'])
+        .optional()
+        .describe('agent = apply changes; plan = propose only. Default: agent.'),
+    },
+    async ({ prompt, project, mode }) => {
+      const result = await dispatchTool('cursor_submit', { prompt, project, mode }, sessionKey);
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    },
+  );
+
+  server.tool(
+    'cursor_ask',
+    'Ask a read-only question about the codebase. No file edits; uses --mode ask. ' +
+      'One-shot; does not pollute the work session. ' +
+      'Use before cursor_submit when you need repo facts to draft an accurate prompt.',
+    {
+      question: z
+        .string()
+        .min(1)
+        .max(32_768)
+        .describe("The question — verbatim from the user or self-generated for repo research."),
+      project: z.string().optional().describe('Target project (defaults to active project).'),
+    },
+    async ({ question, project }) => {
+      const result = await dispatchTool('cursor_ask', { question, project }, sessionKey);
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    },
+  );
+
+  server.tool(
+    'cursor_recall_answer',
+    'Return the last cursor_ask result without re-running cursor-agent. ' +
+      'Use for summarize / repeat / expand follow-ups on the previous answer.',
+    {
+      format: z
+        .enum(['brief', 'full'])
+        .optional()
+        .describe('brief = voice-length summary (default); full = complete text.'),
+    },
+    async ({ format }) => {
+      const result = await dispatchTool('cursor_recall_answer', { format }, sessionKey);
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    },
+  );
+
+  // ── Job tracking ───────────────────────────────────────────────────────
+
+  server.tool(
+    'cursor_status',
+    'Poll a running or completed job. Returns status, recent progress events, summary, ' +
+      'diffstat, and session ID. Call periodically while waiting for a long job.',
+    {
+      job_id: z
+        .string()
+        .uuid()
+        .optional()
+        .describe('Job UUID from cursor_submit or spawn_agent (defaults to the active job).'),
+    },
+    async ({ job_id }) => {
+      const result = await dispatchTool('cursor_status', { job_id }, sessionKey);
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    },
+  );
+
+  server.tool(
+    'cursor_stop',
+    'Terminate the active cursor_submit job (SIGTERM → SIGKILL). ' +
+      'Does not cancel in-flight cursor_ask calls — those run to completion.',
+    {
+      job_id: z
+        .string()
+        .uuid()
+        .optional()
+        .describe('Job UUID (defaults to the active job for this session).'),
+    },
+    async ({ job_id }) => {
+      const result = await dispatchTool('cursor_stop', { job_id }, sessionKey);
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    },
+  );
+
+  // ── Session management ─────────────────────────────────────────────────
+
+  server.tool(
+    'cursor_new_session',
+    'Clear the stored resume ID for a project so the next cursor_submit starts a fresh thread. ' +
+      'Use when the user says "start fresh" or "new conversation".',
+    {
+      project: z.string().optional().describe('Project to reset (defaults to active project).'),
+    },
+    async ({ project }) => {
+      const result = await dispatchTool('cursor_new_session', { project }, sessionKey);
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    },
+  );
+
+  server.tool(
+    'cursor_session_info',
+    'Read the persisted session state for a project: resume ID, last job, last run time. ' +
+      'Useful for narrating "you were last working on X twenty minutes ago".',
+    {
+      project: z.string().optional().describe('Project to query (defaults to active project).'),
+    },
+    async ({ project }) => {
+      const result = await dispatchTool('cursor_session_info', { project }, sessionKey);
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    },
+  );
+
+  // ── Git ────────────────────────────────────────────────────────────────
+
   server.tool(
     'cursor_diff',
-    'Return the current git diff for the active project working directory.',
+    'Return the current uncommitted git diff for the active project. ' +
+      'diffstat is always included; set full_patch: true for the full diff text. ' +
+      'Use to describe what the last agent run changed.',
     {
-      id: z
-        .string()
-        .optional()
-        .describe("Session id (defaults to the active session's project)."),
+      project: z.string().optional().describe('Project to diff (defaults to active project).'),
+      full_patch: z.boolean().optional().describe('Include full patch text (default: false, stat only).'),
     },
-    async ({ id: _id }) => {
-      const result = await dispatchTool('cursor_diff', { include_patch: true }, sessionKey);
+    async ({ project, full_patch }) => {
+      const result = await dispatchTool('cursor_diff', { project, full_patch }, sessionKey);
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     },
   );
 
   server.tool(
     'cursor_revert',
-    'Revert uncommitted changes in the active project working directory.',
+    'Revert uncommitted changes in the active project. ' +
+      'Uncommitted: git stash (safe). Agent-committed: git reset --hard (requires confirm: true). ' +
+      'Always confirm with the user before hard reset.',
     {
-      id: z
-        .string()
+      project: z.string().optional().describe('Project to revert (defaults to active project).'),
+      confirm: z
+        .boolean()
         .optional()
-        .describe("Session id (defaults to the active session's project)."),
+        .describe('Required for hard reset. Confirm with the user first.'),
     },
-    async ({ id: _id }) => {
-      const result = await dispatchTool('cursor_revert', {}, sessionKey);
+    async ({ project, confirm }) => {
+      const result = await dispatchTool('cursor_revert', { project, confirm }, sessionKey);
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    },
+  );
+
+  // ── System ─────────────────────────────────────────────────────────────
+
+  server.tool(
+    'cursor_agent_info',
+    'Get CLI version, default model, OS, and account info from `cursor-agent about`. ' +
+      "Use when the user asks about the Cursor version or 'what model are you using?'",
+    {},
+    async () => {
+      const result = await dispatchTool('cursor_agent_info', {}, sessionKey);
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    },
+  );
+
+  server.tool(
+    'cursor_agent_status',
+    'Check authentication status from `cursor-agent status`. ' +
+      'Returns isAuthenticated, email, and user info. Use to verify the service is ready before jobs.',
+    {},
+    async () => {
+      const result = await dispatchTool('cursor_agent_status', {}, sessionKey);
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    },
+  );
+
+  // ── MCP inspect ────────────────────────────────────────────────────────
+
+  server.tool(
+    'cursor_mcp_list',
+    'List MCP servers configured in the executor workspace (.cursor/mcp.json) and their load status. ' +
+      'Informational — shows what MCPs the worker agents can use.',
+    {},
+    async () => {
+      const result = await dispatchTool('cursor_mcp_list', {}, sessionKey);
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    },
+  );
+
+  server.tool(
+    'cursor_mcp_tools',
+    'List tools exposed by a specific executor MCP server. ' +
+      'Use to discover what tools are available to worker agents from a given server.',
+    {
+      server: z.string().describe('MCP server identifier from cursor_mcp_list.'),
+    },
+    async ({ server }) => {
+      const result = await dispatchTool('cursor_mcp_tools', { server }, sessionKey);
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     },
   );
@@ -254,7 +617,6 @@ function requireMcpAuth(req: FastifyRequest, reply: FastifyReply): boolean {
  */
 export function registerMcpServer(app: FastifyInstance): void {
   // GET /mcp — open SSE stream on an already-initialized session.
-  // Cursor POSTs to initialize first (gets Mcp-Session-Id), then GETs to open the stream.
   app.get('/mcp', async (req, reply) => {
     if (!requireMcpAuth(req, reply)) return;
 
@@ -289,7 +651,6 @@ export function registerMcpServer(app: FastifyInstance): void {
       const sessionId = req.headers['mcp-session-id'];
 
       if (typeof sessionId === 'string') {
-        // Tool call on an existing session.
         const transport = transports.get(sessionId);
         if (!transport) {
           log.warn({ sessionId }, 'mcp POST — session not found');
@@ -339,5 +700,5 @@ export function registerMcpServer(app: FastifyInstance): void {
     await reply.code(204).send();
   });
 
-  log.info('mcp server registered at /mcp');
+  log.info('mcp server registered at /mcp (30 tools)');
 }

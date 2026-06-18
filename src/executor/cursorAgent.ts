@@ -30,9 +30,15 @@ export interface SpawnOptions {
   project: Project;
   session: SessionState;
   prompt: string;
-  mode?: 'agent' | 'plan' | 'ask';
+  mode?: 'agent' | 'plan' | 'ask' | 'debug';
   /** If true, use --output-format json (one-shot, for cursor_ask). */
   oneShot?: boolean;
+  /**
+   * If set, run in an isolated git worktree at ~/.cursor/worktrees/<worktree>.
+   * Enables parallel agents on the same project without working-tree conflicts.
+   * CLI flag: -w <name>
+   */
+  worktree?: string;
 }
 
 export interface AgentHandle {
@@ -59,7 +65,7 @@ export interface AgentResult {
  * Shell interpolation is impossible here — this is an array, not a string.
  */
 export function buildArgs(opts: SpawnOptions): string[] {
-  const { project, session, prompt, mode = 'agent', oneShot = false } = opts;
+  const { project, session, prompt, mode = 'agent', oneShot = false, worktree } = opts;
   const { settings } = getConfig();
 
   const args: string[] = [
@@ -70,23 +76,28 @@ export function buildArgs(opts: SpawnOptions): string[] {
     project.path, // ONLY from registry — never from caller
   ];
 
+  // Worktree: isolated git worktree for parallel agents (no working-tree conflicts).
+  if (worktree) {
+    args.push('-w', worktree);
+  }
+
   // Model: from session state (default 'auto' = Cursor chooses).
   if (session.activeModel && session.activeModel !== 'auto') {
     args.push('--model', session.activeModel);
   }
 
-  // Resume session for submit jobs only — ask mode always starts fresh research.
-  if (project.resumeId && !oneShot && mode !== 'ask') {
+  // Resume session for submit jobs only — ask/worktree mode always starts fresh.
+  if (project.resumeId && !oneShot && mode !== 'ask' && !worktree) {
     args.push('--resume', project.resumeId);
   }
 
-  // Mode flags.
+  // Mode flags. 'debug' maps to agent mode (no CLI flag) — debug intent is prompt-steered.
   if (mode === 'plan') {
     args.push('--mode', 'plan');
   } else if (mode === 'ask') {
     args.push('--mode', 'ask');
   }
-  // 'agent' is the default; no flag needed.
+  // 'agent' and 'debug' are the default; no flag needed.
 
   // Pre-run flags from config (e.g. ['--force', '--trust']).
   // Applied after mode flags so they can't change mode.

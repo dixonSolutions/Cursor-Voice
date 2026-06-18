@@ -18,15 +18,19 @@ import {
   assertAgentAvailable,
   getActiveAgentActivity,
   getActiveAgentRun,
-  killActiveAgent,
   registerAgentRun,
   releaseAgentRun,
+  registerWorktreeAgent,
+  releaseWorktreeAgent,
+  killWorktreeAgent,
 } from './agentSingleton.js';
 import { Watcher } from './watcher.js';
 import { getNarrator } from './narrator.js';
 import { emitVoiceToolActivity } from '../realtime/voiceUiEvents.js';
 import { checkpoint } from './git.js';
-import { createJob, updateJob, getJob, type JobMode } from '../state/jobs.js';
+import { createJob, updateJob, getJob, type JobMode, type JobStatus } from '../state/jobs.js';
+import type { Job } from '../state/jobs.js';
+import { getDb } from '../state/db.js';
 import { setProjectResumeId, getSessionState, type Project } from '../state/registry.js';
 import { getConfig } from '../config.js';
 import { childLogger } from '../log.js';
@@ -91,30 +95,140 @@ export interface SubmitResult {
   sessionId: string | null;
   model: string;
   status: 'running';
+  worktree?: string;
+}
+
+// ── Active job snapshots ──────────────────────────────────────────────────
+
+export interface ActiveJobSummary {
+  jobId: string;
+  project: string;
+  mode: string;
+  prompt: string;
+  pid: number;
+  elapsedMs: number;
+  activity: string | null;
+  worktree?: string;
+}
+
+/** Snapshot of all currently running jobs (singleton + worktree pool). */
+export function getAllActiveJobSummaries(): ActiveJobSummary[] {
+  const result: ActiveJobSummary[] = [];
+  for (const [jobId, aj] of activeJobs.entries()) {
+    const job = getJob(jobId);
+    const elapsedMs = getJobRunAgeMs(jobId) ?? 0;
+    result.push({
+      jobId,
+      project: job?.project ?? 'unknown',
+      mode: job?.mode ?? 'agent',
+      prompt: (job?.prompt ?? '').slice(0, 100),
+      pid: aj.handle.pid,
+      elapsedMs,
+      activity: aj.watcher.getActivitySummary(),
+    });
+  }
+  return result;
+}
+
+// ── Job history ───────────────────────────────────────────────────────────
+
+/**
+ * Fetch recent jobs for a project.
+ * statusFilter='all' returns jobs of any status; otherwise filters to that status.
+ * Used by `list_jobs_history` in the MCP server.
+ */
+export function getJobsHistory(
+  projectName: string | undefined,
+  limit = 10,
+  statusFilter: 'all' | 'done' | 'error' | 'stopped' = 'all',
+): Job[] {
+  type JobRow = {
+    id: string;
+    project: string;
+    prompt: string;
+    mode: string;
+    status: string;
+    pid: number | null;
+    session_id: string | null;
+    checkpoint: string | null;
+    summary: string | null;
+    diffstat: string | null;
+    error: string | null;
+    started_at: string;
+    finished_at: string | null;
+  };
+
+  let rows: JobRow[];
+
+  if (projectName && statusFilter !== 'all') {
+    rows = getDb()
+      .prepare(
+        `SELECT * FROM job WHERE project = @project AND status = @status
+         ORDER BY started_at DESC LIMIT @limit`,
+      )
+      .all({ project: projectName, status: statusFilter, limit }) as JobRow[];
+  } else if (projectName) {
+    rows = getDb()
+      .prepare(`SELECT * FROM job WHERE project = @project ORDER BY started_at DESC LIMIT @limit`)
+      .all({ project: projectName, limit }) as JobRow[];
+  } else if (statusFilter !== 'all') {
+    rows = getDb()
+      .prepare(`SELECT * FROM job WHERE status = @status ORDER BY started_at DESC LIMIT @limit`)
+      .all({ status: statusFilter, limit }) as JobRow[];
+  } else {
+    rows = getDb()
+      .prepare(`SELECT * FROM job ORDER BY started_at DESC LIMIT @limit`)
+      .all({ limit }) as JobRow[];
+  }
+
+  return rows.map((r) => ({
+    id: r.id,
+    project: r.project,
+    prompt: r.prompt,
+    mode: r.mode as JobMode,
+    status: r.status as JobStatus,
+    pid: r.pid,
+    sessionId: r.session_id,
+    checkpoint: r.checkpoint,
+    summary: r.summary,
+    diffstat: r.diffstat,
+    error: r.error,
+    startedAt: r.started_at,
+    finishedAt: r.finished_at,
+  }));
 }
 
 /**
  * Submit a new cursor-agent job.
  * Returns immediately with a job_id; the job runs asynchronously.
  * Track progress with cursor_status(job_id).
+ *
+ * Pass `worktree` to run in an isolated git worktree — bypasses the singleton
+ * gate so multiple agents can run in parallel on separate worktrees.
  */
 export async function submitJob(
   project: Project,
   sessionKey: string,
   prompt: string,
   mode: JobMode = 'agent',
+  worktree?: string,
 ): Promise<SubmitResult> {
   const { settings } = getConfig();
   const session = getSessionState(sessionKey);
 
-  // Enforce concurrency cap (config) and global singleton (one CLI process).
+  // Enforce global concurrency cap.
   if (activeJobs.size >= settings.maxConcurrentJobs) {
     throw new Error(
       `Concurrency limit reached (${settings.maxConcurrentJobs} job${settings.maxConcurrentJobs !== 1 ? 's' : ''} running). ` +
-        'Wait for the current job to finish or call cursor_stop first.',
+        'Wait for a job to finish or use stop_agent, or increase maxConcurrentJobs in config.',
     );
   }
-  assertAgentAvailable();
+
+  // Worktree agents bypass the singleton gate (each runs in an isolated tree).
+  // Non-worktree agents still use the singleton to avoid working-tree conflicts.
+  if (!worktree) {
+    assertAgentAvailable();
+  }
 
   // Git checkpoint — record HEAD before any writes.
   let checkpointSha: string | null = null;
@@ -133,8 +247,8 @@ export async function submitJob(
     checkpoint: checkpointSha ?? undefined,
   });
 
-  // Spawn the agent process.
-  const handle = spawnAgent({ project, session, prompt, mode });
+  // Spawn the agent process (with optional worktree for parallel execution).
+  const handle = spawnAgent({ project, session, prompt, mode, worktree });
 
   // Wire watcher → narrator.
   const watcher = new Watcher(jobId, project.name, () => {
@@ -146,7 +260,12 @@ export async function submitJob(
   const narrator = getNarrator();
   watcher.onNarration((evt) => void narrator.receive(evt));
   handle.onEvent((evt) => watcher.process(evt));
-  registerAgentRun({ kind: 'job', refId: jobId, sessionKey, handle, watcher });
+
+  if (worktree) {
+    registerWorktreeAgent({ refId: jobId, worktreeName: worktree, sessionKey, handle, watcher });
+  } else {
+    registerAgentRun({ kind: 'job', refId: jobId, sessionKey, handle, watcher });
+  }
   updateJob(jobId, { pid: handle.pid });
 
   sessionActiveJobs.set(sessionKey, jobId);
@@ -180,7 +299,11 @@ export async function submitJob(
     watcher.destroy();
     activeJobs.delete(jobId);
     jobStartedAtMs.delete(jobId);
-    releaseAgentRun(handle);
+    if (worktree) {
+      releaseWorktreeAgent(jobId);
+    } else {
+      releaseAgentRun(handle);
+    }
     if (sessionActiveJobs.get(sessionKey) === jobId) {
       sessionActiveJobs.delete(sessionKey);
     }
@@ -205,7 +328,10 @@ export async function submitJob(
     }
   });
 
-  log.info({ jobId, project: project.name, mode, pid: handle.pid }, 'job submitted');
+  log.info(
+    { jobId, project: project.name, mode, pid: handle.pid, worktree: worktree ?? null },
+    'job submitted',
+  );
 
   return {
     jobId,
@@ -213,6 +339,7 @@ export async function submitJob(
     sessionId: null, // not yet known — check cursor_status
     model: session.activeModel,
     status: 'running',
+    ...(worktree ? { worktree } : {}),
   };
 }
 
@@ -244,6 +371,8 @@ export function stopJob(
   active.watcher.destroy();
   activeJobs.delete(jobId);
   jobStartedAtMs.delete(jobId);
+  // Release from the worktree pool if it's a worktree job, otherwise the singleton.
+  killWorktreeAgent(jobId, reason);
   releaseAgentRun(active.handle);
 
   for (const [sessionKey, id] of sessionActiveJobs.entries()) {
