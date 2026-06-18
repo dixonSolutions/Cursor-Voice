@@ -26,22 +26,6 @@
       <label for="token-input">App Token</label>
     </p-iftalabel>
 
-    <p-iftalabel>
-      <input
-        pInputText
-        id="bridge-url"
-        type="text"
-        [(ngModel)]="bridgeUrlInput"
-        placeholder="https://machine.ts.net"
-        (keydown.enter)="onSaveToken()" />
-      <label for="bridge-url">Bridge URL (optional)</label>
-    </p-iftalabel>
-
-    <p-message
-      severity="secondary"
-      variant="simple"
-      text="Open http://localhost:4200 in dev. Leave Bridge URL blank — /api and /ws proxy to the bridge." />
-
     <p-button
       label="Save & Connect"
       icon="pi pi-check"

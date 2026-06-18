@@ -117,6 +117,10 @@ if ! $SKIP_TAILSCALE; then
     info "Tailscale not yet authenticated — signing in..."
     sudo tailscale up
   fi
+  # Enable MagicDNS so *.ts.net hostnames resolve locally (needed for HTTPS URL).
+  tailscale set --accept-dns=true 2>/dev/null \
+    && ok "Tailscale MagicDNS enabled (*.ts.net resolves locally)." \
+    || warn "Could not enable MagicDNS — run: tailscale set --accept-dns=true"
   ok "Tailscale is up: $(tailscale ip -4 2>/dev/null || echo 'IP pending')"
 fi
 
@@ -278,10 +282,20 @@ section "Tailscale HTTPS proxy"
 if $SKIP_TAILSCALE; then
   warn "Skipping tailscale serve (--no-tailscale)."
 else
-  info "Configuring: tailscale serve --bg ${ACTUAL_PORT}"
-  tailscale serve --bg "${ACTUAL_PORT}" \
+  # Allow the current user to run tailscale serve without sudo.
+  # This is a one-time system setting; re-running is harmless.
+  if sudo -n tailscale set --operator="$USER" 2>/dev/null; then
+    ok "tailscale operator set to $USER (serve no longer needs sudo)."
+  elif sudo tailscale set --operator="$USER" 2>/dev/null; then
+    ok "tailscale operator set to $USER."
+  else
+    warn "Could not run 'sudo tailscale set --operator=\$USER' — you may need to run it manually."
+  fi
+
+  info "Configuring: tailscale serve --bg http://127.0.0.1:${ACTUAL_PORT}"
+  tailscale serve --bg "http://127.0.0.1:${ACTUAL_PORT}" \
     && ok "tailscale serve configured." \
-    || warn "tailscale serve failed — run manually: tailscale serve --bg ${ACTUAL_PORT}"
+    || warn "tailscale serve failed — run manually: tailscale serve --bg http://127.0.0.1:${ACTUAL_PORT}"
 
   # Detect Tailscale hostname and patch config.json
   TS_HOST="$(tailscale status --json 2>/dev/null \

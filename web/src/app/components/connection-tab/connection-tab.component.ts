@@ -5,7 +5,6 @@ import { Button } from 'primeng/button';
 import { Card } from 'primeng/card';
 import { Fluid } from 'primeng/fluid';
 import { IftaLabel } from 'primeng/iftalabel';
-import { InputText } from 'primeng/inputtext';
 import { Message } from 'primeng/message';
 import { Password } from 'primeng/password';
 import { Tag } from 'primeng/tag';
@@ -24,7 +23,6 @@ import { VoiceSessionService } from '../../services/voice-session.service';
     Card,
     Fluid,
     IftaLabel,
-    InputText,
     Message,
     Password,
     Tag,
@@ -38,11 +36,8 @@ export class ConnectionTabComponent implements OnInit {
   private readonly logs = inject(LogService);
 
   protected tokenInput = '';
-  protected bridgeUrlInput = '';
 
-  ngOnInit(): void {
-    this.bridgeUrlInput = localStorage.getItem('cv_bridge') ?? '';
-  }
+  ngOnInit(): void {}
 
   protected wsStatusLabel(): string {
     switch (this.bridge.wsStatus()) {
@@ -70,7 +65,7 @@ export class ConnectionTabComponent implements OnInit {
       this.toast.warn('App token required', 'Paste the token from your bridge .env file.');
       return;
     }
-    this.bridge.saveCredentials(token, this.bridgeUrlInput.trim());
+    this.bridge.saveCredentials(token);
     this.tokenInput = '';
     this.bridge.connect();
     this.logs.append('info', 'bridge', 'Credentials updated');
@@ -91,11 +86,10 @@ export class ConnectionTabComponent implements OnInit {
   }
 
   protected onClearAppCredentials(): void {
-    if (!confirm('Clear saved app token and bridge URL?')) return;
+    if (!confirm('Clear saved app token?')) return;
     this.voiceSession.stopSession();
     this.bridge.clearCredentials();
     this.tokenInput = '';
-    this.bridgeUrlInput = '';
     this.logs.append('warn', 'bridge', 'App credentials cleared');
   }
 }
