@@ -5,10 +5,8 @@
  *   .env        → secrets + machine-specific bootstrap paths (never committed)
  *   config.json → operational settings + project registry (non-secret)
  *
- * Voice providers:
- *   .env determines which providers are *viable* (keys present + valid).
- *   config.json stores registered providers, model lists, and defaults.
- *   See docs/13-voice-providers.md and provider_keys.ts.
+ * Voice settings (wake words, turn submit) live in config.json.
+ * AWS IAM keys in .env power Polly, Transcribe, and Bedrock Converse.
  *
  * Precedence: .env > config.json > built-in defaults.
  * Both files are zod-validated at startup; invalid config fails fast.
@@ -18,14 +16,7 @@ import { z } from 'zod';
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
-  PROVIDER_IDS,
-  getProviderDefinition,
-  type ProviderId,
-} from './realtime/provider_keys.js';
-import {
   DEFAULT_LLM_INTELLIGENCE_PROMPTS,
-  DEFAULT_SYSTEM_PROMPTS,
-  loadVoiceSystemPrompt,
   loadWorkflowSystemPrompt,
 } from './state/promptLoader.js';
 import { childLogger } from './log.js';
@@ -38,9 +29,6 @@ const EnvSchema = z.object({
   APP_TOKEN: z
     .string()
     .min(16, 'APP_TOKEN must be at least 16 characters — generate with: openssl rand -base64 32'),
-  OPENAI_API_KEY: z.string().optional(),
-  GEMINI_API_KEY: z.string().optional(),
-  ANTHROPIC_API_KEY: z.string().optional(),
   AWS_ACCESS_KEY_ID: z.string().optional(),
   AWS_SECRET_ACCESS_KEY: z.string().optional(),
   AWS_BEARER_TOKEN_BEDROCK: z.string().optional(),
@@ -50,18 +38,7 @@ const EnvSchema = z.object({
   DB_PATH: z.string().default('./data/state.db'),
 });
 
-// ── Voice provider config (config.json) ─────────────────────────────────────
-
-const VoiceModelSchema = z.object({
-  id: z.string().min(1),
-  label: z.string().optional(),
-  builtin: z.boolean().default(false),
-});
-
-export const VoiceProviderConfigSchema = z.object({
-  defaultModel: z.string().min(1),
-  models: z.array(VoiceModelSchema).min(1),
-});
+// ── Voice settings (config.json) ─────────────────────────────────────────────
 
 export const WakeWordsSchema = z.object({
   start: z.string().min(1).max(100),
@@ -75,21 +52,15 @@ export const TurnSubmitSchema = z.object({
   vadEnabled: z.boolean().default(true),
 });
 
-/** Resolved voice system prompt (loaded from prompts/ at startup). */
-export const VoiceSystemPromptSchema = z.object({
-  /** Template with {{ACTIVATION_RULES}}, {{PROJECT_CATALOG}}, {{WAKE_START}}. */
-  template: z.string().min(1).max(65_536),
-  /** Activation block with {{WAKE_START}}; injected into {{ACTIVATION_RULES}}. */
-  activationRules: z.string().min(1).max(16_384),
-});
-
 export const VoiceSettingsSchema = z.object({
-  defaultProvider: z.enum(PROVIDER_IDS),
-  providers: z.record(z.enum(PROVIDER_IDS), VoiceProviderConfigSchema),
   wakeWords: WakeWordsSchema,
   turnSubmit: TurnSubmitSchema.default({}),
-  /** Paths to prompt manifests, relative to config.json (see prompts/systemprompts.json). */
-  systemPrompts: z.array(z.string().min(1)).min(1).default(['prompts/systemprompts.json']),
+});
+
+/** Resolved system prompt (loaded from prompts/ at startup). */
+export const VoiceSystemPromptSchema = z.object({
+  template: z.string().min(1).max(65_536),
+  activationRules: z.string().min(1).max(16_384),
 });
 
 // ── Run mode (test vs serve) ────────────────────────────────────────────────
@@ -113,9 +84,9 @@ const RunModesSchema = z.object({
   serve: ServeRunModeSchema.default({}),
 });
 
-// ── Workflow config (llm_intelligence vs s2s_voice) ───────────────────────────
+// ── Workflow config ───────────────────────────────────────────────────────────
 
-export const WORKFLOW_IDS = ['cursor_native', 'llm_intelligence', 's2s_voice'] as const;
+export const WORKFLOW_IDS = ['cursor_native', 'llm_intelligence'] as const;
 export type WorkflowId = (typeof WORKFLOW_IDS)[number];
 
 const LlmIntelligenceMemorySchema = z.object({
@@ -154,15 +125,10 @@ export const LlmIntelligenceWorkflowSchema = z.object({
   readOutputMaxChars: z.number().int().min(1000).max(32_768).default(8000),
 });
 
-export const S2sVoiceWorkflowSchema = z.object({
-  systemPrompts: z.array(z.string().min(1)).min(1).default(['prompts/systemprompts.json']),
-});
-
 export const WorkflowSettingsSchema = z.object({
-  /** Active voice pipeline — cursor_native (default), llm_intelligence, or legacy s2s_voice. */
+  /** Active voice pipeline — cursor_native (default) or llm_intelligence. */
   default: z.enum(WORKFLOW_IDS).default('cursor_native'),
   llmIntelligence: LlmIntelligenceWorkflowSchema.default({}),
-  s2sVoice: S2sVoiceWorkflowSchema.default({}),
 });
 
 // ── config.json schema ───────────────────────────────────────────────────────
@@ -206,31 +172,16 @@ export const ConfigFileSchema = z.object({
   projects: z.array(ProjectConfigSchema).min(1, 'At least one project must be registered'),
 });
 
-// ── Legacy schema (migration from voiceProvider + realtimeModel) ─────────────
-
-const LegacySettingsSchema = z
-  .object({
-    voiceProvider: z.enum(['openai', 'gemini']).optional(),
-    realtimeModel: z.string().optional(),
-  })
-  .passthrough();
-
 // ── Exported types ────────────────────────────────────────────────────────────
 
 export type AppEnv = z.infer<typeof EnvSchema>;
-export type VoiceModel = z.infer<typeof VoiceModelSchema>;
 export type WakeWords = z.infer<typeof WakeWordsSchema>;
 export type TurnSubmit = z.infer<typeof TurnSubmitSchema>;
 export type VoiceSystemPrompt = z.infer<typeof VoiceSystemPromptSchema>;
-export type VoiceProviderConfig = z.infer<typeof VoiceProviderConfigSchema>;
 export type VoiceSettingsInput = z.infer<typeof VoiceSettingsSchema>;
-export type VoiceSettings = VoiceSettingsInput & {
-  /** Populated at load time from systemPrompts manifests — not stored in config.json. */
-  systemPrompt: VoiceSystemPrompt;
-};
+export type VoiceSettings = VoiceSettingsInput;
 export type RunModes = z.infer<typeof RunModesSchema>;
 export type LlmIntelligenceWorkflow = z.infer<typeof LlmIntelligenceWorkflowSchema>;
-export type S2sVoiceWorkflow = z.infer<typeof S2sVoiceWorkflowSchema>;
 export type WorkflowSettings = z.infer<typeof WorkflowSettingsSchema> & {
   llmIntelligence: LlmIntelligenceWorkflow & {
     systemPrompt: VoiceSystemPrompt;
@@ -251,19 +202,6 @@ export interface AppConfig {
 
 // ── Migration ─────────────────────────────────────────────────────────────────
 
-function seedProviderConfig(id: ProviderId, defaultModel?: string): VoiceProviderConfig {
-  const def = getProviderDefinition(id);
-  const model = defaultModel ?? def.knownModels[0]?.id ?? 'unknown';
-  return {
-    defaultModel: model,
-    models: def.knownModels.map((m) => ({
-      id: m.id,
-      label: m.label,
-      builtin: true,
-    })),
-  };
-}
-
 function migrateRawConfig(raw: unknown): unknown {
   if (typeof raw !== 'object' || raw === null) return raw;
   const obj = raw as Record<string, unknown>;
@@ -271,6 +209,7 @@ function migrateRawConfig(raw: unknown): unknown {
   if (typeof settings !== 'object' || settings === null) return raw;
 
   const s = settings as Record<string, unknown>;
+
   if ('voice' in s && s['voice'] !== undefined) {
     const voice = s['voice'] as Record<string, unknown>;
     if (typeof voice['wakeWords'] === 'object' && voice['wakeWords'] !== null) {
@@ -291,31 +230,31 @@ function migrateRawConfig(raw: unknown): unknown {
         'config.json must include settings.voice.wakeWords.start — see config.example.json',
       );
     }
-    if ('systemPrompt' in voice) {
-      delete voice['systemPrompt'];
-      log.info('Migrated legacy inline settings.voice.systemPrompt → settings.voice.systemPrompts');
-    }
-    if (!voice['systemPrompts']) {
-      voice['systemPrompts'] = [...DEFAULT_SYSTEM_PROMPTS];
-    }
-    const settingsObj = s;
-    if (!settingsObj['workflow']) {
-      settingsObj['workflow'] = { default: 'cursor_native' };
+
+    // Strip legacy S2S voice provider fields.
+    delete voice['defaultProvider'];
+    delete voice['providers'];
+    delete voice['systemPrompts'];
+    delete voice['systemPrompt'];
+
+    if (!s['workflow']) {
+      s['workflow'] = { default: 'cursor_native' };
       log.info('Migrated config — added default workflow cursor_native');
+    } else if (typeof s['workflow'] === 'object' && s['workflow'] !== null) {
+      const wf = s['workflow'] as Record<string, unknown>;
+      if (wf['default'] === 's2s_voice') {
+        wf['default'] = 'cursor_native';
+        log.info('Migrated workflow default s2s_voice → cursor_native');
+      }
+      delete wf['s2sVoice'];
     }
+
     return raw;
   }
 
   throw new Error(
     'Missing settings.voice in config.json — see config.example.json (include wakeWords.start).',
   );
-}
-
-function resolveVoiceSettings(configPath: string, voice: VoiceSettingsInput): VoiceSettings {
-  return {
-    ...voice,
-    systemPrompt: loadVoiceSystemPrompt(configPath, voice.systemPrompts),
-  };
 }
 
 function resolveWorkflowSettings(
@@ -375,15 +314,13 @@ function loadFromDisk(): AppConfig {
   }
 
   const configFile = cfgResult.data;
-
-  const voice = resolveVoiceSettings(configPath, configFile.settings.voice);
   const workflow = resolveWorkflowSettings(configPath, configFile.settings.workflow);
 
   return {
     env,
     settings: {
       ...configFile.settings,
-      voice,
+      voice: configFile.settings.voice,
       workflow,
     },
     projects: configFile.projects,
@@ -399,7 +336,6 @@ export function loadConfig(): AppConfig {
       configPath: resolve(_configPath),
       projectCount: _config.projects.length,
       runMode: _config.settings.runMode,
-      defaultVoiceProvider: _config.settings.voice.defaultProvider,
       defaultWorkflow: _config.settings.workflow.default,
       logLevel: _config.settings.logLevel,
     },

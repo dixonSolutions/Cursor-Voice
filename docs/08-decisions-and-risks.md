@@ -5,20 +5,24 @@ still to resolve. Update this file as reality is discovered.
 
 ## Confirmed decisions
 
-### ADR-001 — Audio transport: WebRTC (direct phone → provider)
-**Decision:** Phone connects to the speech provider directly over WebRTC.
+### ADR-001 — Audio transport (superseded)
+
+**Original decision:** WebRTC direct phone → speech provider.
+
+**Current (2026):** Cascade STT + TTS on the PWA; Cursor or Bedrock for reasoning.
+S2S providers removed. See [`06-voice-audio-webrtc.md`](./06-voice-audio-webrtc.md).
 **Rationale:** Lowest latency; native capture/encode/echo-cancel/playback; far
 less custom audio code than a PCM-over-WebSocket relay.
 **Consequence:** Tool calls must be routed back through the phone; secured via
 authenticated relay to the bridge (ADR-006). Provider key never on device →
 ephemeral tokens (ADR-007).
 
-### ADR-002 — Provider: OpenAI Realtime (GA) primary, swappable
-**Decision:** OpenAI Realtime (GA, April 2026) as the primary provider, behind a
-`provider.ts` interface; Gemini Live documented as the alternative.
-**Rationale:** User speaks **Polish + English**; modern speech models are
-multilingual, so either works. OpenAI chosen for first-class WebRTC ephemeral
-tokens, mature function calling, async function calling, and remote-MCP support.
+### ADR-002 — Provider (superseded)
+
+**Original:** OpenAI Realtime primary behind `provider.ts`.
+
+**Current (2026):** No S2S providers. Reasoning via Cursor MCP or Bedrock Converse;
+audio via WebKit + Amazon Polly/Transcribe.
 Interface keeps it swappable (Open/Closed, reusability).
 **Consequence:** Target the **GA** schema (`session.type:"realtime"`,
 `audio.input/output`, `output_modalities`, no `OpenAI-Beta` header).

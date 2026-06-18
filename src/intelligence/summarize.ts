@@ -8,8 +8,8 @@ import {
   type Message,
 } from '@aws-sdk/client-bedrock-runtime';
 import { getConfig } from '../config.js';
-import { resolveBedrockAuth } from '../realtime/bedrock/credentials.js';
-import { resolveBedrockConverseModelId } from '../realtime/bedrock/converseModelId.js';
+import { resolveBedrockAuth } from './aws/credentials.js';
+import { resolveBedrockConverseModelId } from './aws/converseModelId.js';
 import type { TurnMessage } from './memory.js';
 
 function bedrockClient(): BedrockRuntimeClient {

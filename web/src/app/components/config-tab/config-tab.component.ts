@@ -19,7 +19,6 @@ import { ToastService } from '../../services/toast.service';
 import { VoiceProvidersService } from '../../services/voice-providers.service';
 import { VoiceSessionService } from '../../services/voice-session.service';
 import { ConnectionTabComponent } from '../connection-tab/connection-tab.component';
-import { ProvidersTabComponent } from '../providers-tab/providers-tab.component';
 
 type ConfigView = 'form' | 'json';
 
@@ -44,7 +43,6 @@ interface ViewOption {
     Tag,
     Textarea,
     ConnectionTabComponent,
-    ProvidersTabComponent,
   ],
   templateUrl: './config-tab.component.html',
 })
@@ -73,10 +71,6 @@ export class ConfigTabComponent implements OnInit {
 
   protected readonly isBridgeConnected = computed(
     () => this.bridge.wsStatus() === 'connected',
-  );
-
-  protected readonly showProviders = computed(
-    () => (this.bridge.settings()?.workflow.default ?? 'cursor_native') === 's2s_voice',
   );
 
   protected readonly phraseConflict = computed(() => {

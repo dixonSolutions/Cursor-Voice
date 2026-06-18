@@ -6,7 +6,7 @@
 import { PollyClient } from '@aws-sdk/client-polly';
 import { TranscribeStreamingClient } from '@aws-sdk/client-transcribe-streaming';
 import { getConfig } from '../../config.js';
-import { resolveBedrockAuth } from '../../realtime/bedrock/credentials.js';
+import { resolveBedrockAuth } from '../aws/credentials.js';
 
 export function getIntelligenceAwsRegion(): string {
   const { llm, audio } = getConfig().settings.workflow.llmIntelligence;

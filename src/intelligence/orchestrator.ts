@@ -12,8 +12,8 @@ import {
   type ToolUseBlock,
 } from '@aws-sdk/client-bedrock-runtime';
 import { getConfig } from '../config.js';
-import { resolveBedrockAuth } from '../realtime/bedrock/credentials.js';
-import { resolveBedrockConverseModelId } from '../realtime/bedrock/converseModelId.js';
+import { resolveBedrockAuth } from './aws/credentials.js';
+import { resolveBedrockConverseModelId } from './aws/converseModelId.js';
 import { childLogger } from '../log.js';
 import { buildIntelligenceSystemPrompt } from './prompt.js';
 import { buildBedrockToolConfig } from './tools.js';

@@ -14,7 +14,7 @@ import {
   type MicProcessingChain,
 } from './audio.js';
 import { getVoiceAudioMeter } from './voice-audio-meter.js';
-import type { SessionCallbacks, VoiceAgentStatusEvent } from './webrtc.js';
+import type { SessionCallbacks, VoiceAgentStatusEvent } from './voice-session-types.js';
 import { type TurnSubmit, type WakeWords } from './wake-words.js';
 import { stopAllTts, TtsPile, type TtsPlayContext } from './tts-fallback.js';
 import { snapshotToPayload, summarizeTtsInterrupt, type TtsInterruptSnapshot } from './tts-interrupt.js';

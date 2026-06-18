@@ -33,6 +33,9 @@ const log = childLogger('voice-agent');
 const VOICE_BOOT_SUFFIX =
   '\n\n---\nThe cursor-voice MCP server is connected. Start the voice loop now — call next_voice_turn() immediately.';
 
+const VOICE_RESUME_SUFFIX =
+  '\n\n---\n@cursor-voice\n\nThe cursor-voice MCP server is connected. Resume the voice loop — call next_voice_turn() immediately.';
+
 export interface VoiceAgentEvent {
   type: 'spawned' | 'session_id' | 'exit';
   value?: string;
@@ -65,8 +68,11 @@ export function getActiveVoiceAgent(): Readonly<ActiveVoiceAgent> | null {
   return activeVoiceAgent;
 }
 
-function buildVoiceBootPrompt(): string {
-  return `${cursorVoiceRuleBody()}${VOICE_BOOT_SUFFIX}`;
+function buildVoiceBootPrompt(project: Project): string {
+  const isResume = Boolean(project.resumeId);
+  return isResume
+    ? VOICE_RESUME_SUFFIX.trim()
+    : `${cursorVoiceRuleBody()}${VOICE_BOOT_SUFFIX}`;
 }
 
 function buildVoiceAgentArgs(project: Project, session: SessionState): string[] {
@@ -95,7 +101,7 @@ function buildVoiceAgentArgs(project: Project, session: SessionState): string[] 
     }
   }
 
-  args.push(buildVoiceBootPrompt());
+  args.push(buildVoiceBootPrompt(project));
   return args;
 }
 

@@ -4,150 +4,114 @@
 
 | Component | Tech | Responsibility |
 | --- | --- | --- |
-| **Phone PWA** | Vanilla TS + Vite, WebRTC, Web Audio | Mic capture, playback, push-to-talk UI, holds the WebRTC peer connection to the provider, relays tool calls to the bridge |
-| **Bridge** | Node 20+, TypeScript, Fastify | Serves the PWA, mints ephemeral provider tokens, authenticated control WebSocket, hosts the MCP tool layer, executes `cursor-agent`, persists state |
-| **MCP tool layer** | `@modelcontextprotocol/sdk` | The constrained, validated tool surface (the safety boundary) |
-| **Executor** | `node:child_process` + `simple-git` | Spawns `cursor-agent`, parses JSON/NDJSON, manages resume sessions, git revert/diff |
-| **Speech provider** | OpenAI Realtime (GA) / Gemini Live | STT + reasoning + TTS, function calling, clarifying questions |
-| **cursor-agent** | Cursor CLI | The sole executor of real file/shell work, inside allowlisted projects |
-| **Network** | Tailscale (`serve`) | Private mesh + automatic HTTPS for mic access |
-| **State** | SQLite (`better-sqlite3`) | Sessions, jobs, project registry, audit log |
+| **Phone PWA** | Angular + vanilla TS modules | Mic capture, Vosk wake words, Silero VAD, STT, TTS playback, orb UI |
+| **Bridge** | Node 20+, TypeScript, Fastify | Serves PWA, `/ws/intelligence`, MCP HTTP server, spawns voice + worker agents, SQLite state |
+| **MCP server** | `@modelcontextprotocol/sdk` | Voice I/O (`speak`, `done`, `next_voice_turn`) + agent control tools |
+| **Voice agent** | `cursor-agent -p` | Conversational loop for `cursor_native`; calls MCP voice tools |
+| **Worker agents** | `cursor-agent -p` | Coding tasks spawned via `spawn_agent` |
+| **AWS (optional)** | Polly, Transcribe, Bedrock Converse | TTS/STT fallback and `llm_intelligence` orchestrator |
+| **Network** | Tailscale (`serve`) | Private mesh + HTTPS for mic access |
+| **State** | SQLite | Jobs, voice agent runs, project registry, audit log |
 
-## Trust boundaries (high level)
-
-```
-[ iPhone Safari PWA ] --WebRTC audio/datachannel--> [ Speech Provider Cloud ]
-        |                                                     |
-        | (1) authenticated WSS (app token)                   | tool-call events
-        v                                                     | over data channel
-[ Bridge: token gate ] <----- (2) phone forwards tool calls --+
-        |
-        | (3) MCP tools (validated, allowlisted)
-        v
-[ cursor-agent ] --> [ allowlisted project workspaces ] --> git
-```
-
-Why this shape (given the WebRTC decision):
-
-- **Audio** flows phone ↔ provider directly = lowest latency (your chosen
-  tradeoff).
-- **Tool execution** never happens on the phone. Tool-call events arrive on the
-  WebRTC **data channel**, the phone **forwards** them to the bridge over an
-  **authenticated WebSocket**, the bridge executes and returns the result, and
-  the phone injects `function_call_output` back to the provider. The phone is an
-  *authenticated relay*, not an executor.
-- The provider API key **never** reaches the phone — only short-lived ephemeral
-  tokens minted by the bridge do.
-
-See `03-security.md` for the full trust analysis and the rejected
-"remote-MCP-by-URL" alternative.
-
-## End-to-end sequence (a voice command)
+## Trust boundaries
 
 ```
-Dad taps push-to-talk (mic latches ON)
-  │
-  ├─ PWA: POST /api/realtime/token  (app token)  ──► Bridge mints ephemeral
-  │        token w/ session+tool config, returns it
-  │
-  ├─ PWA: establish WebRTC to provider using ephemeral token
-  │
-Dad: "Cursor… add a dark-mode toggle to the settings page in the budget app"
-  │
-  ├─ Provider: VAD + transcribe + reason
-  ├─ Provider: (maybe) asks a clarifying question → spoken back to Dad
-  ├─ Provider: emits function_call  cursor_submit{project:"budget", prompt:"…"}
-  │        over the data channel
-  │
-  ├─ PWA → Bridge (WSS, app token): forward tool call
-  ├─ Bridge: validate token → validate args → project in allowlist?
-  ├─ Bridge: spawn cursor-agent -p --output-format stream-json \
-  │            --workspace <registry path> --resume <id> --force --trust "…"
-  ├─ Bridge: Watcher reads NDJSON stdout line-by-line; at key events injects
-  │            narration into the realtime session ("Cursor is editing the
-  │            component…", "tests are running…") so Dad is never left silent
-  ├─ Bridge: final JSON result → parse summary + session_id; persist resume id
-  ├─ Bridge → PWA: tool result (summary, session_id, diff stat)
-  │
-  ├─ PWA → Provider: function_call_output(result)
-  ├─ Provider: speaks a conversational summary to Dad
-  │
-Dad: "Cursor end"  → PWA stops mic / closes session  (or taps button again)
+[ iPhone PWA ]
+    |  STT text, TTS audio (local or Polly)
+    |  WSS /ws/intelligence (app token)
+    v
+[ Bridge ]
+    |  VoiceTurnQueue (pull-based turns)
+    |  MCP /mcp (Bearer token)
+    v
+[ Cursor IDE — voice agent ]
+    |  spawn_agent / cursor_* tools
+    v
+[ cursor-agent workers ] --> [ allowlisted project workspaces ] --> git
 ```
 
-For long jobs, the provider's **async function calling** lets it say "give me a
-moment" and keep the conversation alive; the bridge can also return immediately
-with a `job_id` and the model polls `cursor_status` — both patterns documented in
-`05`.
+- **Audio reasoning** happens in Cursor (`cursor_native`) or Bedrock Claude (`llm_intelligence`).
+- **Tool execution** never happens on the phone.
+- **AWS IAM keys** stay on the bridge — Polly/Transcribe audio is proxied via `/api/intelligence/*`.
+
+## End-to-end sequence (`cursor_native`)
+
+```
+User taps orb → PWA opens /ws/intelligence
+  │
+User says wake phrase → Vosk activates → STT captures utterance
+  │
+PWA → Bridge: { type: "user_turn", text }
+  │
+Bridge enqueues turn in VoiceTurnQueue
+Bridge auto-spawns cursor-agent (voice loop) if not running
+  │
+Cursor MCP: next_voice_turn() → dequeued text
+Cursor reasons → speak("…") → bridge → PWA TTS
+Cursor → spawn_agent(instructions) for coding work
+Cursor → done() → bridge → { type: "turn_complete" } → mic re-arms
+  │
+Loop: next_voice_turn() again
+```
+
+## Voice agent boot prompting
+
+| Spawn | Prompt passed to `cursor-agent -p` |
+| --- | --- |
+| **First session** (no `--resume`) | Full system prompt from `prompts/cursor-voice/system.md` + boot suffix |
+| **Resume** (`--resume <id>`) | `@cursor-voice` rule reference + short boot line |
+
+On resume, Cursor injects the rule from `~/.cursor/rules/cursor-voice.mdc` (or project
+`.cursor/rules/`). Conversation history is preserved via `--resume`; the full system
+prompt is not resent.
+
+Implementation: `src/executor/voiceAgent.ts` — `buildVoiceBootPrompt(project)`.
 
 ## Process & module layout
 
 ```
 cursor-voice/
-├── docs/                     # ← you are here
+├── docs/
+├── prompts/
+│   └── cursor-voice/          # Voice agent system + MCP instructions
 ├── src/
-│   ├── server.ts             # Fastify: static serving, /api routes, control WS
-│   ├── config.ts             # env loading + validation (zod)
-│   ├── auth.ts               # app-token verification (WS + HTTP)
-│   ├── realtime/
-│   │   ├── token.ts          # mint ephemeral provider tokens (key stays here)
-│   │   ├── session.ts        # session/tool config (single source of truth)
-│   │   └── provider.ts       # provider interface (OpenAI ↔ Gemini swap)
-│   ├── mcp/
-│   │   ├── tools.ts          # tool definitions (zod schemas = source of truth)
-│   │   ├── server.ts         # MCP server wiring
-│   │   └── handlers.ts       # tool implementations (call executor)
+│   ├── server.ts              # Fastify: PWA, /api, /ws/intelligence, /mcp
+│   ├── config.ts              # .env + config.json (zod)
 │   ├── executor/
-│   │   ├── cursorAgent.ts    # spawn, flag building, NDJSON parsing
-│   │   ├── watcher.ts        # stream-json event processor → narration events
-│   │   ├── narrator.ts       # narration event → inject into realtime session
-│   │   └── git.ts            # simple-git: diff, revert, checkpoint
-│   ├── state/
-│   │   ├── db.ts             # better-sqlite3 connection + migrations
-│   │   └── registry.ts       # project allowlist registry
-│   └── log.ts                # structured logging + audit trail
-├── web/                      # vanilla TS + Vite PWA
-│   ├── index.html
-│   ├── src/main.ts           # UI + state machine (idle/listening/working)
-│   ├── src/webrtc.ts         # peer connection, data channel, tool relay
-│   └── src/audio.ts          # mic + playback glue (mostly native w/ WebRTC)
-├── cursor-voice.service      # systemd unit
-├── .env.example
-├── package.json
-└── tsconfig.json
+│   │   ├── voiceAgent.ts      # Auto-spawn conversational cursor-agent
+│   │   ├── jobManager.ts      # Worker agent jobs
+│   │   └── watcher.ts         # stream-json parser
+│   ├── intelligence/            # llm_intelligence orchestrator + AWS audio
+│   ├── mcp/server/            # MCP tool handlers + turn queue
+│   ├── voice/                 # Wake words config, TTS interrupt types
+│   └── state/                 # SQLite, registry, jobs
+├── web/                       # Angular PWA + vanilla TS voice modules
+│   ├── llm-intelligence-session.ts  # Shared session for both workflows
+│   ├── silero-vad.ts, vosk-wake-word.ts, amazon-tts.ts, amazon-stt.ts
+│   └── src/app/               # Angular UI (voice tab, config tab)
+└── config.example.json
 ```
 
-Design principles applied (per project rules):
-
-- **Single source of truth** for tool schemas (DRY) — one zod definition emits
-  both MCP tools and provider function tools.
-- **Swappable provider** behind `provider.ts` (Open/Closed, reusability).
-- **All CLI knowledge isolated** in `cursorAgent.ts` (the CLI is beta; contain the churn).
-- **Security at the boundary** (`auth.ts` + `registry.ts`), enforced on every
-  request, not in the UI.
-
-## State machine (PWA)
+## State machine (PWA orb)
 
 ```
-        tap / "cursor start"
- idle ───────────────────────► listening ──(tool call)──► working
-   ▲                              │  ▲                        │
-   │   tap again / "cursor end"   │  └──── result spoken ─────┘
-   └──────────────────────────────┘
+        tap orb
+ idle ─────────► inactive ── wake phrase ──► listening ──► working
+   ▲                  │                              │           │
+   └──── tap orb (hang up) ─────────────────────────┴───────────┘
 ```
 
-`listening` keeps the mic open continuously; the model only *acts* on utterances
-prefixed "Cursor…" and treats "cursor end" as a stop verb.
+- **inactive:** session open, waiting for wake phrase (Vosk).
+- **listening:** utterance capture (STT + VAD or end phrase).
+- **working:** Cursor thinking or worker agent running.
 
-## Latency budget (target, Doherty < 400 ms feel where possible)
+## Latency budget
 
 | Hop | Target |
 | --- | --- |
-| Mic → provider first token (WebRTC) | ~200–500 ms (provider-bound) |
-| Clarifying question round-trip | conversational, provider-bound |
-| Tool call → bridge ack ("working on it") | < 150 ms |
-| `cursor_submit` actual work | seconds–minutes (async; narrate progress) |
+| Wake phrase → Vosk detect | ~100–300 ms (offline) |
+| Speech end → turn submit | VAD or silence timer |
+| Turn → first `speak()` | Cursor-bound |
+| `spawn_agent` work | seconds–minutes (narrated progress) |
 
-The UX strategy for the unavoidable long tail is **conversational progress**
-("okay, I'm editing the settings page now…"), not silence — see Peak-End Rule and
-Doherty Threshold in the UX guidance.
+UX strategy: one sentence per `speak()` call; TTS barge-in via wake phrase during playback.

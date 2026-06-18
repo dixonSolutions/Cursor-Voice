@@ -108,20 +108,43 @@ every running agent session and makes it queryable via `get_agent_status()`.
 
 ---
 
-## 6 — System Prompt
+## 6 — System Prompt & Boot Lifecycle
 
-Prepended to the first user message on each new voice session:
+Voice agent prompts live in `prompts/cursor-voice/system.md` (loaded by
+`src/mcp/loadCursorVoicePrompt.ts`). A matching Cursor rule exists at
+`.cursor/rules/cursor-voice.mdc` for `@cursor-voice` injection.
+
+### First spawn (new session)
+
+When no `resumeId` exists for the project, `spawnVoiceAgent()` passes the **full**
+system prompt plus boot suffix to `cursor-agent -p`:
 
 ```
-You are a voice assistant controlling this Cursor environment.
-- To respond to the user you MUST call speak(). Never produce plain text — the
-  user cannot see it.
-- Call speak() one sentence at a time (minimises latency to first audio).
-- When finished speaking, call done() so the mic re-arms.
-- Use list_agents() and get_agent_status() before answering "what are you doing".
-- All mode changes must target a specific session ID. Never touch global settings.
-- Call next_voice_turn() to receive the next user utterance.
+<prompts/cursor-voice/system.md body>
+
+---
+The cursor-voice MCP server is connected. Start the voice loop now — call next_voice_turn() immediately.
 ```
+
+### Resume (existing session)
+
+When the project has a persisted `resumeId`, only a **short** prompt is sent:
+
+```
+@cursor-voice
+
+The cursor-voice MCP server is connected. Resume the voice loop — call next_voice_turn() immediately.
+```
+
+The `@cursor-voice` mention causes Cursor to inject the rule file. Conversation
+history comes from `--resume <session_id>`; the full system prompt is **not** resent.
+
+Implementation: `src/executor/voiceAgent.ts` — `buildVoiceBootPrompt(project)`.
+
+### MCP server instructions
+
+Separate from the agent boot prompt: `prompts/cursor-voice/mcp-instructions.md` is
+returned as MCP server instructions when Cursor connects to `/mcp`.
 
 ---
 
@@ -236,14 +259,18 @@ The token is the same app token used by the PWA.
 | `prompts/cursor-voice/system.md` | System prompt for Cursor voice mode |
 | `.cursor/mcp.json.example` | Example MCP registration file |
 
-### Phase 2 — `cursor_native` Workflow (future)
+### Phase 2 — `cursor_native` Workflow ✅
 
-- Add `workflow.default: "cursor_native"` config option.
-- When active, the intelligence WebSocket still handles STT but routes turns to
-  `VoiceTurnQueue` instead of Claude.
-- Bridge sends `{ type: "thinking", value: true }` while waiting for Cursor to
-  call `speak()`.
-- `done()` call triggers `{ type: "turn_complete" }` to the PWA.
+- `workflow.default: "cursor_native"` in config.
+- Intelligence WebSocket routes turns to `VoiceTurnQueue`.
+- Bridge auto-spawns conversational `cursor-agent` via `src/executor/voiceAgent.ts`.
+- `done()` triggers `{ type: "turn_complete" }` to the PWA.
+
+### Phase 3 — Auto-Spawn Conversational Agent ✅
+
+- Voice agent spawns automatically on first `user_turn` when none is running.
+- MCP session bound on first `/mcp` connect (`bindVoiceAgentMcpSession`).
+- Boot prompt: full system prompt on first spawn; `@cursor-voice` on resume.
 
 ### Voice session MCP prepare (implemented)
 
@@ -270,28 +297,16 @@ first global install so the MCP server list refreshes.
 
 Template: `config/global-mcp.json.example` → copy to `~/.cursor/mcp.json`.
 
-### Phase 3 — Auto-Spawn Conversational Agent (future)
-
-- Create a Cursor automation rule (`.cursor/rules/`) that spawns the voice
-  conversational loop on project open.
-- Or: expose a `/api/voice/spawn-conversational` endpoint that Cursor
-  background hooks call.
-
 ---
 
 ## 10 — Coexistence with `llm_intelligence`
 
-The two modes coexist without conflict:
-
 | Mode | Who reasons | Bridge role |
 | --- | --- | --- |
 | `cursor_native` (default) | Cursor agent via MCP | Routes turns to `VoiceTurnQueue`; handles `speak()` |
-| `llm_intelligence` | Claude on Bedrock | Routes turns to Bedrock; handles `speak()` |
-| `s2s_voice` (legacy) | Speech-to-speech model | Routes tool calls to MCP dispatch |
+| `llm_intelligence` | Claude on Bedrock | Routes turns to Bedrock orchestrator; handles `speak()` |
 
-The MCP SSE server is always running regardless of the active workflow mode, so
-Cursor can call bridge tools (e.g., `cursor_diff`) from any project at any time —
-not just during voice sessions.
+The MCP server runs regardless of workflow so Cursor can call bridge tools from any project.
 
 ---
 

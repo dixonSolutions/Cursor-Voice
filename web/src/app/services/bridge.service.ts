@@ -3,7 +3,7 @@ import { Subject } from 'rxjs';
 
 export type WsStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
-export type WorkflowId = 'cursor_native' | 'llm_intelligence' | 's2s_voice';
+export type WorkflowId = 'cursor_native' | 'llm_intelligence';
 
 export interface AppSettings {
   workflow: {
@@ -76,7 +76,7 @@ interface PendingCall {
  * Responsibilities:
  *   - Credential storage (localStorage)
  *   - WS lifecycle: connect, auth, auto-reconnect
- *   - HTTP: /api/projects, /api/active-project, /api/realtime/token
+ *   - HTTP: /api/projects, /api/active-project, /api/voice/providers
  *   - Tool-call relay: pendingToolCalls map resolved by WS tool_result frames
  *   - Speaking-state updates forwarded to narrator cadence gate
  *   - Narration events published via narration$ Observable (→ VoiceSessionService)
