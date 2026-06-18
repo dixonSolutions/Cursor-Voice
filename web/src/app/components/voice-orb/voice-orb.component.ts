@@ -38,15 +38,27 @@ export type OrbColorMode = 'blue' | 'red' | 'green';
 
       .cv-voice-orb {
         position: relative;
-        width: 13rem;
-        height: 13rem;
+        width: 11.5rem;
+        height: 11.5rem;
         margin: 0 auto;
         transition: width 0.35s ease, height 0.35s ease;
       }
 
       .cv-voice-orb--expanded {
-        width: min(68vw, 68vh, 22rem);
-        height: min(68vw, 68vh, 22rem);
+        width: min(58vw, 58vh, 20rem);
+        height: min(58vw, 58vh, 20rem);
+      }
+
+      @media (max-width: 640px) {
+        .cv-voice-orb {
+          width: 10.5rem;
+          height: 10.5rem;
+        }
+
+        .cv-voice-orb--expanded {
+          width: min(52vw, 42vh, 18rem);
+          height: min(52vw, 42vh, 18rem);
+        }
       }
 
       .cv-voice-orb canvas {

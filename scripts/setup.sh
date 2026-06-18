@@ -65,7 +65,6 @@ if [[ "$(uname -s)" != "Linux" ]]; then
 fi
 
 RUN_USER="${USER:-$(id -un)}"
-NODE_BIN="$(command -v node 2>/dev/null || true)"
 
 info "Platform: Linux  |  User: ${BLD}${RUN_USER}${NC}  |  Project: ${BLD}${PROJECT_DIR}${NC}"
 
@@ -124,15 +123,30 @@ if ! $SKIP_TAILSCALE; then
   ok "Tailscale is up: $(tailscale ip -4 2>/dev/null || echo 'IP pending')"
 fi
 
+# Detect the Node binary used by an existing service (if installed)
+SERVICE_NODE=""
+SERVICE_FILE="${HOME}/.config/systemd/user/cursor-voice.service"
+if [[ -f "$SERVICE_FILE" ]]; then
+  SERVICE_NODE=$(grep -oP '(?<=ExecStart=)\S+node' "$SERVICE_FILE" || true)
+fi
+if [[ -z "$SERVICE_NODE" && -f /etc/systemd/system/cursor-voice.service ]]; then
+  SERVICE_NODE=$(grep -oP '(?<=ExecStart=)\S+node' /etc/systemd/system/cursor-voice.service || true)
+fi
+NODE_BIN="${SERVICE_NODE:-$(command -v node 2>/dev/null || true)}"
+NPM_BIN="$(dirname "$NODE_BIN")/npm"
+[[ -x "$NPM_BIN" ]] || NPM_BIN="npm"
+
 # ── 3. Build ──────────────────────────────────────────────────────────────
 section "Building project"
 
+info "Using NODE_BIN=${NODE_BIN}  NPM_BIN=${NPM_BIN}"
 info "Installing npm dependencies..."
-npm ci --no-audit --prefer-offline 2>/dev/null \
-  || npm install --no-audit --legacy-peer-deps
+"$NPM_BIN" ci --no-audit --prefer-offline 2>/dev/null \
+  || "$NPM_BIN" install --no-audit --legacy-peer-deps
+"$NPM_BIN" rebuild
 
 info "Building backend + PWA..."
-npm run build
+"$NPM_BIN" run build
 ok "Build complete → dist/index.js + web/dist/"
 
 # ── 4. Environment file ───────────────────────────────────────────────────

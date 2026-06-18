@@ -63,18 +63,35 @@ if [[ -f "$ENV_FILE" ]]; then
 fi
 PORT="${PORT:-8787}"
 
+# Detect the Node binary used by the service (if installed)
+SERVICE_NODE=""
+SERVICE_FILE="${HOME}/.config/systemd/user/cursor-voice.service"
+if [[ -f "$SERVICE_FILE" ]]; then
+  SERVICE_NODE=$(grep -oP '(?<=ExecStart=)\S+node' "$SERVICE_FILE" || true)
+fi
+# Also check system-wide service
+if [[ -z "$SERVICE_NODE" && -f /etc/systemd/system/cursor-voice.service ]]; then
+  SERVICE_NODE=$(grep -oP '(?<=ExecStart=)\S+node' /etc/systemd/system/cursor-voice.service || true)
+fi
+NODE_BIN="${SERVICE_NODE:-node}"
+NPM_BIN="$(dirname "$NODE_BIN")/npm"
+# Fallback if npm not alongside node
+[[ -x "$NPM_BIN" ]] || NPM_BIN="npm"
+
 # ── 1. Build ──────────────────────────────────────────────────────────────
 if $NO_BUILD; then
   section "Skipping build (--no-build)"
   warn "Using existing dist/index.js"
 else
   section "Building"
+  info "Using NODE_BIN=${NODE_BIN}  NPM_BIN=${NPM_BIN}"
   info "Checking dependencies..."
-  npm ci --no-audit --prefer-offline 2>/dev/null || npm install --no-audit
+  "$NPM_BIN" ci --no-audit --prefer-offline 2>/dev/null || "$NPM_BIN" install --no-audit
+  "$NPM_BIN" rebuild
 
   info "Building backend + PWA..."
   START=$SECONDS
-  npm run build
+  "$NPM_BIN" run build
   ok "Build done in $(( SECONDS - START ))s → dist/index.js"
 fi
 
@@ -106,7 +123,7 @@ else
   warn "No systemd service found. Run 'bash scripts/setup.sh' to install it."
   warn "Starting bridge manually in the background..."
   mkdir -p "${PROJECT_DIR}/logs"
-  nohup node "${PROJECT_DIR}/dist/index.js" \
+  nohup "$NODE_BIN" "${PROJECT_DIR}/dist/index.js" \
     >> "${PROJECT_DIR}/logs/bridge.log" 2>&1 &
   PID=$!
   sleep 1

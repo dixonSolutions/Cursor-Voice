@@ -45,6 +45,7 @@ export function getVoiceSettingsView(): VoiceSettingsResponse {
 const WakeWordsBodySchema = z.object({
   start: z.string().min(1).max(100),
   end: z.string().max(100).optional(),
+  cancel: z.string().max(100).optional(),
   silenceMs: z.coerce.number().int().min(500).max(30_000).optional(),
   vadEnabled: z.boolean().optional(),
 });
@@ -55,12 +56,14 @@ export function setWakeWords(raw: unknown): VoiceSettingsResponse {
 
   const startTrim = parsed.data.start.trim();
   const endTrim = parsed.data.end?.trim();
+  const cancelTrim = parsed.data.cancel?.trim();
   if (!startTrim) throw new Error('Activation phrase cannot be empty');
 
   persistVoiceUpdate((voice) => {
     voice.wakeWords = {
       start: startTrim,
       end: parsed.data.end !== undefined ? endTrim ?? '' : (voice.wakeWords.end ?? 'send'),
+      cancel: parsed.data.cancel !== undefined ? cancelTrim ?? 'cancel' : (voice.wakeWords.cancel ?? 'cancel'),
     };
     if (parsed.data.silenceMs !== undefined || parsed.data.vadEnabled !== undefined) {
       voice.turnSubmit = {
@@ -68,7 +71,7 @@ export function setWakeWords(raw: unknown): VoiceSettingsResponse {
         vadEnabled: parsed.data.vadEnabled ?? voice.turnSubmit.vadEnabled ?? true,
       };
     }
-  }, `wake phrase → start="${startTrim}" end="${endTrim ?? '(unchanged)'}"`);
+  }, `wake phrase → start="${startTrim}" end="${endTrim ?? '(unchanged)'}" cancel="${cancelTrim ?? '(unchanged)'}"`);
 
   return getVoiceSettingsView();
 }

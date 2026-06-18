@@ -3,6 +3,7 @@
 export interface WakeWords {
   start: string;
   end: string;
+  cancel?: string;
 }
 
 export interface TurnSubmit {

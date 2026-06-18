@@ -15,10 +15,6 @@
 import { z } from 'zod';
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
-import {
-  DEFAULT_LLM_INTELLIGENCE_PROMPTS,
-  loadWorkflowSystemPrompt,
-} from './state/promptLoader.js';
 import { childLogger } from './log.js';
 
 const log = childLogger('config');
@@ -43,6 +39,8 @@ const EnvSchema = z.object({
 export const WakeWordsSchema = z.object({
   start: z.string().min(1).max(100),
   end: z.string().max(100).default('send'),
+  /** Spoken during capture to abort the turn without sending — default "cancel". */
+  cancel: z.string().max(100).default('cancel'),
 });
 
 export const TurnSubmitSchema = z.object({
@@ -55,12 +53,6 @@ export const TurnSubmitSchema = z.object({
 export const VoiceSettingsSchema = z.object({
   wakeWords: WakeWordsSchema,
   turnSubmit: TurnSubmitSchema.default({}),
-});
-
-/** Resolved system prompt (loaded from prompts/ at startup). */
-export const VoiceSystemPromptSchema = z.object({
-  template: z.string().min(1).max(65_536),
-  activationRules: z.string().min(1).max(16_384),
 });
 
 // ── Run mode (test vs serve) ────────────────────────────────────────────────
@@ -115,11 +107,6 @@ const LlmIntelligenceAudioSchema = z.object({
 export const LlmIntelligenceWorkflowSchema = z.object({
   llm: LlmIntelligenceLlmSchema.default({}),
   audio: LlmIntelligenceAudioSchema.default({}),
-  /** Paths relative to config.json — see prompts/llm-intelligence/. */
-  systemPrompts: z
-    .array(z.string().min(1))
-    .min(1)
-    .default([...DEFAULT_LLM_INTELLIGENCE_PROMPTS]),
   memory: LlmIntelligenceMemorySchema.default({}),
   /** Max chars returned to Claude from read_output / status payloads. */
   readOutputMaxChars: z.number().int().min(1000).max(32_768).default(8000),
@@ -177,16 +164,11 @@ export const ConfigFileSchema = z.object({
 export type AppEnv = z.infer<typeof EnvSchema>;
 export type WakeWords = z.infer<typeof WakeWordsSchema>;
 export type TurnSubmit = z.infer<typeof TurnSubmitSchema>;
-export type VoiceSystemPrompt = z.infer<typeof VoiceSystemPromptSchema>;
 export type VoiceSettingsInput = z.infer<typeof VoiceSettingsSchema>;
 export type VoiceSettings = VoiceSettingsInput;
 export type RunModes = z.infer<typeof RunModesSchema>;
 export type LlmIntelligenceWorkflow = z.infer<typeof LlmIntelligenceWorkflowSchema>;
-export type WorkflowSettings = z.infer<typeof WorkflowSettingsSchema> & {
-  llmIntelligence: LlmIntelligenceWorkflow & {
-    systemPrompt: VoiceSystemPrompt;
-  };
-};
+export type WorkflowSettings = z.infer<typeof WorkflowSettingsSchema>;
 export type Settings = Omit<z.infer<typeof SettingsSchema>, 'voice' | 'workflow'> & {
   voice: VoiceSettings;
   workflow: WorkflowSettings;
@@ -247,6 +229,9 @@ function migrateRawConfig(raw: unknown): unknown {
         log.info('Migrated workflow default s2s_voice → cursor_native');
       }
       delete wf['s2sVoice'];
+      if (typeof wf['llmIntelligence'] === 'object' && wf['llmIntelligence'] !== null) {
+        delete (wf['llmIntelligence'] as Record<string, unknown>)['systemPrompts'];
+      }
     }
 
     return raw;
@@ -258,20 +243,17 @@ function migrateRawConfig(raw: unknown): unknown {
 }
 
 function resolveWorkflowSettings(
-  configPath: string,
   workflow: z.infer<typeof WorkflowSettingsSchema>,
 ): WorkflowSettings {
   const llmIntelligenceRaw = workflow.llmIntelligence;
   const audioRegion = llmIntelligenceRaw.audio.region ?? llmIntelligenceRaw.llm.region;
-  const llmIntelligence = {
-    ...llmIntelligenceRaw,
-    audio: { ...llmIntelligenceRaw.audio, region: audioRegion },
-    systemPrompt: loadWorkflowSystemPrompt(
-      configPath,
-      llmIntelligenceRaw.systemPrompts,
-    ),
+  return {
+    ...workflow,
+    llmIntelligence: {
+      ...llmIntelligenceRaw,
+      audio: { ...llmIntelligenceRaw.audio, region: audioRegion },
+    },
   };
-  return { ...workflow, llmIntelligence };
 }
 
 // ── Loader (singleton) ────────────────────────────────────────────────────────
@@ -314,7 +296,7 @@ function loadFromDisk(): AppConfig {
   }
 
   const configFile = cfgResult.data;
-  const workflow = resolveWorkflowSettings(configPath, configFile.settings.workflow);
+  const workflow = resolveWorkflowSettings(configFile.settings.workflow);
 
   return {
     env,

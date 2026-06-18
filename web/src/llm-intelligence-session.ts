@@ -70,6 +70,7 @@ export class LlmIntelligenceSession {
   private startSpotter: VoskGrammarSpotter | null = null;
   private vadDetector: SileroVadDetector | null = null;
   private endSpotter: VoskGrammarSpotter | null = null;
+  private cancelSpotter: VoskGrammarSpotter | null = null;
   private turnBuffer: TurnSubmitBuffer | null = null;
   private vadSpeechEndPending = false;
   private endPhrasePending = false;
@@ -206,6 +207,8 @@ export class LlmIntelligenceSession {
     void this.stopVadDetector();
     this.endSpotter?.dispose();
     this.endSpotter = null;
+    this.cancelSpotter?.dispose();
+    this.cancelSpotter = null;
     this.turnBuffer?.dispose();
     this.turnBuffer = null;
     this.vadSpeechEndPending = false;
@@ -409,11 +412,52 @@ export class LlmIntelligenceSession {
     this.listeningForEndPhrase = false;
   }
 
+  private stopCancelSpotter(): void {
+    this.cancelSpotter?.dispose();
+    this.cancelSpotter = null;
+  }
+
+  /** Vosk cancel phrase heard during capture — abort current turn without sending. */
+  private onCancelDetected(): void {
+    if (this.closed || !this.voiceActivated) return;
+    console.debug('[cancel] turn cancelled by user');
+    this.cb.onSttError?.('Turn cancelled.');
+    this.exitCapturePhase();
+    this.voiceActivated = false;
+    this.capturingUtterance = false;
+    this.vadSpeechEndPending = false;
+    this.endPhrasePending = false;
+    this.turnBuffer?.dispose();
+    this.turnBuffer = null;
+    this.cb.onDeactivated?.();
+    void this.armStartSpotter();
+  }
+
+  private async armCancelSpotter(): Promise<void> {
+    const cancel = this.wakeWords.cancel?.trim();
+    if (!cancel || !isCrossOriginIsolated()) return;
+
+    this.stopCancelSpotter();
+    try {
+      this.cancelSpotter = new VoskGrammarSpotter({
+        onMatch: () => this.onCancelDetected(),
+        onError: (message) => console.warn('[vosk-cancel]', message),
+      });
+      const mic = this.sharedMicStream ?? (await this.ensureSharedMic());
+      await this.cancelSpotter.start(cancel, { mediaStream: mic, matchPartial: false });
+    } catch (err) {
+      console.warn('[vosk-cancel]', err);
+      this.cancelSpotter?.dispose();
+      this.cancelSpotter = null;
+    }
+  }
+
   private exitCapturePhase(): void {
     this.vadListening = false;
     this.listeningForEndPhrase = false;
     void this.stopVadDetector();
     this.stopEndSpotter();
+    this.stopCancelSpotter();
     this.clearEndSubmitTimer();
     this.vadSpeechEndPending = false;
     this.endPhrasePending = false;
@@ -432,6 +476,10 @@ export class LlmIntelligenceSession {
     } else if (this.usesEndPhraseSubmit()) {
       await this.armEndPhraseSpotter();
     }
+    if (this.closed || !this.voiceActivated) return;
+    // Cancel spotter runs throughout the capture phase — lets user say "cancel"
+    // to abort the turn silently without sending anything.
+    await this.armCancelSpotter();
   }
 
   private resetTurnBuffer(): void {
@@ -962,11 +1010,17 @@ export class LlmIntelligenceSession {
 
       ctx.signal.addEventListener('abort', onAbort, { once: true });
       utter.onstart = () => ctx.onStart();
-      utter.onend = () => finish();
+      utter.onend = () => {
+        // Cancel after onend to prevent Chrome's ghost-restart loop.
+        window.speechSynthesis.cancel();
+        finish();
+      };
       utter.onerror = (ev) => {
         console.warn('[tts webkit]', ev.error ?? 'error');
         finish();
       };
+      // Cancel any lingering synthesis before queuing the next utterance.
+      window.speechSynthesis.cancel();
       window.speechSynthesis.speak(utter);
     });
   }

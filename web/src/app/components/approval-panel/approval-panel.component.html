@@ -1,0 +1,253 @@
+@if (pending(); as req) {
+  <div class="approval-overlay">
+    <div class="approval-card">
+
+      <!-- ── User Input ──────────────────────────────────────── -->
+      @if (asUserInput(); as q) {
+        <div class="approval-header">
+          <span class="approval-icon">🤔</span>
+          <span class="approval-title">Cursor needs your input</span>
+        </div>
+
+        <p class="approval-question">{{ q.question }}</p>
+
+        <!-- Yes / No -->
+        @if (q.input_type === 'yesno') {
+          <div class="approval-actions">
+            <p-button
+              label="Yes"
+              severity="success"
+              icon="pi pi-check"
+              (onClick)="answerYes()"
+            />
+            <p-button
+              label="No"
+              severity="danger"
+              icon="pi pi-times"
+              (onClick)="answerNo()"
+            />
+          </div>
+        }
+
+        <!-- Choice chips -->
+        @if (q.input_type === 'choice' && q.options) {
+          <div class="approval-choices">
+            @for (opt of q.options; track opt) {
+              <p-button
+                [label]="opt"
+                severity="secondary"
+                (onClick)="answerChoice(opt)"
+              />
+            }
+          </div>
+        }
+
+        <!-- Free text -->
+        @if (q.input_type === 'freetext') {
+          <div class="approval-freetext">
+            <input
+              pInputText
+              [(ngModel)]="freeText"
+              placeholder="Type your answer…"
+              (keyup.enter)="submitFreeText()"
+              class="w-full"
+            />
+            <p-button
+              label="Send"
+              icon="pi pi-send"
+              [disabled]="!freeText.trim()"
+              (onClick)="submitFreeText()"
+            />
+          </div>
+        }
+      }
+
+      <!-- ── Plan Approval ───────────────────────────────────── -->
+      @if (asPlanApproval(); as plan) {
+        <div class="approval-header">
+          <span class="approval-icon">📋</span>
+          <span class="approval-title">{{ plan.title }}</span>
+        </div>
+
+        @if (plan.estimated_impact) {
+          <p class="approval-impact">{{ plan.estimated_impact }}</p>
+        }
+
+        <ol class="approval-steps">
+          @for (step of plan.steps; track step; let i = $index) {
+            <li class="approval-step">
+              <span class="step-num">{{ i + 1 }}</span>
+              <span class="step-text">{{ step }}</span>
+            </li>
+          }
+        </ol>
+
+        <div class="approval-actions">
+          <p-button
+            label="Approve"
+            severity="success"
+            icon="pi pi-check"
+            (onClick)="approvePlan()"
+          />
+          <p-button
+            label="Reject"
+            severity="danger"
+            icon="pi pi-ban"
+            (onClick)="rejectPlan()"
+          />
+          <p-button
+            label="Modify"
+            severity="secondary"
+            icon="pi pi-pencil"
+            (onClick)="toggleModify()"
+          />
+        </div>
+
+        @if (showModifyField()) {
+          <div class="approval-freetext" style="margin-top: 0.75rem;">
+            <textarea
+              pTextarea
+              [(ngModel)]="modifyNotes"
+              placeholder="Describe what to change…"
+              rows="3"
+              class="w-full"
+            ></textarea>
+            <p-button
+              label="Submit changes"
+              icon="pi pi-send"
+              [disabled]="!modifyNotes.trim()"
+              (onClick)="modifyPlan()"
+            />
+          </div>
+        }
+      }
+
+    </div>
+  </div>
+}
+
+<style>
+  .approval-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    z-index: 9000;
+    padding: 1rem;
+    padding-bottom: max(1rem, env(safe-area-inset-bottom, 0));
+  }
+
+  .approval-card {
+    background: var(--surface-card, #1e1e2e);
+    border: 1px solid var(--surface-border, #3a3a5c);
+    border-radius: 1rem;
+    padding: 1.25rem 1.5rem 1.5rem;
+    width: 100%;
+    max-width: 520px;
+    box-shadow: 0 -4px 40px rgba(0, 0, 0, 0.4);
+    animation: slideUp 0.22s ease-out;
+  }
+
+  @keyframes slideUp {
+    from { transform: translateY(32px); opacity: 0; }
+    to   { transform: translateY(0);    opacity: 1; }
+  }
+
+  .approval-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .approval-icon {
+    font-size: 1.25rem;
+    line-height: 1;
+  }
+
+  .approval-title {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-color, #e2e8f0);
+  }
+
+  .approval-question {
+    color: var(--text-color-secondary, #94a3b8);
+    font-size: 0.95rem;
+    line-height: 1.5;
+    margin: 0 0 1rem;
+  }
+
+  .approval-impact {
+    font-size: 0.8rem;
+    color: var(--text-color-secondary, #94a3b8);
+    background: var(--surface-ground, #13131f);
+    border-radius: 0.4rem;
+    padding: 0.35rem 0.6rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .approval-steps {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+  }
+
+  .approval-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.55rem;
+    font-size: 0.875rem;
+    color: var(--text-color, #e2e8f0);
+    line-height: 1.4;
+  }
+
+  .step-num {
+    flex-shrink: 0;
+    width: 1.4rem;
+    height: 1.4rem;
+    border-radius: 50%;
+    background: var(--primary-color, #6366f1);
+    color: #fff;
+    font-size: 0.72rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: 0.05rem;
+  }
+
+  .step-text {
+    flex: 1;
+  }
+
+  .approval-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .approval-actions .p-button,
+  .approval-choices .p-button {
+    min-height: 44px;
+    flex: 1 1 auto;
+  }
+
+  .approval-choices {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .approval-freetext {
+    display: flex;
+    gap: 0.5rem;
+    align-items: flex-start;
+  }
+</style>

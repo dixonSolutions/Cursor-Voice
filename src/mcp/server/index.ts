@@ -44,6 +44,8 @@ import {
 import { dispatchTool } from '../handlers.js';
 import { cursorVoiceMcpInstructions } from '../loadCursorVoicePrompt.js';
 import { bindVoiceAgentMcpSession } from '../../executor/voiceAgent.js';
+import { registerRequest, type UserInputRequest, type PlanApprovalRequest } from './approvalRegistry.js';
+import { pushToPhone } from '../../state/controlSocket.js';
 
 const log = childLogger('mcp:server');
 
@@ -576,6 +578,136 @@ function buildMcpServer(sessionKey: string): McpServer {
     },
   );
 
+  // ── User interaction (approvals & questions) ───────────────────────────
+
+  server.tool(
+    'request_user_input',
+    'Ask the user a question and wait for their spoken or tapped reply. ' +
+      'The PWA shows a prompt card; the user answers by voice or tap. ' +
+      'This tool BLOCKS until the user responds or timeout_ms elapses. ' +
+      'Use for yes/no decisions, short choices, or free-text clarifications. ' +
+      'Do NOT call speak() before this — the PWA card is the notification.',
+    {
+      question: z.string().min(1).max(1000).describe('The question to display and read aloud to the user.'),
+      input_type: z
+        .enum(['yesno', 'choice', 'freetext'])
+        .describe(
+          'yesno = Yes / No buttons; ' +
+          'choice = pick from provided options list; ' +
+          'freetext = user types or speaks a free answer.',
+        ),
+      options: z
+        .array(z.string().min(1).max(200))
+        .min(2)
+        .max(10)
+        .optional()
+        .describe('Required when input_type is "choice". List of options for the user to pick from.'),
+      timeout_ms: z
+        .number()
+        .int()
+        .min(10_000)
+        .max(300_000)
+        .optional()
+        .describe('How long to wait for a response (default 120 000 ms = 2 min).'),
+    },
+    async ({ question, input_type, options, timeout_ms }) => {
+      const timeout = timeout_ms ?? 120_000;
+
+      const { request_id, promise } = registerRequest((id) => {
+        const req: UserInputRequest = {
+          kind: 'user_input',
+          request_id: id,
+          question,
+          input_type,
+          options,
+        };
+        pushToPhone({ type: 'user_input_request', ...req });
+        return req;
+      }, timeout);
+
+      log.info({ request_id, input_type }, 'request_user_input: waiting for user');
+
+      try {
+        const response = await promise;
+        if (response.kind !== 'user_input') {
+          return { content: [{ type: 'text', text: JSON.stringify({ error: 'Unexpected response kind' }) }] };
+        }
+        return { content: [{ type: 'text', text: JSON.stringify({ request_id, answer: response.answer }) }] };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { content: [{ type: 'text', text: JSON.stringify({ request_id, error: message }) }] };
+      }
+    },
+  );
+
+  server.tool(
+    'submit_plan_for_approval',
+    'Present a numbered plan to the user and wait for them to approve, reject, or request modifications. ' +
+      'The PWA shows a structured plan card with step-by-step detail. ' +
+      'This tool BLOCKS until the user responds or timeout_ms elapses. ' +
+      'Always use this before applying significant, multi-file, or irreversible changes. ' +
+      'Do NOT call speak() before this — the PWA card is the notification.',
+    {
+      title: z.string().min(1).max(200).describe('Short title summarising the plan (e.g. "Refactor auth module").'),
+      steps: z
+        .array(z.string().min(1).max(500))
+        .min(1)
+        .max(20)
+        .describe('Ordered list of concrete steps the agent will take.'),
+      estimated_impact: z
+        .string()
+        .max(300)
+        .optional()
+        .describe('Optional short description of scope / risk (e.g. "Touches 4 files, no DB changes").'),
+      timeout_ms: z
+        .number()
+        .int()
+        .min(10_000)
+        .max(600_000)
+        .optional()
+        .describe('How long to wait for a response (default 180 000 ms = 3 min).'),
+    },
+    async ({ title, steps, estimated_impact, timeout_ms }) => {
+      const timeout = timeout_ms ?? 180_000;
+
+      const { request_id, promise } = registerRequest((id) => {
+        const req: PlanApprovalRequest = {
+          kind: 'plan_approval',
+          request_id: id,
+          title,
+          steps,
+          estimated_impact,
+        };
+        pushToPhone({ type: 'plan_approval_request', ...req });
+        return req;
+      }, timeout);
+
+      log.info({ request_id, steps: steps.length }, 'submit_plan_for_approval: waiting for user');
+
+      try {
+        const response = await promise;
+        if (response.kind !== 'plan_approval') {
+          return { content: [{ type: 'text', text: JSON.stringify({ error: 'Unexpected response kind' }) }] };
+        }
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                request_id,
+                decision: response.decision,
+                notes: response.notes ?? null,
+              }),
+            },
+          ],
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { content: [{ type: 'text', text: JSON.stringify({ request_id, error: message }) }] };
+      }
+    },
+  );
+
   return server;
 }
 
@@ -700,5 +832,5 @@ export function registerMcpServer(app: FastifyInstance): void {
     await reply.code(204).send();
   });
 
-  log.info('mcp server registered at /mcp (30 tools)');
+  log.info('mcp server registered at /mcp (32 tools)');
 }

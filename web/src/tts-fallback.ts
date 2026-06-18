@@ -194,8 +194,15 @@ function playWebkitLine(text: string, ctx?: TtsPlayContext): Promise<void> {
       lastSpokenText = text;
       ctx?.onStart();
     };
-    utter.onend = () => finish();
+    utter.onend = () => {
+      // Cancel after onend to prevent Chrome's ghost-restart loop where the
+      // browser replays the utterance silently after the synthesis queue closes.
+      window.speechSynthesis.cancel();
+      finish();
+    };
     utter.onerror = () => finish();
+    // Cancel any lingering synthesis before starting — prevents Chrome overlap.
+    window.speechSynthesis.cancel();
     window.speechSynthesis.speak(utter);
   });
 }

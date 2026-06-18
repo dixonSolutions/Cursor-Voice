@@ -3,6 +3,8 @@
 export interface WakeWords {
   start: string;
   end: string;
+  /** Spoken during capture to abort the turn silently — default "cancel". */
+  cancel?: string;
 }
 
 export interface TurnSubmit {

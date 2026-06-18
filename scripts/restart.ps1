@@ -48,12 +48,41 @@ function Test-Admin {
         [Security.Principal.WindowsBuiltinRole]::Administrator)
 }
 
+function Get-ServiceNodeBin {
+    param([string] $ProjectRoot, [string] $SvcName)
+
+    $nssm = Join-Path $ProjectRoot 'tools\nssm.exe'
+    if (Test-Path $nssm) {
+        try {
+            $app = (& $nssm get $SvcName Application 2>$null | Select-Object -First 1).Trim()
+            if ($app -and (Test-Path $app)) { return $app }
+        } catch { }
+    }
+
+    $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
+    if ($nodeCmd) { return $nodeCmd.Source }
+    return 'node'
+}
+
+function Get-NpmBin {
+    param([string] $NodeBin)
+
+    $npmCmd = Join-Path (Split-Path $NodeBin -Parent) 'npm.cmd'
+    if (Test-Path $npmCmd) { return $npmCmd }
+
+    $npmOnPath = Get-Command npm -ErrorAction SilentlyContinue
+    if ($npmOnPath) { return $npmOnPath.Source }
+    return 'npm'
+}
+
 Write-Host "Cursor Voice — restart (Windows)" -ForegroundColor Magenta
 Write-Host "  Project: $ProjectDir"
 
 $ServiceName = 'CursorVoice'
 $EnvFile     = Join-Path $ProjectDir '.env'
 $LogFile     = Join-Path $ProjectDir 'logs\bridge.log'
+$NodeBin     = Get-ServiceNodeBin -ProjectRoot $ProjectDir -SvcName $ServiceName
+$NpmBin      = Get-NpmBin -NodeBin $NodeBin
 
 # ── Load .env for PORT ────────────────────────────────────────────────────
 $ActualPort = 8787
@@ -71,13 +100,16 @@ if ($NoBuild) {
     Warn "Using existing dist\index.js"
 } else {
     Section "Building"
+    Info "Using NODE_BIN=$NodeBin  NPM_BIN=$NpmBin"
     Info "Installing / checking dependencies..."
-    npm ci --no-audit --prefer-offline
-    if ($LASTEXITCODE -ne 0) { npm install --no-audit }
+    & $NpmBin ci --no-audit --prefer-offline
+    if ($LASTEXITCODE -ne 0) { & $NpmBin install --no-audit }
+    & $NpmBin rebuild
+    if ($LASTEXITCODE -ne 0) { Err "npm rebuild failed — check output above." }
 
     Info "Building backend + PWA..."
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
-    npm run build
+    & $NpmBin run build
     if ($LASTEXITCODE -ne 0) { Err "Build failed — check output above." }
     $sw.Stop()
     Ok "Build done in $([int]$sw.Elapsed.TotalSeconds)s → dist\index.js"
@@ -118,8 +150,7 @@ if ($service) {
     Warn "Service '$ServiceName' not found."
     Warn "Did you run setup.ps1 first? Trying to start manually..."
 
-    $NodeExe = (Get-Command node -ErrorAction SilentlyContinue)?.Source
-    if (-not $NodeExe) { Err "Node.js not found on PATH." }
+    if (-not (Test-Path $NodeBin)) { Err "Node.js not found (looked for: $NodeBin)." }
 
     $distFile = Join-Path $ProjectDir 'dist\index.js'
     if (-not (Test-Path $distFile)) { Err "dist\index.js not found — run the build first." }
@@ -135,7 +166,7 @@ if ($service) {
         }
     }
 
-    $proc = Start-Process -FilePath $NodeExe `
+    $proc = Start-Process -FilePath $NodeBin `
         -ArgumentList $distFile `
         -WorkingDirectory $ProjectDir `
         -RedirectStandardOutput $LogFile `
