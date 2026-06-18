@@ -273,22 +273,24 @@ function computeRms(samples: Float32Array): number {
 
 /**
  * Returns true if the gated PCM buffer contains meaningful speech energy.
- * The noise gate zeroes out silent frames, so at least MIN_SPEECH_RATIO of samples
- * must be above a small amplitude threshold for the audio to be worth transcribing.
+ * The noise gate zeroes out silent frames, so at least MIN_SPEECH_RATIO of
+ * non-zero (gated-through) samples must be above a small amplitude threshold.
  */
 function hasSpeechEnergy(chunks: Int16Array[]): boolean {
   // ~0.018 float amplitude in int16 — only non-silence gated-through samples qualify.
   const SPEECH_SAMPLE_THRESHOLD = 600;
   const MIN_SPEECH_RATIO = 0.05;
   let speech = 0;
-  let total = 0;
+  let gated = 0;
   for (const chunk of chunks) {
     for (let i = 0; i < chunk.length; i++) {
-      if (Math.abs(chunk[i] ?? 0) > SPEECH_SAMPLE_THRESHOLD) speech++;
-      total++;
+      const abs = Math.abs(chunk[i] ?? 0);
+      if (abs === 0) continue;
+      gated++;
+      if (abs > SPEECH_SAMPLE_THRESHOLD) speech++;
     }
   }
-  return total > 0 && speech / total >= MIN_SPEECH_RATIO;
+  return gated > 0 && speech / gated >= MIN_SPEECH_RATIO;
 }
 
 function downsampleTo16k(input: Float32Array, inputRate: number): Int16Array {

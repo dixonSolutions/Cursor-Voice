@@ -264,6 +264,7 @@ export class LlmIntelligenceSession {
       const mic = stream ?? (await this.ensureSharedMic());
       const ctx = getSharedAudioContext();
       if (ctx.state === 'suspended') await ctx.resume();
+      this.meterMicChain?.dispose();
       this.meterMicChain = createMicProcessingChain(mic, { highPassHz: 120 });
       const tap = getVoiceAudioMeter().tapMic(ctx, this.meterMicChain.output);
       connectSilentSink(ctx, tap);
@@ -424,7 +425,6 @@ export class LlmIntelligenceSession {
   private async enterCapturePhase(): Promise<void> {
     this.capturePhaseStartedAt = Date.now();
     this.resetTurnBuffer();
-    await this.attachMicMeter(this.sharedMicStream ?? undefined);
     await this.beginUtteranceCapture();
     if (this.closed || !this.voiceActivated) return;
     if (this.usesVad()) {
