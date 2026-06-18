@@ -123,7 +123,8 @@ fi
 section "Building project"
 
 info "Installing npm dependencies..."
-npm ci --no-audit --prefer-offline 2>/dev/null || npm install --no-audit
+npm ci --no-audit --prefer-offline 2>/dev/null \
+  || npm install --no-audit --legacy-peer-deps
 
 info "Building backend + PWA..."
 npm run build
@@ -276,10 +277,10 @@ section "Tailscale HTTPS proxy"
 if $SKIP_TAILSCALE; then
   warn "Skipping tailscale serve (--no-tailscale)."
 else
-  info "Configuring: sudo tailscale serve --bg 443 http://127.0.0.1:${ACTUAL_PORT}"
-  sudo tailscale serve --bg 443 "http://127.0.0.1:${ACTUAL_PORT}" \
+  info "Configuring: tailscale serve --bg ${ACTUAL_PORT}"
+  tailscale serve --bg "${ACTUAL_PORT}" \
     && ok "tailscale serve configured." \
-    || warn "tailscale serve failed — run manually: sudo tailscale serve --bg 443 http://127.0.0.1:${ACTUAL_PORT}"
+    || warn "tailscale serve failed — run manually: tailscale serve --bg ${ACTUAL_PORT}"
 
   # Detect Tailscale hostname and patch config.json
   TS_HOST="$(tailscale status --json 2>/dev/null \
