@@ -275,8 +275,7 @@ export class LlmIntelligenceSession {
 
   /** Idle phase — Vosk only; no STT pipeline (no Transcribe cost). */
   private async startWakeWordPhase(): Promise<void> {
-    const mic = await this.ensureSharedMic();
-    await this.attachMicMeter(mic);
+    await this.ensureSharedMic();
 
     if (!isCrossOriginIsolated()) {
       this.cb.onSttError?.(
@@ -425,6 +424,7 @@ export class LlmIntelligenceSession {
   private async enterCapturePhase(): Promise<void> {
     this.capturePhaseStartedAt = Date.now();
     this.resetTurnBuffer();
+    await this.attachMicMeter(this.sharedMicStream ?? undefined);
     await this.beginUtteranceCapture();
     if (this.closed || !this.voiceActivated) return;
     if (this.usesVad()) {

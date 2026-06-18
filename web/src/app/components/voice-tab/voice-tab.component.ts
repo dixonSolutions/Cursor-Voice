@@ -194,6 +194,14 @@ export class VoiceTabComponent {
     return model ? `Intelligence · ${model}` : 'Intelligence first';
   });
 
+  protected readonly visualizeUserSpeech = computed(() => {
+    if (!this.voiceSession.voiceActivated()) return false;
+    if (this.voiceSession.vadListening()) return true;
+    if (this.voiceSession.endPhraseArmed()) return true;
+    if (this.voiceSession.submittingTurn()) return true;
+    return this.voiceSession.audioSpectrum().mic >= 0.028;
+  });
+
   protected readonly orbColorMode = computed((): OrbColorMode => {
     if (!this.voiceSession.conversationActive()) return 'blue';
     if (this.voiceSession.voiceActivated()) return 'green';
