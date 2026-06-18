@@ -30,12 +30,15 @@ export const MIC_MEDIA_CONSTRAINTS: MediaTrackConstraints = {
 export interface MicFilterOptions {
   /** High-pass cutoff (Hz). Leaf blowers sit mostly below ~200 Hz. */
   highPassHz?: number;
+  /** Low-pass cutoff (Hz). Cuts high-frequency hiss/fan noise above the speech band. */
+  lowPassHz?: number;
   /** Attenuate steady background when RMS stays below the adaptive threshold. */
   noiseGateEnabled?: boolean;
 }
 
 const DEFAULT_FILTER: Required<MicFilterOptions> = {
   highPassHz: 180,
+  lowPassHz: 3500,
   noiseGateEnabled: true,
 };
 
@@ -70,12 +73,25 @@ export async function captureMicStream(): Promise<MediaStream> {
 /**
  * Adaptive noise gate — reduces steady rumble (leaf blowers, fans) between words.
  * Mutates samples in place.
+ *
+ * Asymmetric adaptation: the noise floor rises very slowly so sustained background
+ * noise (fans, HVAC, traffic) cannot lift the threshold above the user's voice.
+ * The floor falls quickly when the environment becomes quiet.
+ * A short hold period keeps the gate open for a few frames after speech ends to
+ * prevent trailing word edges from being clipped.
  */
 export class NoiseGate {
   private noiseFloor = 0.004;
-  private readonly openMultiplier = 2.8;
-  private readonly floorAlpha = 0.04;
+  /** How many times above the noise floor the signal must be to open the gate. */
+  private readonly openMultiplier = 3.2;
+  /** Very slow rise — sustained background noise adapts floor up only slightly. */
+  private readonly floorRiseAlpha = 0.003;
+  /** Faster fall — quieter environments lower the threshold quickly. */
+  private readonly floorFallAlpha = 0.04;
   private readonly closedGain = 0;
+  /** Frames to keep the gate open after speech energy drops below threshold. */
+  private readonly holdDuration = 4;
+  private holdFrames = 0;
 
   process(samples: Float32Array): void {
     let sumSq = 0;
@@ -84,15 +100,21 @@ export class NoiseGate {
       sumSq += s * s;
     }
     const rms = Math.sqrt(sumSq / Math.max(samples.length, 1));
-    const threshold = Math.max(this.noiseFloor * this.openMultiplier, 0.002);
+    const threshold = Math.max(this.noiseFloor * this.openMultiplier, 0.003);
 
-    if (rms < threshold) {
-      this.noiseFloor += (rms - this.noiseFloor) * this.floorAlpha;
+    if (rms >= threshold) {
+      // Speech detected — reset hold, pass audio through unmodified.
+      this.holdFrames = this.holdDuration;
+    } else if (this.holdFrames > 0) {
+      // In hold period after speech — keep gate open to avoid clipping trailing words.
+      this.holdFrames--;
+    } else {
+      // Silence/noise — adapt floor asymmetrically and zero samples.
+      const alpha = rms > this.noiseFloor ? this.floorRiseAlpha : this.floorFallAlpha;
+      this.noiseFloor += (rms - this.noiseFloor) * alpha;
       for (let i = 0; i < samples.length; i++) {
         samples[i] = (samples[i] ?? 0) * this.closedGain;
       }
-    } else {
-      this.noiseFloor += (rms * 0.15 - this.noiseFloor) * (this.floorAlpha * 0.25);
     }
   }
 }
@@ -108,7 +130,7 @@ export interface MicProcessingChain {
   dispose(): void;
 }
 
-/** Mic → high-pass → output (apply gate in PCM callback for Bedrock). */
+/** Mic → high-pass → [low-pass] → output (apply gate in PCM callback for Bedrock). */
 export function createMicProcessingChain(
   micStream: MediaStream,
   options: MicFilterOptions = {},
@@ -122,11 +144,23 @@ export function createMicProcessingChain(
   highPass.Q.value = 0.707;
   source.connect(highPass);
 
+  let lastNode: AudioNode = highPass;
+
+  if (opts.lowPassHz > 0) {
+    const lowPass = ctx.createBiquadFilter();
+    lowPass.type = 'lowpass';
+    lowPass.frequency.value = opts.lowPassHz;
+    lowPass.Q.value = 0.707;
+    highPass.connect(lowPass);
+    lastNode = lowPass;
+  }
+
   const chain: MicChainInternal = {
-    output: highPass,
+    output: lastNode,
     dispose: () => {
       source.disconnect();
       highPass.disconnect();
+      lastNode.disconnect();
     },
   };
 

@@ -131,9 +131,12 @@ export class VoiceOrbComponent implements OnDestroy {
   readonly dimmed = input(false);
   readonly expanded = input(false);
   readonly colorMode = input<OrbColorMode>('blue');
+  /** When true, draw mic-reactive waves (post–wake-word user speech only). */
+  readonly visualizeUserSpeech = input(false);
 
   protected glowOpacity = (): number => {
-    const lv = this.spectrum().active;
+    if (!this.visualizeUserSpeech()) return this.live() ? 0.22 : 0.12;
+    const lv = this.spectrum().mic;
     if (lv < SILENT) return this.live() ? 0.28 : 0.15;
     return Math.min(1, 0.35 + lv * 0.65);
   };
@@ -173,14 +176,18 @@ export class VoiceOrbComponent implements OnDestroy {
   private loop = (): void => {
     const el = this.canvasRef()?.nativeElement;
     if (el) {
-      const { mic, out, active, bins } = this.spectrum();
-      const rise = active > this.displayLevel ? 0.55 : 0.22;
-      this.displayLevel += (active - this.displayLevel) * rise;
-      this.displayMic += (mic - this.displayMic) * 0.35;
-      this.displayOut += (out - this.displayOut) * 0.35;
+      const viz = this.visualizeUserSpeech();
+      const { mic, out, bins } = this.spectrum();
+      const targetMic = viz ? mic : 0;
+      const targetOut = viz ? out : 0;
+      const targetLevel = viz ? mic : 0;
+      const rise = targetLevel > this.displayLevel ? 0.55 : 0.22;
+      this.displayLevel += (targetLevel - this.displayLevel) * rise;
+      this.displayMic += (targetMic - this.displayMic) * 0.35;
+      this.displayOut += (targetOut - this.displayOut) * 0.35;
       for (let i = 0; i < VIZ_BINS; i++) {
-        const v = bins[i] ?? 0;
-        this.displayBins[i] += (v - this.displayBins[i]!) * 0.4;
+        const v = viz ? (bins[i] ?? 0) : 0;
+        this.displayBins[i] += (v - this.displayBins[i]!) * (viz ? 0.4 : 0.28);
       }
       this.draw(el);
     }
@@ -196,10 +203,10 @@ export class VoiceOrbComponent implements OnDestroy {
     const cx = w / 2;
     const cy = h / 2;
     const baseR = Math.min(w, h) * 0.38;
-    const level = this.displayLevel;
+    const level = this.displayMic;
     const mic = this.displayMic;
     const out = this.displayOut;
-    const speaking = level >= SILENT || this.maxBin() >= 0.06;
+    const speaking = this.visualizeUserSpeech() && (level >= SILENT || this.maxBin() >= 0.06);
     const userTalk = mic > out && mic >= SILENT;
 
     const mode = this.colorMode();

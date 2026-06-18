@@ -75,6 +75,7 @@
           [live]="voiceSession.conversationActive()"
           [dimmed]="pttDisabled()"
           [colorMode]="orbColorMode()"
+          [visualizeUserSpeech]="visualizeUserSpeech()"
           [expanded]="
             voiceSession.conversationActive() || voiceSession.sessionConnecting()
           " />

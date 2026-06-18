@@ -195,6 +195,15 @@ export class AmazonSttSession {
       throw new Error('Speech too short — speak your request after the wake phrase.');
     }
 
+    // Verify the gated PCM actually contains speech energy before calling the API.
+    // The noise gate zeroes out non-speech frames, so a buffer with no energy
+    // means the gate blocked everything (background noise was too loud).
+    if (!hasSpeechEnergy(chunks)) {
+      throw new Error(
+        'Transcription returned no text — background noise may be too high. Try speaking louder or closer to the mic.',
+      );
+    }
+
     this.utteranceFlushed = true;
     this.pcmChunks = [];
     this.recording = false;
@@ -260,6 +269,26 @@ function computeRms(samples: Float32Array): number {
     sumSq += s * s;
   }
   return Math.sqrt(sumSq / Math.max(samples.length, 1));
+}
+
+/**
+ * Returns true if the gated PCM buffer contains meaningful speech energy.
+ * The noise gate zeroes out silent frames, so at least MIN_SPEECH_RATIO of samples
+ * must be above a small amplitude threshold for the audio to be worth transcribing.
+ */
+function hasSpeechEnergy(chunks: Int16Array[]): boolean {
+  // ~0.018 float amplitude in int16 — only non-silence gated-through samples qualify.
+  const SPEECH_SAMPLE_THRESHOLD = 600;
+  const MIN_SPEECH_RATIO = 0.05;
+  let speech = 0;
+  let total = 0;
+  for (const chunk of chunks) {
+    for (let i = 0; i < chunk.length; i++) {
+      if (Math.abs(chunk[i] ?? 0) > SPEECH_SAMPLE_THRESHOLD) speech++;
+      total++;
+    }
+  }
+  return total > 0 && speech / total >= MIN_SPEECH_RATIO;
 }
 
 function downsampleTo16k(input: Float32Array, inputRate: number): Int16Array {

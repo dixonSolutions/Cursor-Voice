@@ -338,7 +338,6 @@ export async function buildServer(): Promise<FastifyInstance> {
     });
   });
 
-  registerIntelligenceWebSocket(app);
   registerMcpServer(app);
 
   // ── Web dispatch (after /api/* and /ws/* routes) ───────────────────────

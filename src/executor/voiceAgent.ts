@@ -70,8 +70,11 @@ export function getActiveVoiceAgent(): Readonly<ActiveVoiceAgent> | null {
 
 function buildVoiceBootPrompt(project: Project): string {
   const isResume = Boolean(project.resumeId);
+  // Do NOT trim VOICE_RESUME_SUFFIX — it starts with "---" after trimming,
+  // which cursor-agent CLI parses as an unknown option flag (exit code 1).
+  // The leading "\n\n" keeps it from being treated as a CLI flag.
   return isResume
-    ? VOICE_RESUME_SUFFIX.trim()
+    ? VOICE_RESUME_SUFFIX
     : `${cursorVoiceRuleBody()}${VOICE_BOOT_SUFFIX}`;
 }
 
