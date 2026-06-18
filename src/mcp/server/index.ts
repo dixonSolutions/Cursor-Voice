@@ -46,6 +46,7 @@ import { cursorVoiceMcpInstructions } from '../loadCursorVoicePrompt.js';
 import { bindVoiceAgentMcpSession } from '../../executor/voiceAgent.js';
 import { registerRequest, type UserInputRequest, type PlanApprovalRequest } from './approvalRegistry.js';
 import { pushToPhone } from '../../state/controlSocket.js';
+import { instrumentMcpToolLogging } from './toolLogging.js';
 
 const log = childLogger('mcp:server');
 
@@ -61,6 +62,8 @@ function buildMcpServer(sessionKey: string): McpServer {
       instructions: cursorVoiceMcpInstructions(),
     },
   );
+
+  instrumentMcpToolLogging(server);
 
   // ── Voice I/O ──────────────────────────────────────────────────────────
 

@@ -103,7 +103,7 @@ if ($NoBuild) {
     Info "Using NODE_BIN=$NodeBin  NPM_BIN=$NpmBin"
     Info "Installing / checking dependencies..."
     & $NpmBin ci --no-audit --prefer-offline
-    if ($LASTEXITCODE -ne 0) { & $NpmBin install --no-audit }
+    if ($LASTEXITCODE -ne 0) { & $NpmBin install --no-audit --legacy-peer-deps }
     & $NpmBin rebuild
     if ($LASTEXITCODE -ne 0) { Err "npm rebuild failed — check output above." }
 

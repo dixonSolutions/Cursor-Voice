@@ -6,6 +6,7 @@
  */
 
 import type { SttGate } from './stt-gate.js';
+import { canUseWebkitStt, hasSpeechRecognitionApi } from './webkit-capabilities.js';
 
 export interface SttCallbacks {
   onInterim?: (text: string) => void;
@@ -56,7 +57,7 @@ interface SpeechRecognitionInstance extends EventTarget {
 type SpeechRecognitionCtor = new () => SpeechRecognitionInstance;
 
 function getSpeechRecognition(): SpeechRecognitionCtor | null {
-  if (typeof window === 'undefined') return null;
+  if (typeof window === 'undefined' || !hasSpeechRecognitionApi()) return null;
   const w = window as Window & {
     SpeechRecognition?: SpeechRecognitionCtor;
     webkitSpeechRecognition?: SpeechRecognitionCtor;
@@ -64,8 +65,9 @@ function getSpeechRecognition(): SpeechRecognitionCtor | null {
   return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
 }
 
+/** @deprecated use canUseWebkitStt — kept for existing imports */
 export function isWebkitSttSupported(): boolean {
-  return getSpeechRecognition() !== null;
+  return canUseWebkitStt();
 }
 
 export class WebkitSttSession {

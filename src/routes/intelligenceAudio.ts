@@ -9,6 +9,9 @@ import { isAmazonAudioAvailable } from '../intelligence/audio/awsClient.js';
 import { synthesizePollyMp3 } from '../intelligence/audio/polly.js';
 import { transcribePcm16 } from '../intelligence/audio/transcribe.js';
 import { getConfig } from '../config.js';
+import { childLogger } from '../log.js';
+
+const log = childLogger('api:intelligence-audio');
 
 export async function registerIntelligenceAudioRoutes(app: FastifyInstance): Promise<void> {
   /** GET /api/intelligence/audio — capabilities for the PWA. */
@@ -70,8 +73,16 @@ export async function registerIntelligenceAudioRoutes(app: FastifyInstance): Pro
         return reply.code(400).send({ error: 'Invalid base64 PCM payload' });
       }
 
-      const text = await transcribePcm16(pcm);
-      return { text };
+      log.info({ pcmBytes: pcm.length }, 'transcribe request');
+      try {
+        const text = await transcribePcm16(pcm);
+        log.info({ pcmBytes: pcm.length, textLen: text.length }, 'transcribe ok');
+        return { text };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        log.error({ err, pcmBytes: pcm.length }, 'transcribe failed');
+        return reply.code(500).send({ error: message });
+      }
     },
   );
 }

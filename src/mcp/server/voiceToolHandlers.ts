@@ -46,7 +46,7 @@ export function registerVoiceSession(send: SendFn): () => void {
   };
 }
 
-function broadcast(payload: unknown): void {
+export function broadcastToVoiceSessions(payload: unknown): void {
   for (const send of activeSessions) {
     try {
       send(payload);
@@ -100,7 +100,7 @@ export function broadcastVoiceAgentStatus(payload: VoiceAgentStatusPayload): voi
     'voice agent status',
   );
 
-  broadcast({
+  broadcastToVoiceSessions({
     type: 'voice_agent_status',
     run_id: payload.runId,
     pid: payload.pid,
@@ -140,8 +140,8 @@ export function handleSpeak(args: SpeakArgs): SpeakResult {
   log.info({ text: text.slice(0, 80), sessions: activeSessions.size }, 'speak called');
   // eslint-disable-next-line no-console
   console.log(`[voice] ◀ speak: "${text.slice(0, 120)}${text.length > 120 ? '…' : ''}"`);
-  broadcast({ type: 'speak', text });
-  broadcast({ type: 'assistant_transcript', text });
+  broadcastToVoiceSessions({ type: 'speak', text });
+  broadcastToVoiceSessions({ type: 'assistant_transcript', text });
 
   return { ok: true, sessions: activeSessions.size };
 }
@@ -165,8 +165,8 @@ export function broadcastVoiceTurnIdle(): void {
   log.info('voice turn idle — re-arming mic');
   // eslint-disable-next-line no-console
   console.log('[voice] ✓ done — mic re-arming, waiting for next wake phrase');
-  broadcast({ type: 'thinking', value: false });
-  broadcast({ type: 'turn_complete' });
+  broadcastToVoiceSessions({ type: 'thinking', value: false });
+  broadcastToVoiceSessions({ type: 'turn_complete' });
   notifyTurnComplete();
 }
 
@@ -211,7 +211,7 @@ export async function handleNextVoiceTurn(
     MAX_POLL_MS,
   );
 
-  broadcast({ type: 'thinking', value: true });
+  broadcastToVoiceSessions({ type: 'thinking', value: true });
 
   const turn = await voiceTurnQueue.dequeue(timeoutMs);
 
@@ -219,7 +219,7 @@ export async function handleNextVoiceTurn(
     return { turn: null, is_interrupt: false, received_at: null, queue_depth: 0 };
   }
 
-  broadcast({
+  broadcastToVoiceSessions({
     type: 'tool_activity',
     tool: 'next_voice_turn',
     phase: 'done',

@@ -189,7 +189,7 @@ body {
 .cv-live-log-viewport {
   height: 9rem;
   overflow-y: auto;
-  overflow-x: hidden;
+  overflow-x: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
 }
@@ -211,21 +211,19 @@ body {
   position: absolute;
   top: 0;
   left: 0;
-  right: 0;
+  min-width: 100%;
 }
 
 .cv-live-log-row {
   display: grid;
-  grid-template-columns: 4.5rem 3.5rem 1fr;
+  grid-template-columns: 4.5rem 3.5rem minmax(0, 1fr) 2.75rem;
   align-items: center;
   gap: 0.5rem;
   height: 28px;
   padding: 0 0.75rem;
   font-size: 0.8125rem;
   line-height: 28px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  min-width: max(100%, 36rem);
 }
 
 .cv-live-log-time {
@@ -242,9 +240,47 @@ body {
 }
 
 .cv-live-log-message {
+  white-space: nowrap;
+}
+
+.cv-live-log-message-scroll {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+}
+
+.cv-live-log-copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: inherit;
+  opacity: 0.55;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.cv-live-log-copy:hover,
+.cv-live-log-copy:focus-visible {
+  opacity: 1;
+  background: rgba(148, 163, 184, 0.12);
+}
+
+.cv-live-log-copy:focus-visible {
+  outline: 2px solid rgba(59, 130, 246, 0.5);
+  outline-offset: 1px;
+}
+
+.cv-live-log-copy .pi {
+  font-size: 0.875rem;
 }
 
 .cv-live-log-detail {
@@ -559,11 +595,19 @@ body {
   }
 
   .cv-live-log-row {
-    grid-template-columns: 3.75rem 3rem 1fr;
+    grid-template-columns: 3.75rem 3rem minmax(0, 1fr) 2.75rem;
     height: 32px;
     line-height: 32px;
     font-size: 0.8125rem;
     padding: 0 0.65rem;
+    min-width: max(100%, 32rem);
+  }
+
+  .cv-live-log-copy {
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
   }
 
   .cv-voice-orb-stage {

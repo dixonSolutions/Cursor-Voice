@@ -11,7 +11,7 @@ import { BridgeService } from './bridge.service';
 import { LogService } from './log.service';
 import { ToastService } from './toast.service';
 import { VoiceProvidersService } from './voice-providers.service';
-import { cancelTtsFallback, scheduleTtsFallback, stopAllTts } from '../../tts-fallback.js';
+import { cancelTtsFallback, clearTranscriptTts, configureTranscriptTts, scheduleTtsFallback, stopAllTts } from '../../tts-fallback.js';
 import type { SttBackend, TtsBackend } from '../../intelligence-audio.js';
 
 export interface TranscriptEntry {
@@ -158,6 +158,11 @@ export class VoiceSessionService {
     try {
       await intelSession.start();
       this._audioBackends.set(intelSession.getAudioBackends());
+      configureTranscriptTts({
+        bridgeBase: this.bridge.bridgeBase,
+        appToken: this.bridge.appToken,
+        audio: intelSession.getAudioConfig(),
+      });
       const startMsg =
         workflow === 'cursor_native'
           ? 'Cursor voice session started — run the voice agent in Cursor IDE, then say the wake phrase'
@@ -192,6 +197,7 @@ export class VoiceSessionService {
     this.endPhraseArmed.set(false);
     this.submittingTurn.set(false);
     this._audioBackends.set(null);
+    clearTranscriptTts();
     cancelTtsFallback();
     stopAllTts();
     this.appState.transitionTo('idle');
@@ -276,7 +282,15 @@ export class VoiceSessionService {
       },
       onToolActivity: (event) => {
         this.toolActivity.set({ ...event, at: Date.now() });
-        this.logs.append('info', 'voice', event.label, event.detail);
+        const workflow = this.bridge.settings()?.workflow.default ?? 'cursor_native';
+        if (workflow === 'llm_intelligence') {
+          this.logs.voiceLog(
+            'tool',
+            event.phase === 'error' ? 'error' : 'info',
+            event.label,
+            event.detail,
+          );
+        }
         if (event.phase === 'start') {
           this._jobRunning.set(true);
           this.appState.transitionTo('working');
@@ -378,7 +392,12 @@ export class VoiceSessionService {
             : reason === 'end_word'
               ? 'Turn sent (end phrase)'
               : 'Turn sent (silence)',
+          undefined,
+          'pipeline',
         );
+      },
+      onVoiceLog: (event) => {
+        this.logs.voiceLog(event.subcategory, event.level, event.summary, event.detail);
       },
       relayToolCall: async (callId, name, args) => {
         this.onToolActivityLocal(name, 'start', args);
@@ -406,7 +425,12 @@ export class VoiceSessionService {
         ? String((payload as Record<string, unknown>)['error'] ?? '')
         : undefined;
     this.toolActivity.set({ tool, phase, label, detail, at: Date.now() });
-    this.logs.append('info', 'voice', label, detail);
+    this.logs.voiceLog(
+      'tool',
+      phase === 'error' ? 'error' : 'info',
+      label,
+      detail,
+    );
     if (phase === 'start') {
       this._jobRunning.set(true);
       this.appState.transitionTo('working');

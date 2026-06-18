@@ -16,6 +16,7 @@
  *   { type: "thinking", value }     Orchestrator / Cursor busy
  *   { type: "turn_complete" }
  *   { type: "tool_activity", tool, phase, label?, detail? }
+ *   { type: "session_log", subcategory, level, summary, detail?, at }
  *   { type: "error", message }
  */
 
@@ -205,7 +206,6 @@ export function registerIntelligenceWebSocket(app: FastifyInstance): void {
             send(socket, { type: 'thinking', value: true });
 
             resetTurnSpeakTracking();
-            handleSpeak({ text: 'Got it.', countTowardTurn: false });
 
             const ttsInterrupt = parseTtsInterrupt(msg['tts_interrupt']);
             const isInterrupt = Boolean(msg['is_interrupt']) || Boolean(ttsInterrupt);
