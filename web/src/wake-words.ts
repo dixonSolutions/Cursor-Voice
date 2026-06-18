@@ -7,6 +7,7 @@ export interface WakeWords {
 
 export interface TurnSubmit {
   silenceMs: number;
+  vadEnabled?: boolean;
 }
 
 export function normalizeForWakeMatch(text: string): string {

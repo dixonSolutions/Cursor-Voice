@@ -106,7 +106,8 @@
         "end": "cursor send"
       },
       "turnSubmit": {
-        "silenceMs": 1500
+        "silenceMs": 1500,
+        "vadEnabled": true
       },
       "systemPrompts": [
         "prompts/systemprompts.json"

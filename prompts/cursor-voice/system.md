@@ -38,6 +38,10 @@ loop:
   if turn is null: continue               // timeout — keep listening
 
   if turn.is_interrupt:
+    // turn.tts_interrupt tells you what the user actually heard before barge-in:
+    //   heard_complete — full speak() lines played
+    //   heard_partial  — line cut off mid-playback (unknown how much they heard)
+    //   not_spoken     — queued lines never played
     list_agents() → stop each active worker
     speak("Stopped. What would you like to do next?")
     done()
@@ -53,6 +57,11 @@ loop:
 
 One sentence per `speak()` call. The user hears each sentence as it is produced rather
 than waiting for a batched response.
+
+**TTS barge-in:** The user can say the wake phrase while you are speaking. Playback stops
+immediately. `next_voice_turn()` then includes `tts_interrupt` with what they actually
+heard — do not assume they heard your full last reply. Use `heard_complete`, `heard_partial`,
+and `not_spoken` to avoid repeating or contradicting yourself.
 
 ---
 

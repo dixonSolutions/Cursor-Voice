@@ -2,8 +2,8 @@ import type { AfterViewInit, ElementRef } from '@angular/core';
 import {
   Component,
   ViewChild,
+  afterRenderEffect,
   computed,
-  effect,
   inject,
   signal,
 } from '@angular/core';
@@ -18,6 +18,8 @@ import { VoiceSessionService } from '../../services/voice-session.service';
 const ITEM_HEIGHT_PX = 28;
 const VIEWPORT_HEIGHT_PX = 144;
 const OVERSCAN = 3;
+/** Within this distance of the bottom, treat scroll as "at bottom" and auto-follow new lines. */
+const SCROLL_STICK_EPS_PX = 12;
 
 @Component({
   selector: 'cv-live-log-panel',
@@ -64,11 +66,13 @@ export class LiveLogPanelComponent implements AfterViewInit {
   });
 
   constructor() {
-    effect(() => {
+    afterRenderEffect(() => {
       if (!this.viewReady || !this.visible()) return;
-      const count = this.sessionEntries().length;
-      if (count === 0 || !this.stickToBottom()) return;
-      queueMicrotask(() => this.scrollToBottom());
+      const entries = this.sessionEntries();
+      if (entries.length === 0 || !this.stickToBottom()) return;
+      // Depend on the latest line so every append triggers a post-render scroll.
+      void entries[entries.length - 1]?.id;
+      this.scrollToBottom();
     });
   }
 
@@ -81,7 +85,7 @@ export class LiveLogPanelComponent implements AfterViewInit {
     const el = event.target as HTMLElement;
     const maxScroll = Math.max(0, el.scrollHeight - el.clientHeight);
     this.scrollTop.set(el.scrollTop);
-    this.stickToBottom.set(el.scrollTop >= maxScroll - ITEM_HEIGHT_PX);
+    this.stickToBottom.set(el.scrollTop >= maxScroll - SCROLL_STICK_EPS_PX);
   }
 
   protected clearLogs(): void {
@@ -105,8 +109,8 @@ export class LiveLogPanelComponent implements AfterViewInit {
   private scrollToBottom(): void {
     const el = this.viewport?.nativeElement;
     if (!el) return;
-    el.scrollTop = el.scrollHeight;
+    const maxScroll = Math.max(0, el.scrollHeight - el.clientHeight);
+    el.scrollTop = maxScroll;
     this.scrollTop.set(el.scrollTop);
-    this.stickToBottom.set(true);
   }
 }

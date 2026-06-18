@@ -71,6 +71,8 @@ export const WakeWordsSchema = z.object({
 export const TurnSubmitSchema = z.object({
   /** Ms of silence after last STT final before auto-submitting the buffered turn. */
   silenceMs: z.number().int().min(500).max(30_000).default(1500),
+  /** When true, Silero VAD detects speech end; when false, use end wake phrase or silence timer. */
+  vadEnabled: z.boolean().default(true),
 });
 
 /** Resolved voice system prompt (loaded from prompts/ at startup). */
@@ -279,7 +281,10 @@ function migrateRawConfig(raw: unknown): unknown {
       }
     }
     if (!voice['turnSubmit'] || typeof voice['turnSubmit'] !== 'object') {
-      voice['turnSubmit'] = { silenceMs: 1500 };
+      voice['turnSubmit'] = { silenceMs: 1500, vadEnabled: true };
+    } else {
+      const ts = voice['turnSubmit'] as Record<string, unknown>;
+      if (ts['vadEnabled'] === undefined) ts['vadEnabled'] = true;
     }
     if (!voice['wakeWords'] || typeof voice['wakeWords'] !== 'object') {
       throw new Error(

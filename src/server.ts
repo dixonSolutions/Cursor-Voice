@@ -40,6 +40,7 @@ import { registerIntelligenceWebSocket } from './intelligence/ws.js';
 import { registerIntelligenceAudioRoutes } from './routes/intelligenceAudio.js';
 import { registerCursorSessionRoutes } from './routes/cursorSessions.js';
 import { registerVoiceSessionPrepareRoutes } from './routes/voiceSessionPrepare.js';
+import { registerConfigRoutes } from './routes/config.js';
 import { registerMcpServer } from './mcp/server/index.js';
 import { attachDevWebProxy, registerProductionWeb } from './webDispatch.js';
 
@@ -219,6 +220,7 @@ export async function buildServer(): Promise<FastifyInstance> {
   });
 
   await registerVoiceProviderRoutes(app);
+  await registerConfigRoutes(app);
   await registerIntelligenceAudioRoutes(app);
   await registerCursorSessionRoutes(app);
   await registerVoiceSessionPrepareRoutes(app);

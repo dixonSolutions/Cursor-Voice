@@ -64,6 +64,41 @@ function notifyTurnComplete(): void {
   }
 }
 
+// ── Voice agent status broadcast ──────────────────────────────────────────
+
+export interface VoiceAgentStatusPayload {
+  runId: string;
+  pid: number;
+  sessionId: string | null;
+  mcpSessionId?: string | null;
+  state: 'starting' | 'running' | 'done' | 'error' | 'stopped';
+  project: string;
+}
+
+/** Push voice agent lifecycle to all connected PWA sessions (debug/monitor). */
+export function broadcastVoiceAgentStatus(payload: VoiceAgentStatusPayload): void {
+  log.info(
+    {
+      runId: payload.runId,
+      pid: payload.pid,
+      sessionId: payload.sessionId,
+      mcpSessionId: payload.mcpSessionId,
+      state: payload.state,
+    },
+    'voice agent status',
+  );
+
+  broadcast({
+    type: 'voice_agent_status',
+    run_id: payload.runId,
+    pid: payload.pid,
+    session_id: payload.sessionId,
+    mcp_session_id: payload.mcpSessionId ?? null,
+    state: payload.state,
+    project: payload.project,
+  });
+}
+
 // ── Tool handlers ─────────────────────────────────────────────────────────
 
 export interface SpeakArgs {
@@ -103,13 +138,18 @@ export interface DoneResult {
  * Sends turn_complete to all connected PWA sessions so the mic re-arms.
  */
 export function handleDone(): DoneResult {
-  log.info('done called — re-arming mic');
+  broadcastVoiceTurnIdle();
+  return { ok: true };
+}
+
+/** Re-arm PWA mic — after done() or when the voice agent process exits. */
+export function broadcastVoiceTurnIdle(): void {
+  log.info('voice turn idle — re-arming mic');
   // eslint-disable-next-line no-console
   console.log('[voice] ✓ done — mic re-arming, waiting for next wake phrase');
   broadcast({ type: 'thinking', value: false });
   broadcast({ type: 'turn_complete' });
   notifyTurnComplete();
-  return { ok: true };
 }
 
 export interface NextVoiceTurnArgs {
@@ -126,6 +166,15 @@ export interface NextVoiceTurnResult {
   received_at: string | null;
   /** Turns still buffered after this dequeue. */
   queue_depth: number;
+  /**
+   * When the user barged in during TTS: lines fully heard, line cut off mid-playback,
+   * and lines never spoken. Use this — the user did not hear your full last reply.
+   */
+  tts_interrupt?: {
+    heard_complete: string[];
+    heard_partial: string | null;
+    not_spoken: string[];
+  };
 }
 
 const MAX_POLL_MS = 60_000;
@@ -165,5 +214,6 @@ export async function handleNextVoiceTurn(
     is_interrupt: turn.isInterrupt,
     received_at: turn.receivedAt,
     queue_depth: voiceTurnQueue.size,
+    ...(turn.ttsInterrupt ? { tts_interrupt: turn.ttsInterrupt } : {}),
   };
 }

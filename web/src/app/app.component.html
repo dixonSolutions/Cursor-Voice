@@ -83,7 +83,7 @@
       <cv-live-log-panel />
     </header>
 
-    <main class="cv-main">
+    <main class="cv-main" [class.cv-main--wide]="activeTab() === 'config'">
       @switch (activeTab()) {
         @case ('voice') {
           <cv-voice-tab />
@@ -91,11 +91,8 @@
         @case ('wake') {
           <cv-wake-word-test />
         }
-        @case ('providers') {
-          <cv-providers-tab />
-        }
-        @case ('connection') {
-          <cv-connection-tab />
+        @case ('config') {
+          <cv-config-tab />
         }
         @case ('logs') {
           <cv-logs-tab />

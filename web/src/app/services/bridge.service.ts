@@ -14,7 +14,7 @@ export interface AppSettings {
     };
   };
   wakeWords?: { start: string; end: string };
-  turnSubmit?: { silenceMs: number };
+  turnSubmit?: { silenceMs: number; vadEnabled?: boolean };
 }
 
 export interface Project {
@@ -495,5 +495,17 @@ export class BridgeService {
       throw new Error(detail);
     }
     return res.json() as Promise<T>;
+  }
+
+  async loadConfigFile(): Promise<Record<string, unknown>> {
+    return this.apiFetch<Record<string, unknown>>('/api/config');
+  }
+
+  async saveConfigFile(config: unknown): Promise<void> {
+    await this.apiFetch<{ ok: boolean }>('/api/config', {
+      method: 'PUT',
+      body: JSON.stringify(config),
+    });
+    await this.loadSettings();
   }
 }

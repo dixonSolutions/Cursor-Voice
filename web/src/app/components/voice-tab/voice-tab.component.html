@@ -16,19 +16,15 @@
       </p-iftalabel>
 
       <p-iftalabel class="cv-voice-session-col">
-        <p-multiselect
+        <p-select
           inputId="session-select"
           [options]="sessionOptions()"
-          [(ngModel)]="selectedSessionIds"
+          [(ngModel)]="selectedSessionId"
           optionLabel="label"
           optionValue="value"
           placeholder="Cursor session…"
           [disabled]="!selectedProject || !isBridgeConnected() || loadingSessions()"
           [loading]="loadingSessions()"
-          [selectionLimit]="1"
-          [showToggleAll]="false"
-          [maxSelectedLabels]="1"
-          display="chip"
           [filter]="sessionOptions().length > 6"
           (ngModelChange)="onSessionChange($event)"
           [fluid]="true" />
@@ -51,7 +47,7 @@
       <p-message
         severity="warn"
         variant="simple"
-        text="Bridge settings not loaded. Check connection under Connection tab." />
+        text="Bridge settings not loaded. Check Connection under Config tab." />
     }
 
     <div
@@ -128,62 +124,10 @@
         </p-fluid>
       </p-fieldset>
     }
-  </p-fluid>
-</p-card>
 
-<p-card header="Voice phrases & submit">
-  <p-fluid>
     <p-message
       severity="secondary"
       variant="simple"
-      text="Start phrase activates the mic (Vosk, offline). After that, speech is buffered until silence or the submit phrase (also Vosk). Tap the orb to hang up." />
-
-    <p-fieldset legend="Start phrase (wake)">
-      <p-iftalabel>
-        <input
-          pInputText
-          id="wake-start"
-          [(ngModel)]="wakeStart"
-          placeholder="cursor listen"
-          [disabled]="!isBridgeConnected()" />
-        <label for="wake-start">Activation phrase</label>
-      </p-iftalabel>
-    </p-fieldset>
-
-    <p-fieldset legend="Submit">
-      <p-iftalabel>
-        <input
-          pInputText
-          id="wake-end"
-          [(ngModel)]="wakeEnd"
-          placeholder="cursor send"
-          [disabled]="!isBridgeConnected()" />
-        <label for="wake-end">Submit phrase (blank = silence only)</label>
-      </p-iftalabel>
-
-      <p-iftalabel>
-        <input
-          pInputText
-          id="silence-submit"
-          type="number"
-          min="500"
-          max="30000"
-          step="100"
-          [(ngModel)]="silenceSubmitMs"
-          [disabled]="!isBridgeConnected()" />
-        <label for="silence-submit">Silence submit (ms)</label>
-      </p-iftalabel>
-      <p-message
-        severity="secondary"
-        variant="simple"
-        text="Auto-send after this many milliseconds of silence following your last speech. Whichever comes first — silence or submit phrase — sends the turn." />
-    </p-fieldset>
-
-    <p-button
-      label="Save voice phrases"
-      icon="pi pi-save"
-      [loading]="savingWakeWords"
-      [disabled]="!isBridgeConnected()"
-      (onClick)="onSaveWakeWords()" />
+      text="Wake phrase, VAD, and submit settings live on the Config tab. Changes apply the next time you tap the orb." />
   </p-fluid>
 </p-card>

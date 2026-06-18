@@ -86,6 +86,18 @@ const MIGRATION_SQL = `
     result    TEXT,
     reason    TEXT
   );
+
+  -- Conversational voice agent (cursor_native auto-dispatch).
+  CREATE TABLE IF NOT EXISTS voice_agent_run (
+    id          TEXT PRIMARY KEY,
+    project     TEXT NOT NULL REFERENCES project(name),
+    pid         INTEGER,
+    session_id  TEXT,
+    mcp_session TEXT,
+    status      TEXT NOT NULL DEFAULT 'running',
+    started_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    ended_at    TEXT
+  );
 `;
 
 // ── Indexes (performance) ─────────────────────────────────────────────────────
@@ -96,6 +108,8 @@ const INDEX_SQL = `
   CREATE INDEX IF NOT EXISTS idx_job_event_job  ON job_event(job_id);
   CREATE INDEX IF NOT EXISTS idx_audit_ts       ON audit(ts);
   CREATE INDEX IF NOT EXISTS idx_audit_tool     ON audit(tool);
+  CREATE INDEX IF NOT EXISTS idx_voice_agent_status ON voice_agent_run(status);
+  CREATE INDEX IF NOT EXISTS idx_voice_agent_project ON voice_agent_run(project);
 `;
 
 // ── Public API ────────────────────────────────────────────────────────────────

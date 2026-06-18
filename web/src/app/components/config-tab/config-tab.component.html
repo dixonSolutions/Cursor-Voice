@@ -1,0 +1,156 @@
+<div class="cv-config">
+  <div class="cv-config-toolbar">
+    <p-selectButton
+      [options]="viewOptions"
+      [ngModel]="configView()"
+      (ngModelChange)="onViewChange($event)"
+      optionLabel="label"
+      optionValue="value" />
+    @if (!isBridgeConnected()) {
+      <p-tag value="Bridge offline" severity="warn" />
+    }
+  </div>
+
+  @if (configView() === 'form') {
+    <div class="cv-config-sections">
+      <p-card header="Voice & submit">
+        <p-fluid>
+          <p-message
+            severity="secondary"
+            variant="simple"
+            text="Wake phrase activates the mic (Vosk). Choose Silero VAD or an end wake phrase to finish a turn." />
+
+          <p-fieldset legend="Start phrase (wake)">
+            <p-iftalabel>
+              <input
+                pInputText
+                id="cfg-wake-start"
+                [(ngModel)]="wakeStart"
+                placeholder="cursor listen"
+                [disabled]="!isBridgeConnected()" />
+              <label for="cfg-wake-start">Activation phrase</label>
+            </p-iftalabel>
+          </p-fieldset>
+
+          <p-fieldset legend="Submit">
+            <label class="cv-voice-toggle-row">
+              <input
+                type="checkbox"
+                id="cfg-vad-enabled"
+                [(ngModel)]="vadEnabled"
+                [disabled]="!isBridgeConnected()" />
+              <span>Silero VAD (detect speech end)</span>
+            </label>
+
+            @if (vadEnabled) {
+              <p-tag value="Silero VAD" severity="info" />
+              <p-iftalabel>
+                <input
+                  pInputText
+                  id="cfg-silence-vad"
+                  type="number"
+                  min="500"
+                  max="30000"
+                  step="100"
+                  [(ngModel)]="silenceSubmitMs"
+                  [disabled]="!isBridgeConnected()" />
+                <label for="cfg-silence-vad">VAD silence threshold (ms)</label>
+              </p-iftalabel>
+            } @else {
+              <p-iftalabel>
+                <input
+                  pInputText
+                  id="cfg-wake-end"
+                  [(ngModel)]="wakeEnd"
+                  placeholder="send"
+                  [disabled]="!isBridgeConnected()" />
+                <label for="cfg-wake-end">End wake phrase</label>
+              </p-iftalabel>
+              <p-iftalabel>
+                <input
+                  pInputText
+                  id="cfg-silence-fallback"
+                  type="number"
+                  min="500"
+                  max="30000"
+                  step="100"
+                  [(ngModel)]="silenceSubmitMs"
+                  [disabled]="!isBridgeConnected()" />
+                <label for="cfg-silence-fallback">Silence fallback (ms)</label>
+              </p-iftalabel>
+              @if (phraseConflict()) {
+                <p-message
+                  severity="error"
+                  variant="simple"
+                  text="Wake and end phrases must be different — e.g. listen / send." />
+              }
+            }
+          </p-fieldset>
+
+          <p-button
+            label="Save voice settings"
+            icon="pi pi-save"
+            [loading]="savingVoice"
+            [disabled]="!isBridgeConnected() || (!vadEnabled && phraseConflict())"
+            (onClick)="onSaveVoiceSettings()" />
+        </p-fluid>
+      </p-card>
+
+      <div class="cv-config-embed">
+        <cv-connection-tab />
+      </div>
+
+      @if (showProviders()) {
+        <div class="cv-config-embed">
+          <cv-providers-tab />
+        </div>
+      }
+    </div>
+  } @else {
+    <p-card header="config.json">
+      <p-fluid>
+        <p-message
+          severity="warn"
+          variant="simple"
+          text="Edits here replace the full config.json on the bridge. Invalid JSON or schema errors are rejected. Secrets stay in .env — not in this file." />
+
+        <p-iftalabel>
+          <textarea
+            pTextarea
+            id="cfg-raw-json"
+            class="cv-config-json"
+            [(ngModel)]="rawJson"
+            (ngModelChange)="onRawJsonEdit()"
+            [disabled]="loadingJson || !isBridgeConnected()"
+            rows="24"
+            [autoResize]="false"></textarea>
+          <label for="cfg-raw-json">Raw JSON</label>
+        </p-iftalabel>
+
+        <div class="cv-config-json-actions">
+          <p-button
+            label="Reload"
+            icon="pi pi-refresh"
+            severity="secondary"
+            [outlined]="true"
+            [loading]="loadingJson"
+            [disabled]="!isBridgeConnected()"
+            (onClick)="loadRawJson()" />
+          <p-button
+            label="Format"
+            icon="pi pi-align-left"
+            severity="secondary"
+            [outlined]="true"
+            [disabled]="!rawJson.trim()"
+            (onClick)="formatRawJson()" />
+          <p-button
+            label="Save config.json"
+            icon="pi pi-save"
+            [loading]="savingJson"
+            [disabled]="!isBridgeConnected() || !rawJsonDirty"
+            (onClick)="saveRawJson()" />
+        </div>
+      </p-fluid>
+    </p-card>
+  }
+</div>
