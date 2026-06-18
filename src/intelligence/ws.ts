@@ -205,7 +205,6 @@ export function registerIntelligenceWebSocket(app: FastifyInstance): void {
             send(socket, { type: 'thinking', value: true });
 
             resetTurnSpeakTracking();
-            handleSpeak({ text: 'Got it.', countTowardTurn: false });
 
             const ttsInterrupt = parseTtsInterrupt(msg['tts_interrupt']);
             const isInterrupt = Boolean(msg['is_interrupt']) || Boolean(ttsInterrupt);
