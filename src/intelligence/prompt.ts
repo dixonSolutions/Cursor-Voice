@@ -6,7 +6,7 @@
 
 import { listProjects, getSessionState } from '../state/registry.js';
 import { getConfig } from '../config.js';
-import { getWakeWordsFromConfig } from '../realtime/session.js';
+import { getWakeWordsFromConfig } from '../voice/wakeWordsConfig.js';
 
 function applyWakeWordPlaceholders(text: string, start: string): string {
   return text.replaceAll('{{WAKE_START}}', start);

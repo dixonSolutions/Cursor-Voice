@@ -1,155 +1,88 @@
-# 13 — Voice Provider Configuration
+# 13 — Voice Settings & AWS Audio
 
-How Cursor Voice selects, configures, and secures speech providers (OpenAI,
-Gemini, Anthropic, Amazon Bedrock).
+How Cursor Voice configures wake words, turn submit timing, and AWS services for
+STT/TTS fallback and the `llm_intelligence` orchestrator.
 
-## Design (three layers)
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  Layer 1 — Catalog (provider_keys.ts)                           │
-│  Fixed list of provider IDs, env key schemas, known models       │
-│  Shipped with the bridge; not user-editable                     │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-┌─────────────────────────────────────────────────────────────────┐
-│  Layer 2 — Viability (.env)                                     │
-│  Which providers *can* run — keys present and pass validation     │
-│  Detected at runtime; never exposed to the web app              │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-┌─────────────────────────────────────────────────────────────────┐
-│  Layer 3 — Preferences (config.json)                              │
-│  Registered providers, model lists, default provider/model      │
-│  Managed via Settings in the PWA or by editing config.json      │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-**Why split this way**
-
-- **Secrets stay in `.env`** — chmod 600, never committed, never returned by API.
-- **Preferences stay in `config.json`** — safe to back up; no API keys.
-- **Catalog stays in code** — one place to add a new provider ID or known model.
-
-## Provider catalog
-
-| ID | Display name | Env keys | Token mint status |
-| --- | --- | --- | --- |
-| `openai` | OpenAI | `OPENAI_API_KEY` | Implemented (WebRTC GA) |
-| `gemini` | Google Gemini | `GEMINI_API_KEY` | Stub |
-| `anthropic` | Anthropic | `ANTHROPIC_API_KEY` | Stub |
-| `amazon_bedrock` | Amazon Bedrock | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` (optional) | Implemented (bridge WS relay) |
-
-Known models and env validation rules live in `src/realtime/provider_keys.ts`.
-
-### Recommended speech-to-speech models (cost vs quality)
-
-| Provider | Model ID | Tier | Notes |
-| --- | --- | --- | --- |
-| OpenAI | `gpt-realtime-mini` | $ | Default — best cost/performance for PTT |
-| OpenAI | `gpt-4o-mini-realtime-preview` | $ | Preview mini realtime |
-| OpenAI | `gpt-realtime` | $$ | Full GA model — best instruction following |
-| Gemini | `gemini-2.5-flash-native-audio-preview-12-2025` | $ | Native audio live (stub mint) |
-| Bedrock | `amazon.nova-2-sonic-v1:0` | $$ | Nova 2 Sonic — bridge relay |
-| Bedrock | `amazon.nova-sonic-v1:0` | $$ | Nova Sonic v1 |
-
-OpenAI uses browser WebRTC. Bedrock uses `/ws/voice` on the bridge (AWS keys never on the phone).
-
-## config.json shape
+## config.json — voice settings
 
 ```json
 {
   "settings": {
     "voice": {
-      "defaultProvider": "openai",
-      "providers": {
-        "openai": {
-          "defaultModel": "gpt-4o-realtime-preview",
-          "models": [
-            { "id": "gpt-4o-realtime-preview", "label": "GPT-4o Realtime Preview", "builtin": true }
-          ]
-        }
+      "wakeWords": {
+        "start": "cursor listen",
+        "end": "cursor send"
+      },
+      "turnSubmit": {
+        "silenceMs": 1500,
+        "vadEnabled": true
       }
     }
   }
 }
 ```
 
-- **`defaultProvider`** — used for `POST /api/realtime/token`.
-- **`providers`** — only *registered* providers appear here.
-- **`models`** — user can add custom models or remove non-default ones.
-- **`builtin: true`** — seeded from catalog; user can still delete from list.
+| Field | Purpose |
+| --- | --- |
+| `wakeWords.start` | Activation phrase (Vosk offline detection) |
+| `wakeWords.end` | Submit phrase when VAD is disabled |
+| `turnSubmit.silenceMs` | Silence before auto-submit (500–30000 ms) |
+| `turnSubmit.vadEnabled` | Use Silero VAD for speech-end detection |
 
-Legacy configs with `voiceProvider` + `realtimeModel` are migrated automatically
-on load.
+Managed via Config tab or API:
 
-## Voice system prompt (`settings.voice.systemPrompts`)
+- `GET /api/voice/providers` — returns `{ wakeWords, turnSubmit }`
+- `PATCH /api/voice/wake-words` — update wake words and turn submit
 
-The Nova/OpenAI voice model instructions live in **`prompts/`** as readable markdown,
-not as escaped strings in `config.json`. See **[`14-prompts.md`](./14-prompts.md)** for
-the full layout, manifest format, and editing workflow.
+Implementation: `src/voice/voiceSettingsRegistry.ts`.
 
-Minimal `config.json` wiring:
+## AWS IAM keys (`.env`)
+
+Used for **Amazon Polly** (TTS), **Amazon Transcribe** (STT), and **Bedrock Converse**
+(Claude for `llm_intelligence`). **Not** used for speech-to-speech models (removed).
+
+| Env var | Required | Purpose |
+| --- | --- | --- |
+| `AWS_ACCESS_KEY_ID` | Yes (for AWS features) | IAM access key (AKIA…) |
+| `AWS_SECRET_ACCESS_KEY` | Yes | IAM secret |
+| `AWS_REGION` | Optional | Defaults to `us-east-1` / llm region |
+| `AWS_BEARER_TOKEN_BEDROCK` | Optional | Text-only Bedrock API key — **not** valid for Polly/Transcribe |
+
+Validation: `src/intelligence/aws/credentials.ts` — rejects Bedrock API key IDs for
+audio services.
+
+## Audio API routes
+
+| Route | Service |
+| --- | --- |
+| `POST /api/intelligence/tts` | Amazon Polly → MP3 |
+| `POST /api/intelligence/transcribe` | Amazon Transcribe streaming |
+
+Client modules: `web/src/amazon-tts.ts`, `web/src/amazon-stt.ts`.
+
+## Workflow selection
+
+Set in `config.json`:
 
 ```json
-{
-  "settings": {
-    "voice": {
-      "systemPrompts": ["prompts/systemprompts.json"]
-    }
-  }
+"workflow": {
+  "default": "cursor_native",
+  "llmIntelligence": { ... }
 }
 ```
 
-**Placeholders** (substituted at token mint — do not remove unless intentional):
-
-| Placeholder | Source |
+| Workflow | AWS usage |
 | --- | --- |
-| `{{ACTIVATION_RULES}}` | `prompts/activation-rules.md` (after wake-word substitution) |
-| `{{ACTIVE_PROJECT}}` | Project selected in the app before the call |
-| `{{PROJECT_CATALOG}}` | Other registered projects (reference only) |
-| `{{WAKE_START}}` | `settings.voice.wakeWords.start` |
-
-There is no spoken stop phrase — the user hangs up by tapping the orb only.
-
-After editing prompt files, restart the bridge and start a new voice session (prompt
-is baked into the ephemeral token).
-
-## Viability rules
-
-A provider is **viable** when every required env key (from `provider_keys.ts`) is:
-
-1. Non-empty in `process.env` / `.env`
-2. At least `minLength` characters (optional keys may be empty)
-
-Registration and “set as default” require viability.
-
-## API (all require app token)
-
-| Method | Path | Purpose |
-| --- | --- | --- |
-| GET | `/api/voice/providers` | Catalog + configured state (no secrets) |
-| POST | `/api/voice/providers` | Register `{ id }` |
-| DELETE | `/api/voice/providers/:id` | Unregister |
-| PUT | `/api/voice/default-provider` | `{ id }` |
-| PATCH | `/api/voice/providers/:id/default-model` | `{ modelId }` |
-| POST | `/api/voice/providers/:id/models` | `{ id, label? }` |
-| DELETE | `/api/voice/providers/:id/models/:modelId` | Remove model |
-| PUT | `/api/voice/providers/:id/keys` | `{ keys: { ENV_VAR: "value" } }` — write-only |
-
-Key updates write to `.env`, reload config, reset the cached voice provider, and
-audit env var **names** only (never values).
-
-## Web app (Settings → Voice providers)
-
-- See all catalog providers with key status
-- Register viable providers; remove registered ones
-- Set default provider and default model
-- Add/remove models (catalog chips or custom IDs)
-- Update API keys (password fields, never pre-filled)
+| `cursor_native` | Polly/Transcribe fallback only (WebKit preferred) |
+| `llm_intelligence` | Bedrock Converse + Polly/Transcribe fallback |
 
 ## Security
 
-- Backend **never** returns secret values.
-- Provider allowlist enforced server-side (`provider_keys.ts`).
-- Model IDs validated on add; default model must exist in the provider's list.
+- `.env` is chmod 600, never committed, never returned by API.
+- Wake word updates require app token (`/api/voice/wake-words`).
+- Polly/Transcribe routes require app token.
+
+## Related docs
+
+- [`06-voice-audio-webrtc.md`](./06-voice-audio-webrtc.md) — STT/TTS pipeline
+- [`15-llm-intelligence-workflow.md`](./15-llm-intelligence-workflow.md) — Bedrock orchestrator config

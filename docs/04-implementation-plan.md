@@ -1,8 +1,9 @@
 # 04 — Implementation Plan
 
-Phased, dependency-ordered, each milestone independently testable. The ordering
-front-loads the two biggest risks (the `cursor-agent` non-TTY spike and the
-WebRTC voice loop) so we fail fast on anything that would invalidate the design.
+> **Note (2026):** Speech-to-speech (WebRTC / Nova Sonic) was removed. Current voice
+> path: STT/TTS cascade + `cursor_native` MCP. Spikes C/D are historical.
+
+Phased, dependency-ordered, each milestone independently testable.
 
 > Estimates are rough effort sizes (S ≈ <½ day, M ≈ ~1 day, L ≈ 2–3 days) for one
 > developer, assuming accounts/keys are available.

@@ -1,5 +1,5 @@
 /**
- * Browser TTS when Bedrock sends assistant text but no (or broken) audio stream.
+ * Browser TTS fallback when assistant text arrives without active playback.
  */
 
 import { stopAmazonTts } from './amazon-tts.js';
@@ -203,16 +203,6 @@ function playWebkitLine(text: string, ctx?: TtsPlayContext): Promise<void> {
 /** WebKit-only pile for llm_intelligence transcript fallback. */
 const webkitPile = new TtsPile((text, ctx) => playWebkitLine(text, ctx));
 
-/** True for internal reasoning Nova prints instead of user-facing speech. */
-function isReasoningMonologue(text: string): boolean {
-  const t = text.trim();
-  if (SPEAK_PREFIX.test(t)) return false;
-  if (t.length > 180 && /^(okay|ok|let'?s see|the user|from the previous|i need to|looking at)/i.test(t)) {
-    return true;
-  }
-  return false;
-}
-
 function prepareSpeechSynthesis(): void {
   if (typeof window === 'undefined' || !window.speechSynthesis) return;
   window.speechSynthesis.resume();
@@ -237,18 +227,16 @@ export function speakTtsNow(text: string): void {
 }
 
 /**
- * Fallback when Nova sends plain assistant text without audio.
+ * Fallback when assistant text arrives without active TTS playback.
  */
-export function scheduleTtsFallback(text: string, bedrockSpeaking: () => boolean): void {
+export function scheduleTtsFallback(text: string, isSpeaking: () => boolean): void {
   const trimmed = text.trim();
   if (!trimmed || typeof window === 'undefined' || !window.speechSynthesis) return;
-
-  if (isReasoningMonologue(trimmed)) return;
 
   if (pendingTimer) clearTimeout(pendingTimer);
   pendingTimer = setTimeout(() => {
     pendingTimer = null;
-    if (bedrockSpeaking()) return;
+    if (isSpeaking()) return;
     if (Date.now() - lastSpokenAt < 400) return;
     speakTtsNow(trimmed);
   }, SPEAK_PREFIX.test(trimmed) ? 200 : 800);

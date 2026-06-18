@@ -3,91 +3,61 @@
 Self-hosted voice bridge for driving [Cursor's coding agent](https://cursor.com/docs/cli)
 (`cursor-agent`) by **speech, from your phone**.
 
-Speak to a coding agent from an iPhone (push-to-talk, with a "Cursor…" prefix); a
-speech-to-speech model drafts and refines the request, asks clarifying questions,
-and calls a small, constrained set of tools that run `cursor-agent` against your
-own projects on your own machine. Audio goes phone ↔ provider over WebRTC;
-networking is private over Tailscale; secrets stay on the host.
+Speak from an iPhone PWA; **Cursor IDE** is the reasoning layer via the
+**cursor-voice MCP server** (`speak`, `done`, `next_voice_turn`). Coding work is
+delegated to worker agents via `spawn_agent`. Audio uses browser STT/TTS with
+Amazon Polly/Transcribe fallback. Networking is private over Tailscale.
 
-> **Status: planning / pre-implementation.** This repository currently contains
-> the design and implementation docs. No application code yet — the architecture,
-> security model, and phased plan are finalized first (see [`docs/`](./docs)).
-
-## Why
-
-A non-technical person (the original motivation: a parent) can direct real coding
-work by voice, while the system stays safe: the voice model can only do what a
-handful of constrained tools allow, every project path is operator-allowlisted,
-and edits are git-revertable.
-
-## How it works (high level)
+## How it works
 
 ```
-iPhone (Safari PWA) ──WebRTC audio──► Speech-to-speech model (OpenAI Realtime / Gemini Live)
-        │                                      │ tool calls (data channel)
-        │ authenticated WSS (app token)        ▼
-        └──────────────────────────────► Bridge (Node/TS, systemd)
-                                               │ constrained MCP tools (the safety boundary)
-                                               ▼
-                                          cursor-agent  ──►  allowlisted project workspaces ──► git
+iPhone PWA (Vosk wake + STT + TTS)
+        │  /ws/intelligence (app token)
+        ▼
+Bridge (Node/TS) ── VoiceTurnQueue ── MCP /mcp ──► Cursor voice agent
+        │                                              │
+        │                                              ▼ spawn_agent
+        └──────────────────────────────────────► cursor-agent workers → git
 ```
 
-- **Phone PWA** — mic capture, playback, push-to-talk; relays tool calls.
-- **Bridge** — serves the app, mints ephemeral provider tokens, hosts the MCP
-  tool layer, executes `cursor-agent`, persists state.
-- **MCP tools** — `cursor_submit`, `cursor_status`, `cursor_stop`,
-  `cursor_revert`, `cursor_diff`, `cursor_new_session`, `cursor_list_projects`,
-  `cursor_set_project`, `cursor_ask` (read-only repo Q&A),
-  `cursor_list_models`, `cursor_set_model` — the only things the voice model
-  can do. No model IDs are hardcoded; models are fetched live from the CLI and
-  selected per-session. The voice model has **no direct repo access**.
-- **Network** — Tailscale mesh + `tailscale serve` for the HTTPS required by
-  mobile mic access. No port forwarding.
+**Default workflow:** `cursor_native` — see [`docs/16-mcp-server-cursor-as-brain.md`](./docs/16-mcp-server-cursor-as-brain.md).
+
+**Alternate:** `llm_intelligence` — Claude on Bedrock orchestrates tools.
+
+## Quick start
+
+```bash
+cp config.example.json config.json
+cp .env.example .env   # set APP_TOKEN + AWS IAM keys
+npm install
+npm run dev
+```
+
+Open the web URL shown in the terminal (unified port in test mode).
 
 ## Documentation
 
-Full design lives in [`docs/`](./docs):
+Full design in [`docs/`](./docs) — start with [`docs/README.md`](./docs/README.md).
 
 | Doc | Topic |
 | --- | --- |
-| [`docs/README.md`](./docs/README.md) | Index + one-paragraph summary |
-| [`01-critical-analysis.md`](./docs/01-critical-analysis.md) | Feasibility critique |
-| [`02-architecture.md`](./docs/02-architecture.md) | System architecture & data flow |
-| [`03-security.md`](./docs/03-security.md) | Trust boundaries & API-level enforcement |
-| [`04-implementation-plan.md`](./docs/04-implementation-plan.md) | Phased milestones |
-| [`05-mcp-and-cursor-agent.md`](./docs/05-mcp-and-cursor-agent.md) | MCP tools & CLI integration |
-| [`06-voice-audio-webrtc.md`](./docs/06-voice-audio-webrtc.md) | Voice, WebRTC, project selection |
-| [`07-data-and-deployment.md`](./docs/07-data-and-deployment.md) | Config, state, deployment |
-| [`08-decisions-and-risks.md`](./docs/08-decisions-and-risks.md) | Decision log & risks |
-| [`09-competitive-landscape.md`](./docs/09-competitive-landscape.md) | Similar projects & OSS-vs-commercial |
+| [`02-architecture.md`](./docs/02-architecture.md) | System architecture |
+| [`06-voice-audio-webrtc.md`](./docs/06-voice-audio-webrtc.md) | STT, TTS, VAD, wake words |
+| [`16-mcp-server-cursor-as-brain.md`](./docs/16-mcp-server-cursor-as-brain.md) | Default Cursor voice workflow |
+| [`11-mcp-tool-surface.md`](./docs/11-mcp-tool-surface.md) | MCP tool inventory |
 
-## Planned stack
+## Stack
 
-- **Bridge:** Node.js 20+, TypeScript, Fastify, `@modelcontextprotocol/sdk`,
-  `better-sqlite3`, `simple-git`
-- **Voice:** OpenAI Realtime (GA) primary, Gemini Live alternative, behind a
-  swappable provider interface
-- **Web app:** vanilla TypeScript + Vite (PWA)
-- **Executor:** `cursor-agent` CLI (non-interactive, `--output-format stream-json`)
-- **Network/deploy:** Tailscale, systemd
+- **Bridge:** Node.js 20+, TypeScript, Fastify, MCP SDK, SQLite
+- **Web app:** Angular PWA + vanilla TS voice modules (Vosk, Silero VAD)
+- **Voice I/O:** WebKit STT/TTS; Amazon Polly/Transcribe fallback
+- **Reasoning:** Cursor IDE (`cursor_native`) or Bedrock Claude (`llm_intelligence`)
+- **Executor:** `cursor-agent` CLI
+- **Network:** Tailscale
 
-## Configuration model
+## Configuration
 
-- **`.env`** — secrets only (provider API key, app token). Never committed.
-- **`config.json`** — non-secret settings + the allowlisted project registry.
-  Projects are registered manually by the host operator.
+- **`.env`** — `APP_TOKEN`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`
+- **`config.json`** — projects, wake words, workflow, operational settings
 
 See [`docs/07-data-and-deployment.md`](./docs/07-data-and-deployment.md).
-
-## Security
-
-Security is enforced at the API level, not just the network. A single app token
-gates every request, the MCP tool surface bounds what the agent can do, project
-paths come only from an operator-controlled allowlist, and git revert is the undo.
-See [`docs/03-security.md`](./docs/03-security.md).
-
-## Status & roadmap
-
-Pre-build. Next step is Milestone 0 de-risking spikes (notably: confirm
-`cursor-agent` runs cleanly without a pty, and validate the WebRTC + ephemeral
-token loop). See [`docs/04-implementation-plan.md`](./docs/04-implementation-plan.md).

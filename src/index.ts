@@ -63,7 +63,7 @@ async function main(): Promise<void> {
       runMode: run.runMode,
       backendUrl: run.backendUrl,
       webUrl: run.webUrl,
-      defaultVoiceProvider: config.settings.voice.defaultProvider,
+      defaultWorkflow: config.settings.workflow.default,
     },
     'cursor-voice bridge ready',
   );

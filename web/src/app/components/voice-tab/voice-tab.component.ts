@@ -174,41 +174,14 @@ export class VoiceTabComponent {
     ];
   });
 
-  protected readonly activeProviderLabel = computed(() => {
-    const data = this.voiceProviders.data();
-    if (!data) return null;
-    return data.providers.find((p) => p.id === data.defaultProvider)?.displayName ?? null;
-  });
-
-  protected readonly activeModelLabel = computed(() => {
-    const data = this.voiceProviders.data();
-    if (!data) return null;
-    const provider = data.providers.find((p) => p.id === data.defaultProvider);
-    if (!provider) return null;
-    const model = provider.models.find((m) => m.id === provider.defaultModel);
-    return model?.label ?? provider.defaultModel;
-  });
-
   protected readonly isBridgeConnected = computed(
     () => this.bridge.wsStatus() === 'connected',
   );
 
   protected readonly pttDisabled = computed(() => {
     if (this.voiceSession.sessionPrepActive()) return true;
-    const workflow = this.bridge.settings()?.workflow.default ?? 'cursor_native';
-    if (workflow === 'cursor_native' || workflow === 'llm_intelligence') {
-      return (
-        this.bridge.wsStatus() !== 'connected' ||
-        !this.bridge.activeProject() ||
-        !this.selectedSessionId
-      );
-    }
-    const data = this.voiceProviders.data();
-    const provider = data?.providers.find((p) => p.id === data.defaultProvider);
-    const hasModel = Boolean(provider?.defaultModel && provider.viable && provider.registered);
     return (
       this.bridge.wsStatus() !== 'connected' ||
-      !hasModel ||
       !this.bridge.activeProject() ||
       !this.selectedSessionId
     );
@@ -217,11 +190,8 @@ export class VoiceTabComponent {
   protected readonly workflowLabel = computed(() => {
     const workflow = this.bridge.settings()?.workflow.default ?? 'cursor_native';
     if (workflow === 'cursor_native') return 'Cursor first';
-    if (workflow === 'llm_intelligence') {
-      const model = this.bridge.settings()?.workflow.llmIntelligence.model;
-      return model ? `Intelligence · ${model}` : 'Intelligence first';
-    }
-    return this.activeProviderLabel();
+    const model = this.bridge.settings()?.workflow.llmIntelligence.model;
+    return model ? `Intelligence · ${model}` : 'Intelligence first';
   });
 
   protected readonly orbColorMode = computed((): OrbColorMode => {

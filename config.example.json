@@ -35,72 +35,9 @@
           "pollyEngine": "neural",
           "transcribeLanguageCode": "en-US"
         }
-      },
-      "s2sVoice": {
-        "systemPrompts": [
-          "prompts/systemprompts.json"
-        ]
       }
     },
     "voice": {
-      "defaultProvider": "openai",
-      "providers": {
-        "openai": {
-          "defaultModel": "gpt-realtime-mini",
-          "models": [
-            {
-              "id": "gpt-realtime-mini",
-              "label": "GPT Realtime Mini",
-              "builtin": true
-            },
-            {
-              "id": "gpt-4o-mini-realtime-preview",
-              "label": "GPT-4o Mini Realtime",
-              "builtin": true
-            },
-            {
-              "id": "gpt-realtime",
-              "label": "GPT Realtime",
-              "builtin": true
-            },
-            {
-              "id": "gpt-4o-realtime-preview",
-              "label": "GPT-4o Realtime Preview",
-              "builtin": true
-            }
-          ]
-        },
-        "amazon_bedrock": {
-          "defaultModel": "amazon.nova-2-sonic-v1:0",
-          "models": [
-            {
-              "id": "amazon.nova-2-sonic-v1:0",
-              "label": "Nova 2 Sonic",
-              "builtin": true
-            },
-            {
-              "id": "amazon.nova-sonic-v1:0",
-              "label": "Nova Sonic v1",
-              "builtin": true
-            }
-          ]
-        },
-        "gemini": {
-          "defaultModel": "gemini-2.5-flash-native-audio-preview-12-2025",
-          "models": [
-            {
-              "id": "gemini-2.5-flash-native-audio-preview-12-2025",
-              "label": "Gemini 2.5 Flash Live",
-              "builtin": true
-            },
-            {
-              "id": "gemini-2.0-flash-live-preview",
-              "label": "Gemini 2.0 Flash Live",
-              "builtin": true
-            }
-          ]
-        }
-      },
       "wakeWords": {
         "start": "cursor listen",
         "end": "cursor send"
@@ -108,10 +45,7 @@
       "turnSubmit": {
         "silenceMs": 1500,
         "vadEnabled": true
-      },
-      "systemPrompts": [
-        "prompts/systemprompts.json"
-      ]
+      }
     },
     "defaultMode": "agent",
     "maxConcurrentJobs": 1,

@@ -32,10 +32,8 @@ import { getConfig } from './config.js';
 import { getRunModeInfo } from './runMode.js';
 import { childLogger } from './log.js';
 import { dispatchTool } from './mcp/handlers.js';
-import { mintToken, hasViableVoiceProvider } from './realtime/token.js';
 import { getNarrator, PhoneRelaySession } from './executor/narrator.js';
 import { registerVoiceProviderRoutes } from './routes/voiceProviders.js';
-import { registerBedrockVoiceWebSocket } from './realtime/bedrock/ws.js';
 import { registerIntelligenceWebSocket } from './intelligence/ws.js';
 import { registerIntelligenceAudioRoutes } from './routes/intelligenceAudio.js';
 import { registerCursorSessionRoutes } from './routes/cursorSessions.js';
@@ -190,35 +188,9 @@ export async function buildServer(): Promise<FastifyInstance> {
     },
   );
 
-  // ── Realtime token endpoint ────────────────────────────────────────────
+  // ── Intelligence + MCP WebSockets ──────────────────────────────────────
 
-  /**
-   * POST /api/realtime/token
-   * Mints an ephemeral provider token for the phone to use with WebRTC.
-   * The API key NEVER reaches the phone — only the short-lived token does.
-   *
-   * Body: { voice?: string }
-   */
-  app.post<{ Body?: { voice?: string } }>('/api/realtime/token', async (req, reply) => {
-    if (!hasViableVoiceProvider()) {
-      return reply.code(503).send({
-        error:
-          'No viable voice provider configured. Register a provider and set API keys in Settings.',
-      });
-    }
-
-    try {
-      const voice = req.body?.voice;
-      const tokenData = await mintToken(voice);
-      return tokenData;
-    } catch (err) {
-      log.error({ err }, 'token mint failed');
-      return reply
-        .code(502)
-        .send({ error: `Token mint failed: ${err instanceof Error ? err.message : String(err)}` });
-    }
-  });
-
+  registerIntelligenceWebSocket(app);
   await registerVoiceProviderRoutes(app);
   await registerConfigRoutes(app);
   await registerIntelligenceAudioRoutes(app);
@@ -235,8 +207,6 @@ export async function buildServer(): Promise<FastifyInstance> {
       webUrl: run.webUrl,
       publicBaseUrl: run.publicBaseUrl ?? null,
       useDevWebServer: run.useDevWebServer,
-      defaultVoiceProvider: s.voice.defaultProvider,
-      defaultVoiceModel: s.voice.providers[s.voice.defaultProvider]?.defaultModel ?? null,
       wakeWords: s.voice.wakeWords,
       turnSubmit: s.voice.turnSubmit,
       defaultMode: s.defaultMode,
@@ -368,7 +338,6 @@ export async function buildServer(): Promise<FastifyInstance> {
     });
   });
 
-  registerBedrockVoiceWebSocket(app);
   registerIntelligenceWebSocket(app);
   registerMcpServer(app);
 

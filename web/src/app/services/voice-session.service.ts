@@ -1,7 +1,6 @@
 import { Injectable, inject, signal } from '@angular/core';
-import { BedrockVoiceSession } from '../../bedrock-voice.js';
 import { LlmIntelligenceSession } from '../../llm-intelligence-session.js';
-import { WebRTCVoiceSession, type SessionCallbacks } from '../../webrtc.js';
+import type { SessionCallbacks } from '../../voice-session-types.js';
 import {
   disposeVoiceAudioMeter,
   getVoiceAudioMeter,
@@ -42,7 +41,7 @@ export interface VoiceAgentStatusState {
 const MAX_ENTRIES = 50;
 let _nextId = 0;
 
-type ActiveSession = WebRTCVoiceSession | BedrockVoiceSession | LlmIntelligenceSession;
+type ActiveSession = LlmIntelligenceSession;
 
 @Injectable({ providedIn: 'root' })
 export class VoiceSessionService {
@@ -149,47 +148,24 @@ export class VoiceSessionService {
     const callbacks = this.buildCallbacks();
     const workflow = this.bridge.settings()?.workflow.default ?? 'cursor_native';
 
-    if (workflow === 'cursor_native' || workflow === 'llm_intelligence') {
-      const intelSession = new LlmIntelligenceSession(
-        this.bridge.bridgeBase,
-        this.bridge.appToken,
-        callbacks,
-      );
-      this._session = intelSession;
-      try {
-        await intelSession.start();
-        this._audioBackends.set(intelSession.getAudioBackends());
-        const startMsg =
-          workflow === 'cursor_native'
-            ? 'Cursor voice session started — run the voice agent in Cursor IDE, then say the wake phrase'
-            : 'Intelligence session started — say wake phrase to activate';
-        this.logs.append('info', 'voice', startMsg);
-      } catch (err) {
-        const detail = err instanceof Error ? err.message : String(err);
-        this.logs.append('error', 'voice', 'Could not start intelligence session', detail);
-        this.toast.error('Could not start voice', detail);
-        this.stopSession();
-      } finally {
-        this.sessionConnecting.set(false);
-      }
-      return;
-    }
-
-    const transport = this.resolveTransport();
-
-    const session =
-      transport === 'bedrock_ws'
-        ? new BedrockVoiceSession(this.bridge.bridgeBase, this.bridge.appToken, callbacks)
-        : new WebRTCVoiceSession(this.bridge.bridgeBase, this.bridge.appToken, callbacks);
-
-    this._session = session;
+    const intelSession = new LlmIntelligenceSession(
+      this.bridge.bridgeBase,
+      this.bridge.appToken,
+      callbacks,
+    );
+    this._session = intelSession;
 
     try {
-      await session.start();
-      this.logs.append('info', 'voice', 'Voice session started — say wake phrase to activate');
+      await intelSession.start();
+      this._audioBackends.set(intelSession.getAudioBackends());
+      const startMsg =
+        workflow === 'cursor_native'
+          ? 'Cursor voice session started — run the voice agent in Cursor IDE, then say the wake phrase'
+          : 'Intelligence session started — say wake phrase to activate';
+      this.logs.append('info', 'voice', startMsg);
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
-      this.logs.append('error', 'voice', 'Could not start voice', detail);
+      this.logs.append('error', 'voice', 'Could not start intelligence session', detail);
       this.toast.error('Could not start voice', detail);
       this.stopSession();
     } finally {
@@ -275,7 +251,7 @@ export class VoiceSessionService {
         if (s === 'error') {
           this.toast.error(
             'Voice connection failed',
-            'Check provider keys and model, then tap to talk again.',
+            'Check bridge connection and AWS keys, then tap to talk again.',
           );
           this.stopSession();
         }
@@ -283,7 +259,6 @@ export class VoiceSessionService {
       onUserTranscript: (text) => this.addEntry(text, 'user'),
       onAssistantTranscript: (text) => {
         this.addEntry(text, 'assistant');
-        // cursor_native: audio comes from MCP speak() only — fallback races and cancels.
         const workflow = this.bridge.settings()?.workflow.default ?? 'cursor_native';
         if (workflow === 'llm_intelligence') {
           scheduleTtsFallback(text, () => this._speaking());
@@ -474,11 +449,6 @@ export class VoiceSessionService {
       default:
         return tool.replace(/_/g, ' ');
     }
-  }
-
-  private resolveTransport(): 'webrtc' | 'bedrock_ws' {
-    const provider = this.voiceProviders.data()?.defaultProvider;
-    return provider === 'amazon_bedrock' ? 'bedrock_ws' : 'webrtc';
   }
 
   private startMeterPoll(): void {
