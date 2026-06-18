@@ -382,8 +382,8 @@ if ($NoTailscale) {
     Warn "tailscale not found — skipping serve setup."
 } else {
     try {
-        Info "Configuring tailscale serve :443 → http://127.0.0.1:$ActualPort..."
-        tailscale serve --bg 443 "http://127.0.0.1:$ActualPort"
+        Info "Configuring tailscale serve on port $ActualPort..."
+        tailscale serve --bg $ActualPort
         Ok "tailscale serve configured."
 
         # Try to detect hostname
@@ -402,7 +402,7 @@ if ($NoTailscale) {
         }
     } catch {
         Warn "tailscale serve failed: $_"
-        Warn "Run manually: tailscale serve --bg 443 http://127.0.0.1:$ActualPort"
+        Warn "Run manually: tailscale serve --bg $ActualPort"
     }
 }
 
