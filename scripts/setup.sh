@@ -11,7 +11,8 @@
 #        cursor-voice.service      — bridge process (auto-restart on crash)
 #        cursor-voice-watch.path   — restarts service when dist/index.js changes
 #   6. Configures tailscale serve (HTTPS proxy to the bridge)
-#   7. Prints a next-step checklist
+#   7. Opens UFW firewall port on the tailscale0 interface
+#   8. Prints a next-step checklist
 #
 # Usage:
 #   bash scripts/setup.sh [--port PORT] [--no-tailscale]
@@ -299,7 +300,39 @@ else
   fi
 fi
 
-# ── 8. Done ───────────────────────────────────────────────────────────────
+# ── 8. UFW firewall ───────────────────────────────────────────────────────
+section "UFW firewall"
+
+if ! command -v ufw &>/dev/null; then
+  warn "ufw not found — skipping firewall setup."
+elif ! sudo -n ufw status &>/dev/null 2>&1 && ! ufw status &>/dev/null 2>&1; then
+  warn "Cannot run ufw (no sudo access) — run manually:"
+  warn "  sudo ufw allow in on tailscale0 to any port ${ACTUAL_PORT} proto tcp"
+  warn "  sudo ufw --force enable"
+else
+  _ufw() { sudo ufw "$@" 2>/dev/null || ufw "$@" 2>/dev/null || true; }
+
+  # Allow bridge port on Tailscale interface only
+  _ufw allow in on tailscale0 to any port "${ACTUAL_PORT}" proto tcp \
+    comment "cursor-voice bridge"
+
+  # Ensure SSH on tailscale is allowed before enabling (prevents lockout)
+  _ufw allow in on tailscale0 to any port 22 proto tcp \
+    comment "SSH on tailscale"
+
+  UFW_STATUS="$(ufw status 2>/dev/null | head -1 || true)"
+  if echo "$UFW_STATUS" | grep -q "inactive"; then
+    info "Enabling UFW..."
+    _ufw --force enable
+    ok "UFW enabled with tailscale0:${ACTUAL_PORT} open."
+  else
+    ok "UFW already active — rules added for tailscale0:${ACTUAL_PORT}."
+  fi
+
+  ufw status numbered 2>/dev/null | grep -E "8787|${ACTUAL_PORT}" || true
+fi
+
+# ── 9. Done ───────────────────────────────────────────────────────────────
 section "Setup complete"
 
 TOKEN="$(grep '^APP_TOKEN=' "$ENV_FILE" | cut -d= -f2 | tr -d '[:space:]')"
@@ -308,6 +341,7 @@ echo ""
 echo -e "${GRN}✔${NC}  Bridge running as a persistent systemd user service"
 echo -e "${GRN}✔${NC}  Auto-restarts on crash (Restart=on-failure)"
 echo -e "${GRN}✔${NC}  Auto-restarts on new build (cursor-voice-watch.path watches dist/index.js)"
+echo -e "${GRN}✔${NC}  UFW firewall allows port ${ACTUAL_PORT} on tailscale0"
 echo ""
 echo -e "${YEL}▶  Action required:${NC}"
 echo ""

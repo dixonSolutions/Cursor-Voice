@@ -366,11 +366,12 @@ export async function buildServer(): Promise<FastifyInstance> {
   return app;
 }
 
-/** Start listening on 127.0.0.1 (Tailscale proxies externally in serve mode). */
+/** Start listening. Serve mode binds to 0.0.0.0 so Tailscale peers can reach the bridge directly. */
 export async function startServer(app: FastifyInstance): Promise<string> {
   const { settings } = getConfig();
   const run = getRunModeInfo(settings);
-  const address = await app.listen({ port: run.backendPort, host: '127.0.0.1' });
+  const host = run.runMode === 'serve' ? '0.0.0.0' : '127.0.0.1';
+  const address = await app.listen({ port: run.backendPort, host });
   log.info(
     {
       address,
