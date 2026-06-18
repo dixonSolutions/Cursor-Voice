@@ -24,7 +24,7 @@ Bridge (Node/TS) ── VoiceTurnQueue ── MCP /mcp ──► Cursor voice ag
 
 **Alternate:** `llm_intelligence` — Claude on Bedrock orchestrates tools.
 
-## Quick start
+## Quick start (dev)
 
 ```bash
 cp config.example.json config.json
@@ -34,6 +34,61 @@ npm run dev
 ```
 
 Open the web URL shown in the terminal (unified port in test mode).
+
+## Host on Windows (one-command setup)
+
+Prerequisites: [Node.js 20 LTS](https://nodejs.org), [Git](https://git-scm.com), [Cursor IDE](https://cursor.com) with `cursor-agent` on PATH.
+
+```powershell
+# 1. Clone the repo
+git clone https://github.com/dixonSolutions/Cursor-Voice.git
+cd Cursor-Voice
+
+# 2. Run setup — installs Tailscale, builds the project, creates .env,
+#    installs a Windows Service (NSSM), and configures tailscale serve.
+#    Run in an elevated (Administrator) PowerShell terminal.
+.\scripts\setup.ps1
+```
+
+After setup, the script prints your `APP_TOKEN`. Enter it in the PWA settings screen.
+
+**After initial setup:**
+
+```powershell
+# Rebuild and restart after code changes
+.\scripts\restart.ps1
+
+# Diagnose connectivity issues
+.\scripts\doctor.ps1
+```
+
+> **Tailscale required.** The setup script installs Tailscale via winget if it is not present.
+> After installation, sign in to Tailscale and enable **HTTPS Certificates** in the
+> [Tailscale admin console](https://login.tailscale.com/admin/dns) to get a trusted HTTPS URL.
+
+## Host on Linux (one-command setup)
+
+Prerequisites: Node.js 20 LTS, Git, Cursor IDE with `cursor-agent` on PATH.
+
+```bash
+# 1. Clone the repo
+git clone https://github.com/dixonSolutions/Cursor-Voice.git
+cd Cursor-Voice
+
+# 2. Run setup — installs Tailscale, builds, creates .env,
+#    installs a systemd user service, and configures tailscale serve.
+bash scripts/setup.sh
+```
+
+**After initial setup:**
+
+```bash
+# Rebuild and restart after code changes
+bash scripts/restart.sh
+
+# Diagnose connectivity issues
+bash scripts/doctor.sh
+```
 
 ## Documentation
 
