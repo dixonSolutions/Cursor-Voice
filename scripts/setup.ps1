@@ -128,6 +128,14 @@ if ($NoTailscale) {
             Warn "Install Tailscale manually from https://tailscale.com/download/windows"
         }
     }
+
+    # Enable MagicDNS so *.ts.net hostnames resolve locally (needed for HTTPS URL).
+    try {
+        tailscale set --accept-dns=true 2>$null
+        Ok "Tailscale MagicDNS enabled (*.ts.net resolves locally)."
+    } catch {
+        Warn "Could not enable MagicDNS — run: tailscale set --accept-dns=true"
+    }
 }
 
 # ── 3. Build project ──────────────────────────────────────────────────────
@@ -382,8 +390,11 @@ if ($NoTailscale) {
     Warn "tailscale not found — skipping serve setup."
 } else {
     try {
-        Info "Configuring tailscale serve on port $ActualPort..."
-        tailscale serve --bg $ActualPort
+        # Running as Administrator so operator set is not needed on Windows.
+        # Use full URL syntax required by newer tailscale CLI.
+        $serveTarget = "http://127.0.0.1:$ActualPort"
+        Info "Configuring: tailscale serve --bg $serveTarget"
+        tailscale serve --bg $serveTarget
         Ok "tailscale serve configured."
 
         # Try to detect hostname
@@ -402,7 +413,7 @@ if ($NoTailscale) {
         }
     } catch {
         Warn "tailscale serve failed: $_"
-        Warn "Run manually: tailscale serve --bg $ActualPort"
+        Warn "Run manually: tailscale serve --bg http://127.0.0.1:$ActualPort"
     }
 }
 

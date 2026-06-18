@@ -101,7 +101,6 @@ export class BridgeService {
   // ── Private ────────────────────────────────────────────────────────────
 
   private _appToken = '';
-  private _bridgeBase = '';
   private _ws: WebSocket | null = null;
   private _reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private _autoReconnect = true;
@@ -111,35 +110,34 @@ export class BridgeService {
 
   loadCredentials(): void {
     const token = localStorage.getItem('cv_token');
-    const base  = localStorage.getItem('cv_bridge');
+    // Migrate: remove any stored base URL — app and API are on the same origin now.
+    localStorage.removeItem('cv_bridge');
     if (token) {
-      this._appToken  = token;
-      this._bridgeBase = base ?? window.location.origin;
+      this._appToken = token;
       this.hasCredentials.set(true);
     }
   }
 
-  saveCredentials(token: string, base: string): void {
-    this._appToken   = token;
-    this._bridgeBase = base || window.location.origin;
-    localStorage.setItem('cv_token',  this._appToken);
-    localStorage.setItem('cv_bridge', this._bridgeBase);
+  saveCredentials(token: string): void {
+    this._appToken = token;
+    localStorage.setItem('cv_token', this._appToken);
+    localStorage.removeItem('cv_bridge');
     this.hasCredentials.set(true);
   }
 
   clearCredentials(): void {
     localStorage.removeItem('cv_token');
     localStorage.removeItem('cv_bridge');
-    this._appToken   = '';
-    this._bridgeBase = '';
+    this._appToken = '';
     this.hasCredentials.set(false);
     this.disconnect();
   }
 
-  // ── Accessors (used by VoiceSessionService to start WebRTC) ───────────
+  // ── Accessors ──────────────────────────────────────────────────────────
 
-  get appToken():   string { return this._appToken; }
-  get bridgeBase(): string { return this._bridgeBase; }
+  get appToken(): string { return this._appToken; }
+  /** Always the same origin — app and API are co-hosted. */
+  get bridgeBase(): string { return window.location.origin; }
 
   // ── WebSocket ──────────────────────────────────────────────────────────
 
@@ -148,7 +146,7 @@ export class BridgeService {
 
     this._autoReconnect = true;
     this.wsStatus.set('connecting');
-    const wsUrl = this._bridgeBase.replace(/^http/, 'ws') + '/ws/control';
+    const wsUrl = window.location.origin.replace(/^http/, 'ws') + '/ws/control';
     this._ws = new WebSocket(wsUrl);
 
     this._ws.addEventListener('open', () => {
@@ -293,7 +291,7 @@ export class BridgeService {
     project: string,
     onLog: (event: VoiceSessionLogEvent) => void,
   ): Promise<VoiceSessionPrepareResult> {
-    const res = await fetch(`${this._bridgeBase}/api/voice-session/prepare`, {
+    const res = await fetch(`/api/voice-session/prepare`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${this._appToken}`,
@@ -474,9 +472,9 @@ export class BridgeService {
     this._pendingCalls.clear();
   }
 
-  /** Authenticated fetch to the bridge API. */
+  /** Authenticated fetch to the bridge API. Uses relative paths — app and API share the same origin. */
   async apiFetch<T>(path: string, opts: RequestInit = {}): Promise<T> {
-    const res = await fetch(`${this._bridgeBase}${path}`, {
+    const res = await fetch(path, {
       ...opts,
       headers: {
         Authorization: `Bearer ${this._appToken}`,

@@ -8,7 +8,6 @@ import { Button } from 'primeng/button';
 import { Dialog } from 'primeng/dialog';
 import { Fluid } from 'primeng/fluid';
 import { IftaLabel } from 'primeng/iftalabel';
-import { InputText } from 'primeng/inputtext';
 import { Message } from 'primeng/message';
 import { Password } from 'primeng/password';
 import { Tag } from 'primeng/tag';
@@ -48,7 +47,6 @@ interface TabItem {
     Dialog,
     Fluid,
     IftaLabel,
-    InputText,
     Message,
     Password,
     Tag,
@@ -70,7 +68,6 @@ export class AppComponent implements OnInit, OnDestroy {
   private readonly logs = inject(LogService);
 
   protected tokenInput = '';
-  protected bridgeUrlInput = '';
   protected readonly activeTab = signal<AppTab>('voice');
 
   protected readonly tabs: TabItem[] = [
@@ -177,9 +174,8 @@ export class AppComponent implements OnInit, OnDestroy {
   protected onSaveToken(): void {
     const token = this.tokenInput.trim();
     if (!token) return;
-    this.bridge.saveCredentials(token, this.bridgeUrlInput.trim());
+    this.bridge.saveCredentials(token);
     this.tokenInput = '';
-    this.bridgeUrlInput = '';
     this.bridge.connect();
     this.logs.append('info', 'bridge', 'Initial credentials saved');
     this.toast.success('Saved', 'Connecting to bridge…');
