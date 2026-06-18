@@ -24,6 +24,26 @@
               {
                 "glob": "**/*",
                 "input": "web/public"
+              },
+              {
+                "glob": "vad.worklet.bundle.min.js",
+                "input": "node_modules/@ricky0123/vad-web/dist",
+                "output": "silero-vad"
+              },
+              {
+                "glob": "silero_vad_legacy.onnx",
+                "input": "node_modules/@ricky0123/vad-web/dist",
+                "output": "silero-vad"
+              },
+              {
+                "glob": "ort-wasm*.wasm",
+                "input": "node_modules/onnxruntime-web/dist",
+                "output": "silero-vad"
+              },
+              {
+                "glob": "ort-wasm*.mjs",
+                "input": "node_modules/onnxruntime-web/dist",
+                "output": "silero-vad"
               }
             ],
             "styles": [

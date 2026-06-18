@@ -73,7 +73,7 @@ export interface SessionCallbacks {
   onClosed(reason?: string): void;
   /** Start wake phrase heard — utterance capture begins. */
   onActivated?(phrase: string): void;
-  /** Returned to wake-phrase listen after end phrase or turn complete (orb red). */
+  /** Returned to wake-phrase listen after VAD speech-end or turn complete (orb red). */
   onDeactivated?(): void;
   /** Heard speech before wake phrase matched — use for user feedback. */
   onWakeRejected?(heard: string, expectedWake: string): void;
@@ -83,12 +83,18 @@ export interface SessionCallbacks {
   onTurnError?(message: string): void;
   /** Cursor finished a voice turn (done() / turn_complete). */
   onTurnComplete?(): void;
+  /** User barged in during assistant TTS — playback stopped. */
+  onTtsBargeIn?(summary: string): void;
+  /** Silero VAD is listening for speech end (after wake, during STT). */
+  onVadArmed?(): void;
+  /** Silero VAD detected the user finished speaking. */
+  onVadDetected?(): void;
   /** Vosk is listening for the end/submit phrase (after wake, during STT). */
   onEndPhraseArmed?(phrase: string): void;
   /** Vosk heard the configured end/submit phrase. */
   onEndPhraseDetected?(phrase: string): void;
-  /** Turn flushed to bridge (end phrase or silence). */
-  onTurnSubmitted?(reason: 'silence' | 'end_word'): void;
+  /** Turn flushed to bridge (VAD, end phrase, or silence). */
+  onTurnSubmitted?(reason: 'silence' | 'vad' | 'end_word'): void;
   /**
    * Relay a function call to the bridge control WebSocket.
    * Returns the tool result, or throws on tool error / WS disconnect.
@@ -102,6 +108,17 @@ export interface SessionCallbacks {
     label: string;
     detail?: string;
   }): void;
+  /** cursor_native conversational agent lifecycle (pid, session id, run id). */
+  onVoiceAgentStatus?(event: VoiceAgentStatusEvent): void;
+}
+
+export interface VoiceAgentStatusEvent {
+  runId: string;
+  pid: number;
+  sessionId: string | null;
+  mcpSessionId: string | null;
+  state: 'starting' | 'running' | 'done' | 'error' | 'stopped';
+  project: string;
 }
 
 // ── Internal types ─────────────────────────────────────────────────────────

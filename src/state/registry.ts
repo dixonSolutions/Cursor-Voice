@@ -281,3 +281,14 @@ export function setActiveModel(sessionKey: string, model: string): void {
     )
     .run({ sessionKey, model });
 }
+
+/** Copy active project/model from one session key to another (e.g. MCP connection bind). */
+export function cloneSessionState(fromKey: string, toKey: string): void {
+  const from = getSessionState(fromKey);
+  if (from.activeProject) {
+    setActiveProject(toKey, from.activeProject);
+  }
+  if (from.activeModel) {
+    setActiveModel(toKey, from.activeModel);
+  }
+}

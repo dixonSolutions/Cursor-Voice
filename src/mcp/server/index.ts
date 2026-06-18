@@ -26,22 +26,19 @@ import {
   handleNextVoiceTurn,
 } from './voiceToolHandlers.js';
 import {
-  handleListAgents,
-  handleGetAgentStatus,
-  handleSpawnAgent,
-  handleStopAgent,
-  handleInject,
-  handleSetMode,
-  handleExecutePlan,
+  makeAgentHandlers,
 } from './agentToolHandlers.js';
 import { dispatchTool } from '../handlers.js';
 import { cursorVoiceMcpInstructions } from '../loadCursorVoicePrompt.js';
+import { bindVoiceAgentMcpSession } from '../../executor/voiceAgent.js';
 
 const log = childLogger('mcp:server');
 
 // ── MCP server factory ────────────────────────────────────────────────────
 
-function buildMcpServer(): McpServer {
+function buildMcpServer(sessionKey: string): McpServer {
+  const agentTools = makeAgentHandlers(sessionKey);
+
   const server = new McpServer(
     { name: 'cursor-voice', version: '0.1.0' },
     {
@@ -78,6 +75,7 @@ function buildMcpServer(): McpServer {
     'next_voice_turn',
     'Receive the next user utterance. Long-polls up to timeout_ms (default 30 s). ' +
       'Returns { turn: null } on timeout — call again to keep listening. ' +
+      'On barge-in during TTS, tts_interrupt reports what the user actually heard. ' +
       'Always call done() before next_voice_turn() to re-arm the mic first.',
     {
       timeout_ms: z
@@ -102,7 +100,7 @@ function buildMcpServer(): McpServer {
       'Call before answering "what are you working on?".',
     {},
     async () => {
-      const result = handleListAgents();
+      const result = agentTools.handleListAgents();
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     },
   );
@@ -112,7 +110,7 @@ function buildMcpServer(): McpServer {
     'Return detailed status — output buffer, mode, elapsed time — for a specific agent.',
     { id: z.string().min(1).describe('Agent / job id from list_agents or spawn_agent.') },
     async ({ id }) => {
-      const result = await handleGetAgentStatus({ id });
+      const result = await agentTools.handleGetAgentStatus({ id });
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     },
   );
@@ -129,7 +127,7 @@ function buildMcpServer(): McpServer {
         .describe('agent = apply changes immediately; plan = propose only. Default agent.'),
     },
     async ({ instructions, mode }) => {
-      const result = await handleSpawnAgent({ instructions, mode });
+      const result = await agentTools.handleSpawnAgent({ instructions, mode });
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     },
   );
@@ -139,7 +137,7 @@ function buildMcpServer(): McpServer {
     'Terminate a specific worker agent immediately.',
     { id: z.string().min(1).describe('Agent id from list_agents.') },
     async ({ id }) => {
-      const result = await handleStopAgent({ id });
+      const result = await agentTools.handleStopAgent({ id });
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     },
   );
@@ -153,7 +151,7 @@ function buildMcpServer(): McpServer {
       message: z.string().min(1).describe('Context message to inject.'),
     },
     async ({ id, message }) => {
-      const result = await handleInject({ id, message });
+      const result = await agentTools.handleInject({ id, message });
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     },
   );
@@ -170,7 +168,7 @@ function buildMcpServer(): McpServer {
         .describe('Target mode for the session.'),
     },
     async ({ id, mode }) => {
-      const result = await handleSetMode({ id, mode });
+      const result = await agentTools.handleSetMode({ id, mode });
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     },
   );
@@ -180,7 +178,7 @@ function buildMcpServer(): McpServer {
     'Trigger plan execution on an agent that is in plan mode.',
     { id: z.string().min(1).describe('Agent id of the plan-mode session.') },
     async ({ id }) => {
-      const result = await handleExecutePlan({ id });
+      const result = await agentTools.handleExecutePlan({ id });
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     },
   );
@@ -195,7 +193,7 @@ function buildMcpServer(): McpServer {
         .describe("Session id (defaults to the active session's project)."),
     },
     async ({ id: _id }) => {
-      const result = await dispatchTool('cursor_diff', { include_patch: true }, 'default');
+      const result = await dispatchTool('cursor_diff', { include_patch: true }, sessionKey);
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     },
   );
@@ -210,7 +208,7 @@ function buildMcpServer(): McpServer {
         .describe("Session id (defaults to the active session's project)."),
     },
     async ({ id: _id }) => {
-      const result = await dispatchTool('cursor_revert', {}, 'default');
+      const result = await dispatchTool('cursor_revert', {}, sessionKey);
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     },
   );
@@ -315,7 +313,9 @@ export function registerMcpServer(app: FastifyInstance): void {
         log.info({ sessionId: newId }, 'mcp session closed');
       };
 
-      const mcpServer = buildMcpServer();
+      bindVoiceAgentMcpSession(newId);
+
+      const mcpServer = buildMcpServer(newId);
       await mcpServer.connect(transport);
       log.info({ sessionId: newId }, 'mcp session initialized');
 

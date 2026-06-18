@@ -1,14 +1,14 @@
 /**
- * Buffers STT finals until silence timeout or an end phrase (Vosk) flushes the turn.
+ * Buffers STT finals until silence timeout, Silero VAD speech-end, or end wake phrase.
  */
 
 import { stripEndPhrase } from './wake-words.js';
 
-export type TurnSubmitReason = 'silence' | 'end_word';
+export type TurnSubmitReason = 'silence' | 'vad' | 'end_word';
 
 export interface TurnSubmitBufferOptions {
   silenceMs: number;
-  endPhrase: string;
+  endPhrase?: string;
   onSubmit: (text: string, reason: TurnSubmitReason) => void;
   onBufferChange?: (text: string) => void;
 }
@@ -27,14 +27,14 @@ export class TurnSubmitBuffer {
     this.scheduleSilenceSubmit();
   }
 
-  /** Flush on end phrase heard (Vosk) or external trigger. Returns true if a turn was sent. */
+  /** Flush on VAD, end phrase, or external trigger. Returns true if a turn was sent. */
   submitNow(reason: TurnSubmitReason): boolean {
     this.clearTimer();
     const raw = this.text();
     if (!raw) return false;
 
     let cleaned = raw;
-    if (reason === 'end_word' && this.opts.endPhrase.trim()) {
+    if (reason === 'end_word' && this.opts.endPhrase?.trim()) {
       cleaned = stripEndPhrase(raw, this.opts.endPhrase);
       if (!cleaned) return false;
     }
@@ -55,6 +55,7 @@ export class TurnSubmitBuffer {
   }
 
   private scheduleSilenceSubmit(): void {
+    if (this.opts.silenceMs <= 0) return;
     this.clearTimer();
     this.timer = setTimeout(() => this.submitNow('silence'), this.opts.silenceMs);
   }

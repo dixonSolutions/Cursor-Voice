@@ -12,6 +12,7 @@
  */
 
 import { childLogger } from '../../log.js';
+import type { TtsInterruptContext } from '../../voice/ttsInterrupt.js';
 
 const log = childLogger('mcp:server:turnQueue');
 
@@ -21,6 +22,13 @@ export interface VoiceTurn {
   receivedAt: string;
   /** Whether this turn should interrupt any in-progress work (e.g. "cancel", "stop"). */
   isInterrupt: boolean;
+  /** What the user actually heard via TTS before barge-in, if any. */
+  ttsInterrupt?: TtsInterruptContext;
+}
+
+export interface EnqueueVoiceTurnOptions {
+  isInterrupt?: boolean;
+  ttsInterrupt?: TtsInterruptContext;
 }
 
 interface PendingWaiter {
@@ -47,17 +55,25 @@ class VoiceTurnQueue {
    * Push a transcribed turn from the PWA into the queue.
    * If a waiter is already blocking on `dequeue()`, it is woken immediately.
    */
-  enqueue(text: string): void {
-    const isInterrupt = detectInterrupt(text);
+  enqueue(text: string, options?: EnqueueVoiceTurnOptions): void {
+    const phraseInterrupt = detectInterrupt(text);
+    const isInterrupt = Boolean(options?.isInterrupt) || phraseInterrupt;
     if (isInterrupt) {
       this.interruptFlag = true;
-      log.info({ text: text.slice(0, 80) }, 'interrupt turn enqueued');
+      log.info(
+        {
+          text: text.slice(0, 80),
+          ttsBargeIn: Boolean(options?.ttsInterrupt),
+        },
+        'interrupt turn enqueued',
+      );
     }
 
     const turn: VoiceTurn = {
       text,
       receivedAt: new Date().toISOString(),
       isInterrupt,
+      ttsInterrupt: options?.ttsInterrupt,
     };
 
     const waiter = this.waiters.shift();

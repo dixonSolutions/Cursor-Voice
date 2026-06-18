@@ -287,7 +287,8 @@ export function removeProviderModel(id: string, modelId: string): VoiceProviders
 const WakeWordsBodySchema = z.object({
   start: z.string().min(1).max(100),
   end: z.string().max(100).optional(),
-  silenceMs: z.number().int().min(500).max(30_000).optional(),
+  silenceMs: z.coerce.number().int().min(500).max(30_000).optional(),
+  vadEnabled: z.boolean().optional(),
 });
 
 export function setWakeWords(raw: unknown): VoiceProvidersResponse {
@@ -303,8 +304,11 @@ export function setWakeWords(raw: unknown): VoiceProvidersResponse {
       start: startTrim,
       end: parsed.data.end !== undefined ? endTrim ?? '' : (voice.wakeWords.end ?? 'send'),
     };
-    if (parsed.data.silenceMs !== undefined) {
-      voice.turnSubmit = { silenceMs: parsed.data.silenceMs };
+    if (parsed.data.silenceMs !== undefined || parsed.data.vadEnabled !== undefined) {
+      voice.turnSubmit = {
+        silenceMs: parsed.data.silenceMs ?? voice.turnSubmit.silenceMs,
+        vadEnabled: parsed.data.vadEnabled ?? voice.turnSubmit.vadEnabled ?? true,
+      };
     }
   }, `wake phrase → start="${startTrim}" end="${endTrim ?? '(unchanged)'}"`);
 

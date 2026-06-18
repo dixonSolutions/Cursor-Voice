@@ -303,3 +303,128 @@ export function projectHasCursorSession(projectName: string, sessionId: string):
     .get({ project: projectName, sessionId }) as { ok: number } | undefined;
   return Boolean(row?.ok);
 }
+
+// ── Voice agent runs (cursor_native conversational loop) ─────────────────────
+
+export type VoiceAgentRunStatus = 'running' | 'done' | 'error' | 'stopped';
+
+export interface VoiceAgentRun {
+  id: string;
+  project: string;
+  pid: number | null;
+  sessionId: string | null;
+  mcpSession: string | null;
+  status: VoiceAgentRunStatus;
+  startedAt: string;
+  endedAt: string | null;
+}
+
+interface VoiceAgentRunRow {
+  id: string;
+  project: string;
+  pid: number | null;
+  session_id: string | null;
+  mcp_session: string | null;
+  status: string;
+  started_at: string;
+  ended_at: string | null;
+}
+
+function rowToVoiceAgentRun(row: VoiceAgentRunRow): VoiceAgentRun {
+  return {
+    id: row.id,
+    project: row.project,
+    pid: row.pid,
+    sessionId: row.session_id,
+    mcpSession: row.mcp_session,
+    status: row.status as VoiceAgentRunStatus,
+    startedAt: row.started_at,
+    endedAt: row.ended_at,
+  };
+}
+
+/** Create a voice agent run row (status = running). Returns the run id. */
+export function createVoiceAgentRun(params: { project: string; pid?: number }): string {
+  const id = randomUUID();
+  getDb()
+    .prepare(
+      `INSERT INTO voice_agent_run (id, project, pid, status)
+       VALUES (@id, @project, @pid, 'running')`,
+    )
+    .run({ id, project: params.project, pid: params.pid ?? null });
+  log.debug({ runId: id, project: params.project }, 'voice agent run created');
+  return id;
+}
+
+export function getVoiceAgentRun(id: string): VoiceAgentRun | null {
+  const row = getDb()
+    .prepare('SELECT * FROM voice_agent_run WHERE id = ?')
+    .get(id) as VoiceAgentRunRow | undefined;
+  return row ? rowToVoiceAgentRun(row) : null;
+}
+
+export function getActiveVoiceAgentRun(): VoiceAgentRun | null {
+  const row = getDb()
+    .prepare(
+      `SELECT * FROM voice_agent_run WHERE status = 'running' ORDER BY started_at DESC LIMIT 1`,
+    )
+    .get() as VoiceAgentRunRow | undefined;
+  return row ? rowToVoiceAgentRun(row) : null;
+}
+
+export function updateVoiceAgentRun(
+  id: string,
+  patch: Partial<{
+    pid: number | null;
+    sessionId: string | null;
+    mcpSession: string | null;
+    status: VoiceAgentRunStatus;
+    endedAt: string | null;
+  }>,
+): void {
+  const sets: string[] = [];
+  const values: Record<string, unknown> = { id };
+
+  if (patch.pid !== undefined) {
+    sets.push('pid = @pid');
+    values['pid'] = patch.pid;
+  }
+  if (patch.sessionId !== undefined) {
+    sets.push('session_id = @sessionId');
+    values['sessionId'] = patch.sessionId;
+  }
+  if (patch.mcpSession !== undefined) {
+    sets.push('mcp_session = @mcpSession');
+    values['mcpSession'] = patch.mcpSession;
+  }
+  if (patch.status !== undefined) {
+    sets.push('status = @status');
+    values['status'] = patch.status;
+  }
+  if (patch.endedAt !== undefined) {
+    sets.push('ended_at = @endedAt');
+    values['endedAt'] = patch.endedAt;
+  }
+
+  if (sets.length === 0) return;
+
+  getDb()
+    .prepare(`UPDATE voice_agent_run SET ${sets.join(', ')} WHERE id = @id`)
+    .run(values);
+}
+
+/** Mark orphaned voice agent runs after bridge restart. */
+export function markOrphanedVoiceAgentRuns(): number {
+  const result = getDb()
+    .prepare(
+      `UPDATE voice_agent_run SET
+         status = 'error',
+         ended_at = datetime('now')
+       WHERE status = 'running'`,
+    )
+    .run();
+  if (result.changes > 0) {
+    log.warn({ count: result.changes }, 'marked orphaned voice agent runs as error');
+  }
+  return result.changes;
+}

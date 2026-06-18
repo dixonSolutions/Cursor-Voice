@@ -1,4 +1,4 @@
-<p-card header="Wake &amp; end phrase test">
+<p-card header="Wake word + submit test">
   <div class="cv-wake-test">
     <div
       class="cv-wake-test-orb"
@@ -6,7 +6,9 @@
       role="img"
       [attr.aria-label]="
         phase() === 'stt_listening'
-          ? 'STT listening — end phrase active'
+          ? vadEnabled()
+            ? 'STT listening — Silero VAD active'
+            : 'STT listening — end phrase active'
           : 'Waiting for wake phrase only'
       ">
     </div>
@@ -14,7 +16,7 @@
     <div class="cv-wake-test-meta">
       <p-tag [value]="phaseLabel()" [severity]="phaseSeverity()" />
       <p-tag [value]="'Wake: ' + startPhrase()" severity="secondary" />
-      <p-tag [value]="submitModeLabel()" severity="secondary" />
+      <p-tag [value]="submitModeLabel()" [severity]="vadEnabled() ? 'info' : 'secondary'" />
       <p-tag
         [value]="isolated ? 'COOP/COEP OK' : 'COOP/COEP missing'"
         [severity]="isolated ? 'success' : 'warn'" />
@@ -27,24 +29,28 @@
       <p-message
         severity="error"
         variant="simple"
-        text="Wake and end phrases must be different — e.g. start / send." />
+        text="Wake and end phrases must be different — disable VAD and use distinct start/end phrases." />
     }
 
     @if (!isolated) {
       <p-message
         severity="warn"
         variant="simple"
-        text="Open via the bridge URL (unified port) or ng serve — SharedArrayBuffer needs COOP/COEP headers." />
+        text="Open via the bridge URL (unified port) or ng serve — SharedArrayBuffer needs COOP/COEP headers for Vosk wake word." />
     }
 
     <p-message
       severity="secondary"
       variant="simple"
-      text="Same flow as Voice tab: Phase 1 (red) = wake phrase only — end phrase is ignored. Phase 2 (green) = STT on + end phrase Vosk. Saying the end phrase during phase 1 does nothing." />
+      text="Same flow as Voice tab: Phase 1 (red) = wake phrase only. Phase 2 (green) = STT on + Silero VAD or end wake phrase (from Voice tab settings)." />
 
     <div class="cv-wake-test-meta">
       @if (!isRunning()) {
-        <p-button label="Start stream" icon="pi pi-play" (onClick)="start()" [disabled]="phraseConflict()" />
+        <p-button
+          label="Start stream"
+          icon="pi pi-play"
+          (onClick)="start()"
+          [disabled]="phraseConflict()" />
       } @else {
         <p-button label="Stop" icon="pi pi-stop" severity="danger" (onClick)="stop()" />
       }

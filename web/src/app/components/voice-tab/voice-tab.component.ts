@@ -8,7 +8,6 @@ import { Fluid } from 'primeng/fluid';
 import { IftaLabel } from 'primeng/iftalabel';
 import { InputText } from 'primeng/inputtext';
 import { Message } from 'primeng/message';
-import { MultiSelect } from 'primeng/multiselect';
 import { Select } from 'primeng/select';
 import { Tag } from 'primeng/tag';
 
@@ -47,7 +46,6 @@ interface SessionOption {
     IftaLabel,
     InputText,
     Message,
-    MultiSelect,
     Select,
     Tag,
     VoiceOrbComponent,
@@ -62,45 +60,55 @@ export class VoiceTabComponent {
   private readonly toast = inject(ToastService);
 
   protected selectedProject: string | null = null;
-  /** MultiSelect model — enforced to at most one value via selectionLimit. */
-  protected selectedSessionIds: string[] = [NEW_CURSOR_SESSION_ID];
+  protected selectedSessionId: string = NEW_CURSOR_SESSION_ID;
+  protected typedMessage = '';
   protected readonly cursorSessions = signal<CursorSessionEntry[]>([]);
   protected readonly activeCursorSessionId = signal<string | null>(null);
   protected readonly loadingSessions = signal(false);
-  protected wakeStart = '';
-  protected wakeEnd = '';
-  protected silenceSubmitMs = 1500;
-  protected savingWakeWords = false;
-  protected typedMessage = '';
-
   protected readonly activationPhrase = computed(
-    () => (this.voiceProviders.data()?.wakeWords.start ?? this.wakeStart) || 'start',
+    () => this.voiceProviders.data()?.wakeWords.start?.trim() || 'start',
   );
 
   protected readonly submitPhrase = computed(
-    () => (this.voiceProviders.data()?.wakeWords.end ?? this.wakeEnd) || 'send',
+    () => this.voiceProviders.data()?.wakeWords.end?.trim() || 'send',
   );
 
   protected readonly silenceSubmitLabel = computed(() => {
-    const ms = this.voiceProviders.data()?.turnSubmit.silenceMs ?? this.silenceSubmitMs;
+    const ms = this.voiceProviders.data()?.turnSubmit.silenceMs ?? 1500;
+    if (this.vadEnabledEffective()) {
+      return `${(ms / 1000).toFixed(1)}s silence (VAD)`;
+    }
     return `${(ms / 1000).toFixed(1)}s silence`;
   });
+
+  protected readonly vadEnabledEffective = computed(
+    () => this.voiceProviders.data()?.turnSubmit.vadEnabled !== false,
+  );
 
   protected readonly workflowHint = computed(() => {
     const start = this.activationPhrase();
     const end = this.submitPhrase();
     const silence = this.silenceSubmitLabel();
+    if (this.vadEnabledEffective()) {
+      if (this.isCursorNative()) {
+        return (
+          `Cursor-first voice: say "${start}" to activate, then pause ${silence} to send. ` +
+          'The bridge auto-starts a Cursor agent when you speak — session id appears in logs.'
+        );
+      }
+      return `Say "${start}" to activate. After that, Silero VAD sends your turn when you pause ${silence}. Vosk detects the wake phrase offline. Type below to test without a mic.`;
+    }
     if (this.isCursorNative()) {
       return (
         `Cursor-first voice: say "${start}" to activate, then pause ${silence} or say "${end}" to send. ` +
-        'Keep a Cursor agent running with the global cursor-voice MCP (~/.cursor/mcp.json). Type below to test without a mic.'
+        'The bridge auto-starts a Cursor agent when you speak — session id appears in logs.'
       );
     }
     return `Say "${start}" to activate. After that, pause ${silence} or say "${end}" to send. Vosk detects start/end offline. Type below to test without a mic.`;
   });
 
   protected readonly sessionHint = computed(() => {
-    const selected = this.selectedSessionIds[0];
+    const selected = this.selectedSessionId;
     if (!selected || selected === NEW_CURSOR_SESSION_ID) {
       return 'New session — a fresh Cursor thread is created when you start voice.';
     }
@@ -192,7 +200,7 @@ export class VoiceTabComponent {
       return (
         this.bridge.wsStatus() !== 'connected' ||
         !this.bridge.activeProject() ||
-        this.selectedSessionIds.length === 0
+        !this.selectedSessionId
       );
     }
     const data = this.voiceProviders.data();
@@ -202,7 +210,7 @@ export class VoiceTabComponent {
       this.bridge.wsStatus() !== 'connected' ||
       !hasModel ||
       !this.bridge.activeProject() ||
-      this.selectedSessionIds.length === 0
+      !this.selectedSessionId
     );
   });
 
@@ -225,6 +233,11 @@ export class VoiceTabComponent {
 
   protected readonly orbActiveStatus = computed((): string | null => {
     if (this.voiceSession.submittingTurn()) return 'Submitting…';
+    const agent = this.voiceSession.agentStatus();
+    if (agent && (agent.state === 'starting' || agent.state === 'running')) {
+      const sid = agent.sessionId ? `${agent.sessionId.slice(0, 8)}…` : '…';
+      return `Agent pid ${agent.pid} · session ${sid}`;
+    }
     if (!this.voiceSession.voiceActivated()) {
       if (this.voiceSession.conversationActive()) {
         const start = this.activationPhrase();
@@ -239,6 +252,9 @@ export class VoiceTabComponent {
     if (this.voiceSession.speaking()) return 'Replying…';
     const levels = this.voiceSession.audioSpectrum();
     if (levels.mic >= 0.028) return 'Speaking…';
+    if (this.voiceSession.vadListening()) {
+      return 'Pause when finished — VAD will send';
+    }
     if (this.voiceSession.endPhraseArmed()) {
       const end = this.submitPhrase();
       return `Say "${end}" to send`;
@@ -269,7 +285,7 @@ export class VoiceTabComponent {
 
   protected readonly wakeHint = computed(() => {
     if (this.orbColorMode() === 'red') return null;
-    const start = this.voiceProviders.data()?.wakeWords.start ?? this.wakeStart;
+    const start = this.activationPhrase();
     const st = this.appState.state();
     const backends = this.voiceSession.audioBackends();
     if (backends?.stt === 'text_only') {
@@ -284,6 +300,9 @@ export class VoiceTabComponent {
     if (st === 'listening' && this.voiceSession.conversationActive()) {
       const end = this.submitPhrase();
       const silence = this.silenceSubmitLabel();
+      if (this.vadEnabledEffective()) {
+        return `Active — speak, then pause ${silence} to send. Tap the orb to hang up.`;
+      }
       return `Active — speak, pause ${silence}, or say "${end}" to send. Tap the orb to hang up.`;
     }
     return `Tap the orb — then say "${start}" to activate. Background noise is filtered.`;
@@ -291,17 +310,16 @@ export class VoiceTabComponent {
 
   constructor() {
     effect(() => {
+      if (this.bridge.wsStatus() === 'connected') {
+        void this.voiceProviders.refresh();
+      }
+    });
+    effect(() => {
       const active = this.bridge.activeProject();
       if (active) {
         this.selectedProject = active;
         void this.loadSessionsForProject(active);
       }
-    });
-    effect(() => {
-      const data = this.voiceProviders.data();
-      if (data?.wakeWords.start) this.wakeStart = data.wakeWords.start;
-      if (data?.wakeWords.end) this.wakeEnd = data.wakeWords.end;
-      if (data?.turnSubmit.silenceMs) this.silenceSubmitMs = data.turnSubmit.silenceMs;
     });
     effect(() => {
       if (this.bridge.wsStatus() === 'connected' && this.selectedProject) {
@@ -328,20 +346,20 @@ export class VoiceTabComponent {
     });
   }
 
-  protected onSessionChange(ids: string[]): void {
-    const next = ids.length > 1 ? [ids[ids.length - 1]!] : ids;
-    this.selectedSessionIds = next.length > 0 ? next : [NEW_CURSOR_SESSION_ID];
+  protected onSessionChange(sessionId: string | null): void {
+    const next = sessionId ?? NEW_CURSOR_SESSION_ID;
+    this.selectedSessionId = next;
 
     const project = this.selectedProject;
-    const sessionId = this.selectedSessionIds[0];
-    if (!project || !sessionId) return;
+    if (!project) return;
 
-    if (sessionId === NEW_CURSOR_SESSION_ID) {
+    if (next === NEW_CURSOR_SESSION_ID) {
       this.bridge.storeCursorSessionPreference(project, NEW_CURSOR_SESSION_ID);
       return;
     }
 
-    void this.bridge.selectCursorSession(project, sessionId).catch(() => {
+    this.bridge.storeCursorSessionPreference(project, next);
+    void this.bridge.selectCursorSession(project, next).catch(() => {
       this.toast.error('Could not select session');
     });
   }
@@ -349,10 +367,7 @@ export class VoiceTabComponent {
   protected handlePtt(): void {
     const st = this.appState.state();
     if (st === 'idle') {
-      void this.voiceSession.startSession().then(() => {
-        const project = this.selectedProject;
-        if (project) void this.loadSessionsForProject(project);
-      });
+      void this.voiceSession.startSession();
     } else if (st === 'inactive' || st === 'listening' || st === 'working') {
       this.voiceSession.stopSession();
       this.toast.info('Mic off');
@@ -364,24 +379,6 @@ export class VoiceTabComponent {
     if (!text) return;
     void this.voiceSession.sendTextMessage(text);
     this.typedMessage = '';
-  }
-
-  protected async onSaveWakeWords(): Promise<void> {
-    const start = this.wakeStart.trim();
-    const end = this.wakeEnd.trim();
-    if (!start) {
-      this.toast.warn('Activation phrase required', 'Set a non-empty start phrase in config.');
-      return;
-    }
-    this.savingWakeWords = true;
-    try {
-      await this.voiceProviders.updateWakeWords(start, end, this.silenceSubmitMs);
-      this.toast.success('Voice phrases updated');
-    } catch {
-      this.toast.error('Could not save voice phrases');
-    } finally {
-      this.savingWakeWords = false;
-    }
   }
 
   private async loadSessionsForProject(project: string): Promise<void> {
@@ -402,17 +399,61 @@ export class VoiceTabComponent {
           job_count: 0,
         });
       }
+
+      const stored = this.bridge.getStoredCursorSession(project);
+      if (
+        stored &&
+        stored !== NEW_CURSOR_SESSION_ID &&
+        !sessions.some((s) => s.session_id === stored)
+      ) {
+        sessions.unshift({
+          session_id: stored,
+          last_prompt: 'Saved session',
+          last_status: 'done',
+          last_run_at: new Date().toISOString(),
+          job_count: 0,
+        });
+      }
+
       this.cursorSessions.set(sessions);
       this.activeCursorSessionId.set(data.active_session_id);
-
-      this.selectedSessionIds = [NEW_CURSOR_SESSION_ID];
-      this.bridge.storeCursorSessionPreference(project, NEW_CURSOR_SESSION_ID);
+      this.restoreSessionSelection(project, sessions, data.active_session_id);
     } catch {
       this.cursorSessions.set([]);
-      this.selectedSessionIds = [NEW_CURSOR_SESSION_ID];
+      this.selectedSessionId = NEW_CURSOR_SESSION_ID;
     } finally {
       this.loadingSessions.set(false);
     }
+  }
+
+  /** Keep user choice across reloads; fall back to stored preference or active resume id. */
+  private restoreSessionSelection(
+    project: string,
+    sessions: CursorSessionEntry[],
+    activeSessionId: string | null,
+  ): void {
+    const valid = new Set<string>([
+      NEW_CURSOR_SESSION_ID,
+      ...sessions.map((s) => s.session_id),
+    ]);
+    if (activeSessionId) valid.add(activeSessionId);
+
+    const stored = this.bridge.getStoredCursorSession(project);
+    const current =
+      this.selectedSessionId && valid.has(this.selectedSessionId)
+        ? this.selectedSessionId
+        : null;
+
+    let pick = NEW_CURSOR_SESSION_ID;
+    if (stored && valid.has(stored)) {
+      pick = stored;
+    } else if (current) {
+      pick = current;
+    } else if (activeSessionId && valid.has(activeSessionId)) {
+      pick = activeSessionId;
+    }
+
+    this.selectedSessionId = pick;
   }
 
   private formatSessionLabel(s: CursorSessionEntry): string {

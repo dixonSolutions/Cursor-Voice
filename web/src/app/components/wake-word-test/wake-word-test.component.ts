@@ -9,7 +9,7 @@ import { Tag } from 'primeng/tag';
 
 import { captureMicStream, unlockAudioContext } from '../../../audio.js';
 import { isCrossOriginIsolated } from '../../../cross-origin-isolation.js';
-import { SilenceAfterSpeechWatch } from '../../../silence-after-speech.js';
+import { SileroVadDetector } from '../../../silero-vad.js';
 import { VoskGrammarSpotter } from '../../../vosk-wake-word.js';
 import { phrasesConflict } from '../../../wake-words.js';
 import { VoiceProvidersService } from '../../services/voice-providers.service';
@@ -17,7 +17,7 @@ import { VoiceProvidersService } from '../../services/voice-providers.service';
 /**
  * Phased test mirroring live voice:
  *   1. awaiting_wake — Vosk listens for start phrase ONLY (red)
- *   2. stt_listening — wake done, STT armed, Vosk listens for end phrase ONLY (green)
+ *   2. stt_listening — wake done, STT armed, VAD or end phrase (green)
  */
 type TestPhase = 'idle' | 'loading' | 'awaiting_wake' | 'stt_listening' | 'error';
 
@@ -117,6 +117,10 @@ export class WakeWordTestComponent implements OnInit, OnDestroy {
     return end || null;
   });
 
+  protected readonly vadEnabled = computed(
+    () => this.voiceProviders.data()?.turnSubmit.vadEnabled !== false,
+  );
+
   protected readonly silenceMs = computed(
     () => this.voiceProviders.data()?.turnSubmit.silenceMs ?? 1500,
   );
@@ -124,23 +128,25 @@ export class WakeWordTestComponent implements OnInit, OnDestroy {
   protected readonly phraseConflict = computed(() => {
     const start = this.voiceProviders.data()?.wakeWords.start ?? '';
     const end = this.voiceProviders.data()?.wakeWords.end ?? '';
-    return phrasesConflict(start, end);
+    return !this.vadEnabled() && phrasesConflict(start, end);
   });
 
   protected readonly submitModeLabel = computed(() => {
-    if (this.endPhrase()) {
-      return `End phrase: "${this.endPhrase()}"`;
-    }
-    return `Silence submit: ${(this.silenceMs() / 1000).toFixed(1)}s`;
+    if (this.vadEnabled()) return 'VAD (Silero)';
+    const end = this.endPhrase();
+    return end ? `End phrase: "${end}"` : `Silence: ${(this.silenceMs() / 1000).toFixed(1)}s`;
   });
 
   private micStream: MediaStream | null = null;
   private ownsMic = false;
   private startSpotter: VoskGrammarSpotter | null = null;
   private endSpotter: VoskGrammarSpotter | null = null;
-  private silenceWatch: SilenceAfterSpeechWatch | null = null;
+  private sileroVad: SileroVadDetector | null = null;
   private sessionRunning = false;
+  private vadListening = false;
   private listeningForEndPhrase = false;
+  private capturePhaseStartedAt = 0;
+  private readonly minSpeechEndMs = 800;
 
   ngOnInit(): void {
     void this.voiceProviders.refresh();
@@ -165,7 +171,7 @@ export class WakeWordTestComponent implements OnInit, OnDestroy {
       case 'awaiting_wake':
         return 'Phase 1 — wake only';
       case 'stt_listening':
-        return 'Phase 2 — STT + end phrase';
+        return this.vadEnabled() ? 'Phase 2 — STT + VAD' : 'Phase 2 — STT + end phrase';
       case 'error':
         return 'Error';
       default:
@@ -231,6 +237,7 @@ export class WakeWordTestComponent implements OnInit, OnDestroy {
 
   protected stop(): void {
     this.sessionRunning = false;
+    this.vadListening = false;
     this.listeningForEndPhrase = false;
     this.teardownSpotters();
     if (this.ownsMic) {
@@ -247,6 +254,7 @@ export class WakeWordTestComponent implements OnInit, OnDestroy {
     if (!this.sessionRunning || !this.micStream) return;
 
     this.teardownSpotters();
+    this.vadListening = false;
     this.listeningForEndPhrase = false;
     this.phase.set('loading');
 
@@ -257,7 +265,7 @@ export class WakeWordTestComponent implements OnInit, OnDestroy {
       onReady: () => {
         this.phase.set('awaiting_wake');
         this.statusText.set(
-          end
+          end && !this.vadEnabled()
             ? `Red — wake phrase only. Say "${start}" (the end phrase "${end}" is ignored here).`
             : `Red — say "${start}" to turn green.`,
         );
@@ -287,21 +295,47 @@ export class WakeWordTestComponent implements OnInit, OnDestroy {
     this.stopStartSpotter();
     this.partialText.set('');
 
-    const end = this.endPhrase();
     const silence = this.silenceMs();
     const start = this.startPhrase();
+    const end = this.endPhrase();
+    this.capturePhaseStartedAt = Date.now();
 
     this.phase.set('stt_listening');
-    this.statusText.set(
-      `Wake phrase "${start}" OK — STT would be recording. Speak your message${
-        end ? `, then say "${end}" to finish` : ''
-      }.`,
-    );
-
-    if (end) {
+    if (this.vadEnabled()) {
+      this.statusText.set(
+        `Wake phrase "${start}" OK — STT would be recording. Speak your message, then pause (${(silence / 1000).toFixed(1)}s) for VAD to finish.`,
+      );
+      await this.armSileroVad(silence);
+    } else if (end) {
+      this.statusText.set(
+        `Wake phrase "${start}" OK — STT would be recording. Speak your message, then say "${end}" to finish.`,
+      );
       await this.armEndPhraseSpotter(end);
     } else {
-      this.fallbackSilenceOnly(silence);
+      this.statusText.set(
+        `Wake phrase "${start}" OK — STT would be recording. Pause ${(silence / 1000).toFixed(1)}s of silence to finish.`,
+      );
+    }
+  }
+
+  private async armSileroVad(redemptionMs: number): Promise<void> {
+    if (!this.sessionRunning || !this.micStream) return;
+
+    await this.stopSileroVad();
+    this.sileroVad = new SileroVadDetector();
+
+    try {
+      await this.sileroVad.start(this.micStream, {
+        redemptionMs,
+        onSpeechEnd: () => void this.onSubmitDetected('vad'),
+        onError: (message) => console.warn('[wake-test vad]', message),
+      });
+      this.vadListening = true;
+    } catch (err) {
+      console.warn('[wake-test vad]', err);
+      this.statusText.set(
+        `Silero VAD failed — ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
 
@@ -315,7 +349,7 @@ export class WakeWordTestComponent implements OnInit, OnDestroy {
           this.partialText.set(text.trim());
         }
       },
-      onMatch: () => void this.onEndPhraseDetected(),
+      onMatch: () => void this.onSubmitDetected('end'),
       onError: (message) => console.warn('[wake-test end]', message),
     });
 
@@ -327,39 +361,38 @@ export class WakeWordTestComponent implements OnInit, OnDestroy {
       this.listeningForEndPhrase = true;
     } catch (err) {
       console.warn('[wake-test end]', err);
-      this.fallbackSilenceOnly(this.silenceMs());
+      this.statusText.set(
+        `End phrase spotter failed — ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
 
-  private async onEndPhraseDetected(): Promise<void> {
-    if (!this.sessionRunning || !this.listeningForEndPhrase) return;
-    await this.returnToAwaitingWake('end');
+  private async onSubmitDetected(reason: 'vad' | 'end'): Promise<void> {
+    if (!this.sessionRunning) return;
+    if (reason === 'vad' && !this.vadListening) return;
+    if (reason === 'end' && !this.listeningForEndPhrase) return;
+    if (Date.now() - this.capturePhaseStartedAt < this.minSpeechEndMs) {
+      console.debug('[wake-test] ignored — too soon after wake');
+      return;
+    }
+    await this.returnToAwaitingWake(reason);
   }
 
-  private fallbackSilenceOnly(silenceMs: number): void {
-    if (!this.micStream) return;
-    this.silenceWatch = new SilenceAfterSpeechWatch({
-      silenceMs,
-      onSilence: () => void this.returnToAwaitingWake('silence'),
-    });
-    this.silenceWatch.start(this.micStream);
-  }
-
-  private async returnToAwaitingWake(reason: 'end' | 'silence'): Promise<void> {
+  private async returnToAwaitingWake(reason: 'vad' | 'end'): Promise<void> {
     if (!this.sessionRunning) return;
 
+    this.vadListening = false;
     this.listeningForEndPhrase = false;
+    await this.stopSileroVad();
     this.stopEndSpotter();
-    this.silenceWatch?.stop();
-    this.silenceWatch = null;
     this.partialText.set('');
 
     const start = this.startPhrase();
     const end = this.endPhrase();
-    if (reason === 'end' && end) {
+    if (reason === 'vad') {
+      this.statusText.set(`Speech ended (VAD) — back to wake. Say "${start}" again.`);
+    } else if (end) {
       this.statusText.set(`End phrase "${end}" heard — back to wake. Say "${start}" again.`);
-    } else {
-      this.statusText.set(`Silence timeout — back to wake. Say "${start}" again.`);
     }
 
     await this.listenForWake();
@@ -376,10 +409,15 @@ export class WakeWordTestComponent implements OnInit, OnDestroy {
     this.listeningForEndPhrase = false;
   }
 
+  private async stopSileroVad(): Promise<void> {
+    await this.sileroVad?.dispose();
+    this.sileroVad = null;
+    this.vadListening = false;
+  }
+
   private teardownSpotters(): void {
     this.stopStartSpotter();
     this.stopEndSpotter();
-    this.silenceWatch?.stop();
-    this.silenceWatch = null;
+    void this.stopSileroVad();
   }
 }

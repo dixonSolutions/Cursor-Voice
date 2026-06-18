@@ -19,8 +19,9 @@ import { getRunModeInfo } from './runMode.js';
 import { initLogger, getLogger } from './log.js';
 import { getDb, closeDb } from './state/db.js';
 import { reconcileRegistry } from './state/registry.js';
-import { markOrphanedJobs } from './state/jobs.js';
+import { markOrphanedJobs, markOrphanedVoiceAgentRuns } from './state/jobs.js';
 import { killActiveAgent } from './executor/agentSingleton.js';
+import { killVoiceAgent } from './executor/voiceAgent.js';
 import { buildServer, startServer } from './server.js';
 
 async function main(): Promise<void> {
@@ -45,6 +46,11 @@ async function main(): Promise<void> {
     log.warn({ orphanCount }, 'cleaned up orphaned jobs from previous run');
   }
 
+  const orphanVoiceCount = markOrphanedVoiceAgentRuns();
+  if (orphanVoiceCount > 0) {
+    log.warn({ orphanVoiceCount }, 'cleaned up orphaned voice agent runs from previous run');
+  }
+
   // 6. Start server
   const app = await buildServer();
   await startServer(app);
@@ -67,6 +73,7 @@ async function main(): Promise<void> {
   async function shutdown(signal: string): Promise<void> {
     log.info({ signal }, 'shutdown signal received');
     killActiveAgent('bridge shutdown');
+    killVoiceAgent('bridge shutdown');
     try {
       await app.close();
       closeDb();

@@ -29,6 +29,16 @@ export interface ToolActivityState {
   at: number;
 }
 
+export interface VoiceAgentStatusState {
+  runId: string;
+  pid: number;
+  sessionId: string | null;
+  mcpSessionId: string | null;
+  state: 'starting' | 'running' | 'done' | 'error' | 'stopped';
+  project: string;
+  at: number;
+}
+
 const MAX_ENTRIES = 50;
 let _nextId = 0;
 
@@ -50,6 +60,7 @@ export class VoiceSessionService {
 
   readonly transcript = signal<TranscriptEntry[]>([]);
   readonly toolActivity = signal<ToolActivityState | null>(null);
+  readonly agentStatus = signal<VoiceAgentStatusState | null>(null);
   readonly conversationActive = signal(false);
   readonly sessionConnecting = signal(false);
   /** True while MCP install / version check runs before mic opens. */
@@ -57,9 +68,11 @@ export class VoiceSessionService {
   readonly speaking = this._speaking.asReadonly();
   readonly voiceActivated = this._voiceActivated.asReadonly();
   readonly micMuted = this._micMuted.asReadonly();
+  /** Silero VAD active — listening for speech end to submit. */
+  readonly vadListening = signal(false);
   /** Vosk end-phrase spotter active (say end word to submit). */
   readonly endPhraseArmed = signal(false);
-  /** Heard end phrase — flushing STT and submitting. */
+  /** Speech-end detected — flushing STT and submitting. */
   readonly submittingTurn = signal(false);
 
   private readonly _audioSpectrum = signal<AudioSpectrum>({
@@ -198,6 +211,8 @@ export class VoiceSessionService {
     this.conversationActive.set(false);
     this.transcript.set([]);
     this.toolActivity.set(null);
+    this.agentStatus.set(null);
+    this.vadListening.set(false);
     this.endPhraseArmed.set(false);
     this.submittingTurn.set(false);
     this._audioBackends.set(null);
@@ -268,7 +283,11 @@ export class VoiceSessionService {
       onUserTranscript: (text) => this.addEntry(text, 'user'),
       onAssistantTranscript: (text) => {
         this.addEntry(text, 'assistant');
-        scheduleTtsFallback(text, () => this._speaking());
+        // cursor_native: audio comes from MCP speak() only — fallback races and cancels.
+        const workflow = this.bridge.settings()?.workflow.default ?? 'cursor_native';
+        if (workflow === 'llm_intelligence') {
+          scheduleTtsFallback(text, () => this._speaking());
+        }
       },
       onSpeaking: (speaking) => {
         if (speaking) cancelTtsFallback();
@@ -294,6 +313,19 @@ export class VoiceSessionService {
           this.syncAppState();
         }
       },
+      onVoiceAgentStatus: (event) => {
+        this.agentStatus.set({ ...event, at: Date.now() });
+        const sid = event.sessionId ? `${event.sessionId.slice(0, 8)}…` : 'pending';
+        const label =
+          event.state === 'starting'
+            ? `Cursor agent starting — pid ${event.pid}, run ${event.runId.slice(0, 8)}…`
+            : event.state === 'running'
+              ? `Cursor agent running — pid ${event.pid}, session ${sid}`
+              : event.state === 'done'
+                ? `Cursor agent finished — session ${sid}`
+                : `Cursor agent ${event.state} — pid ${event.pid}`;
+        this.logs.append('info', 'voice', label);
+      },
       onClosed: (reason) => {
         if (reason) {
           this.toast.warn('Voice disconnected', reason);
@@ -303,6 +335,7 @@ export class VoiceSessionService {
       onActivated: (phrase) => {
         this.logs.append('info', 'voice', `Wake phrase heard — "${phrase}"`);
         this._voiceActivated.set(true);
+        this.vadListening.set(false);
         this.endPhraseArmed.set(false);
         this.syncAppState();
         if (phrase !== '(typed input)') {
@@ -311,6 +344,7 @@ export class VoiceSessionService {
       },
       onDeactivated: () => {
         this._voiceActivated.set(false);
+        this.vadListening.set(false);
         this.endPhraseArmed.set(false);
         this.syncAppState();
       },
@@ -333,23 +367,45 @@ export class VoiceSessionService {
         this.toolActivity.set(null);
         this.submittingTurn.set(false);
       },
+      onTtsBargeIn: (summary) => {
+        this.logs.append('info', 'voice', 'Speech interrupted — listening', summary);
+      },
+      onVadArmed: () => {
+        this.vadListening.set(true);
+        this.endPhraseArmed.set(false);
+        this.submittingTurn.set(false);
+        this.logs.append('info', 'voice', 'Silero VAD armed — pause when finished speaking');
+      },
+      onVadDetected: () => {
+        this.vadListening.set(false);
+        this.endPhraseArmed.set(false);
+        this.submittingTurn.set(true);
+        this.logs.append('info', 'voice', 'Speech ended (VAD) — stopping mic, submitting');
+      },
       onEndPhraseArmed: (phrase) => {
         this.endPhraseArmed.set(true);
+        this.vadListening.set(false);
         this.submittingTurn.set(false);
         this.logs.append('info', 'voice', `End phrase armed — say "${phrase}" when finished`);
       },
       onEndPhraseDetected: (phrase) => {
         this.endPhraseArmed.set(false);
+        this.vadListening.set(false);
         this.submittingTurn.set(true);
         this.logs.append('info', 'voice', `End phrase heard — "${phrase}" (stopping mic, submitting)`);
       },
       onTurnSubmitted: (reason) => {
         this.submittingTurn.set(false);
+        this.vadListening.set(false);
         this.endPhraseArmed.set(false);
         this.logs.append(
           'info',
           'voice',
-          reason === 'end_word' ? 'Turn sent (end phrase)' : 'Turn sent (silence)',
+          reason === 'vad'
+            ? 'Turn sent (Silero VAD)'
+            : reason === 'end_word'
+              ? 'Turn sent (end phrase)'
+              : 'Turn sent (silence)',
         );
       },
       relayToolCall: async (callId, name, args) => {

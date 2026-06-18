@@ -29,10 +29,19 @@ import { isAmazonAudioAvailable } from './audio/awsClient.js';
 import { createMemory, type ConversationMemory } from './memory.js';
 import { runIntelligenceTurn as runOrchestratorTurn, type OrchestratorCallbacks } from './orchestrator.js';
 import { voiceTurnQueue } from '../mcp/server/turnQueue.js';
+import { parseTtsInterrupt } from '../voice/ttsInterrupt.js';
 import {
   registerTurnCompleteHook,
   registerVoiceSession,
 } from '../mcp/server/voiceToolHandlers.js';
+import {
+  spawnVoiceAgent,
+  isVoiceAgentRunning,
+  getActiveVoiceAgent,
+  killVoiceAgent,
+  refreshProjectForVoice,
+} from '../executor/voiceAgent.js';
+import { resolveProject, getSessionState } from '../state/registry.js';
 
 const log = childLogger('intelligence:ws');
 
@@ -181,7 +190,7 @@ export function registerIntelligenceWebSocket(app: FastifyInstance): void {
             'intelligence user_turn',
           );
 
-          if (intelSession.busy) {
+          if (intelSession.busy && intelSession.workflow !== 'cursor_native') {
             send(socket, {
               type: 'speak',
               text: "One moment — I'm still working on your last request.",
@@ -192,13 +201,52 @@ export function registerIntelligenceWebSocket(app: FastifyInstance): void {
           if (intelSession.workflow === 'cursor_native') {
             intelSession.busy = true;
             send(socket, { type: 'thinking', value: true });
-            voiceTurnQueue.enqueue(text);
 
-            // Emit a visible server-terminal line so the developer can monitor the agent.
-            // eslint-disable-next-line no-console
-            console.log(
-              `\n[voice] ▶ cursor_native turn queued: "${text.slice(0, 80)}${text.length > 80 ? '…' : ''}"\n` +
-              `        Monitor: cursor-agent status   (or watch this terminal for speak/done events)\n`,
+            const ttsInterrupt = parseTtsInterrupt(msg['tts_interrupt']);
+            const isInterrupt = Boolean(msg['is_interrupt']) || Boolean(ttsInterrupt);
+            voiceTurnQueue.enqueue(text, { isInterrupt, ttsInterrupt });
+
+            const bridgeSession = getSessionState(sessionKey);
+            let project = resolveProject(bridgeSession.activeProject ?? '');
+
+            if (!isVoiceAgentRunning()) {
+              if (!project) {
+                send(socket, {
+                  type: 'speak',
+                  text: 'No project is selected. Choose a project in the voice tab first.',
+                });
+                send(socket, { type: 'thinking', value: false });
+                send(socket, { type: 'turn_complete' });
+                intelSession.busy = false;
+                return;
+              }
+
+              project = refreshProjectForVoice(project);
+              try {
+                spawnVoiceAgent(project, bridgeSession);
+              } catch (err) {
+                const message = err instanceof Error ? err.message : String(err);
+                log.error({ err, sessionKey }, 'voice agent spawn failed');
+                send(socket, { type: 'speak', text: `Could not start Cursor agent: ${message}` });
+                send(socket, { type: 'error', message });
+                send(socket, { type: 'thinking', value: false });
+                send(socket, { type: 'turn_complete' });
+                intelSession.busy = false;
+                return;
+              }
+            }
+
+            const va = getActiveVoiceAgent();
+            const sessionLabel = va?.sessionId
+              ? va.sessionId.slice(0, 8)
+              : project?.resumeId?.slice(0, 8) ?? 'new';
+            const detail = va
+              ? `Turn queued — agent run ${va.runId.slice(0, 8)}… pid ${va.pid} session ${sessionLabel}…`
+              : 'Turn queued — starting agent…';
+
+            log.info(
+              { sessionKey, runId: va?.runId, pid: va?.pid, sessionId: va?.sessionId },
+              'cursor_native turn queued',
             );
 
             send(socket, {
@@ -206,7 +254,7 @@ export function registerIntelligenceWebSocket(app: FastifyInstance): void {
               tool: 'next_voice_turn',
               phase: 'start',
               label: 'Waiting for Cursor',
-              detail: 'Turn queued — monitor: cursor-agent status (or watch server terminal)',
+              detail,
             });
             return;
           }
@@ -255,6 +303,7 @@ export function registerIntelligenceWebSocket(app: FastifyInstance): void {
         unregisterTurnDone?.();
         unregisterVoice = null;
         unregisterTurnDone = null;
+        killVoiceAgent('intelligence websocket closed');
         if (relaySession) {
           void getNarrator().setSession(null);
           relaySession = null;
