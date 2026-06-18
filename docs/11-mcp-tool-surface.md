@@ -6,6 +6,64 @@ registration and the provider function-tool definition (DRY).
 
 Verified against the live CLI (`cursor-agent 2026.06.04-5fd875e`, June 2026).
 
+> **Total: 30 tools** — 3 voice I/O + 10 agent/job self-management + 17 cursor-agent wrappers.
+> All are registered in `src/mcp/server/index.ts` and callable by Cursor's conversational agent.
+
+---
+
+## MCP Server Tools (Cursor calls these to manage itself)
+
+These are Cursor's self-management surface — tools the conversational voice agent
+calls to orchestrate workers, observe the full agent ecosystem, and manage state.
+
+### Group: Voice I/O
+
+| Tool | Purpose |
+| --- | --- |
+| `speak(text)` | Convert text → TTS and push to PWA. One sentence per call. |
+| `done()` | Signal turn end; re-arms the PWA mic. |
+| `next_voice_turn(timeout_ms?)` | Long-poll dequeue of next user utterance. |
+
+### Group: Identity
+
+| Tool | Returns |
+| --- | --- |
+| `get_session_ref()` | voice_run_id, voice_session_id (cursor-agent resume ref), mcp_session_id, active_job_id, active_project, active_model, preferred_spawn_mode |
+
+Use this to orient after a resume or when session state is unclear.
+
+### Group: Agent Management
+
+| Tool | Purpose |
+| --- | --- |
+| `list_agents()` | All running workers (singleton + worktree pool) + voice agent. Shows id, kind, pid, activity, elapsed, worktree. |
+| `get_agent_status(id)` | Live detail: activity, files_written, files_read, shell_commands, elapsed_ms. Falls back to DB for completed jobs. |
+| `get_agent_output(id, offset?, limit?)` | Paginated full event log (tool calls, file writes, shell runs, output text). In-memory for live; DB for completed. |
+| `spawn_agent(instructions, mode?, use_worktree?, worktree_name?)` | Start a worker. Modes: agent/plan/ask/debug. `use_worktree: true` runs in isolated git worktree for parallel execution. |
+| `stop_agent(id)` | SIGTERM → SIGKILL a worker (singleton or worktree). |
+| `inject(id, message)` | Best-effort stdin context injection. Fallback: stop + respawn with amended instructions. |
+| `revert_agent(id, confirm?)` | Revert project to the git checkpoint taken before job `id` ran. Uncommitted → stash; committed → reset --hard (requires confirm: true). |
+
+**Parallel agents**: `spawn_agent` with `use_worktree: true` creates an isolated git worktree
+(`~/.cursor/worktrees/<name>`) so multiple agents can code concurrently without working-tree
+conflicts. Each gets a unique name; `list_agents` shows all. This is Cursor's native
+Parallel Agents capability exposed via voice.
+
+### Group: Job History
+
+| Tool | Purpose |
+| --- | --- |
+| `list_jobs_history(project?, limit?, status_filter?)` | Recent jobs for the active project. Returns id, mode, prompt, status, files_changed, summary, error, timing, checkpoint. Use to find job IDs for revert_agent. |
+
+### Group: Mode Control
+
+| Tool | Purpose |
+| --- | --- |
+| `set_mode(id?, mode)` | Store preferred spawn mode for this session (agent/plan/ask/debug). Applied to next `spawn_agent`. Does NOT restart running agents. |
+| `execute_plan(id)` | Trigger plan execution: submits a follow-up that applies the proposed plan. |
+
+---
+
 ---
 
 ## Tool groups
@@ -285,30 +343,51 @@ executor MCP server. Informational; used for debugging.
 
 ---
 
-## Complete tool inventory (all tools)
+## Complete tool inventory (all 30 tools)
+
+### MCP Server tools (Cursor's self-management surface)
 
 | # | Tool | Group | Backed by |
 | --- | --- | --- | --- |
-| 1 | `cursor_list_projects` | Project | Registry (custom) |
-| 2 | `cursor_set_project` | Project | Registry (custom) |
-| 3 | `cursor_list_models` | Model | CLI: `cursor-agent models` |
-| 4 | `cursor_set_model` | Model | State (DB) |
-| 5 | `cursor_submit` | Execute | CLI: `-p --output-format stream-json` |
-| 6 | `cursor_ask` | Execute | CLI: `-p --output-format json --mode ask` |
-| 6b | `cursor_recall_answer` | Execute | Bridge cache (last ask) |
-| 7 | `cursor_status` | Job | DB (job rows + watcher events) |
-| 8 | `cursor_stop` | Job | `process.kill` → SIGTERM/SIGKILL |
-| 9 | `cursor_new_session` | Session | DB clear + CLI: `create-chat` |
-| 10 | `cursor_session_info` | Session | DB |
-| 11 | `cursor_diff` | Git | simple-git |
-| 12 | `cursor_revert` | Git | simple-git |
-| 13 | `cursor_agent_info` | System | CLI: `about --format json` |
-| 14 | `cursor_agent_status` | System | CLI: `status --format json` |
-| 15 | `cursor_mcp_list` | MCP inspect | CLI: `mcp list` |
-| 16 | `cursor_mcp_tools` | MCP inspect | CLI: `mcp list-tools` |
+| 1 | `speak` | Voice I/O | PWA TTS broadcast |
+| 2 | `done` | Voice I/O | PWA mic re-arm broadcast |
+| 3 | `next_voice_turn` | Voice I/O | `VoiceTurnQueue` long-poll |
+| 4 | `get_session_ref` | Identity | `voiceAgent.ts` + `agentSingleton.ts` + registry |
+| 5 | `list_agents` | Agents | `agentSingleton.ts` + `jobManager.ts` + `voiceAgent.ts` |
+| 6 | `get_agent_status` | Agents | `agentSingleton.ts` (live) + DB (completed) |
+| 7 | `get_agent_output` | Agents | Watcher in-memory buffer (live) + DB job_events (completed) |
+| 8 | `spawn_agent` | Agents | `jobManager.submitJob` + optional worktree |
+| 9 | `stop_agent` | Agents | `agentSingleton.killActiveAgent` / `killWorktreeAgent` |
+| 10 | `inject` | Agents | stdin write (best-effort) |
+| 11 | `revert_agent` | Agents | `git.revert` via job checkpoint from DB |
+| 12 | `list_jobs_history` | Jobs | DB (`job` table) |
+| 13 | `set_mode` | Mode | Session-scoped `preferredModeMap` |
+| 14 | `execute_plan` | Mode | `dispatchTool('cursor_submit', ...)` |
 
-**17 tools total.** All defined from a single zod schema source; MCP and provider
-function-tool definitions are generated from that schema (DRY).
+### cursor-agent wrapper tools (exposed to Cursor via MCP — same as dispatchTool surface)
+
+| # | Tool | Group | Backed by |
+| --- | --- | --- | --- |
+| 15 | `cursor_list_projects` | Project | Registry (custom) |
+| 16 | `cursor_set_project` | Project | Registry (custom) |
+| 17 | `cursor_list_models` | Model | CLI: `cursor-agent models` |
+| 18 | `cursor_set_model` | Model | State (DB) |
+| 19 | `cursor_submit` | Execute | CLI: `-p --output-format stream-json` |
+| 20 | `cursor_ask` | Execute | CLI: `-p --output-format json --mode ask` |
+| 21 | `cursor_recall_answer` | Execute | Bridge cache (last ask) |
+| 22 | `cursor_status` | Job | DB (job rows + watcher events) |
+| 23 | `cursor_stop` | Job | `process.kill` → SIGTERM/SIGKILL |
+| 24 | `cursor_new_session` | Session | DB clear + CLI: `create-chat` |
+| 25 | `cursor_session_info` | Session | DB |
+| 26 | `cursor_diff` | Git | simple-git |
+| 27 | `cursor_revert` | Git | simple-git |
+| 28 | `cursor_agent_info` | System | CLI: `about --format json` |
+| 29 | `cursor_agent_status` | System | CLI: `status --format json` |
+| 30 | `cursor_mcp_list` | MCP inspect | CLI: `mcp list` |
+| 31 | `cursor_mcp_tools` | MCP inspect | CLI: `mcp list-tools` |
+
+> Tools 15–31 are also accessible via the control WebSocket (`dispatchTool`) for the
+> `llm_intelligence` workflow. Tools 1–14 are MCP-server-only (Cursor's self-management surface).
 
 ---
 
@@ -316,22 +395,31 @@ function-tool definitions are generated from that schema (DRY).
 
 ```
 src/mcp/
+├── server/
+│   ├── index.ts              # MCP Streamable HTTP server — registers all 30 tools
+│   ├── voiceToolHandlers.ts  # speak, done, next_voice_turn
+│   ├── agentToolHandlers.ts  # get_session_ref, list_agents, get_agent_status,
+│   │                         # get_agent_output, spawn_agent, stop_agent,
+│   │                         # inject, revert_agent, list_jobs_history,
+│   │                         # set_mode, execute_plan
+│   └── turnQueue.ts          # VoiceTurnQueue long-poll bridge
 ├── tools/
-│   ├── project.ts       # cursor_list_projects, cursor_set_project
-│   ├── model.ts         # cursor_list_models, cursor_set_model
-│   ├── execute.ts       # cursor_submit, cursor_ask
-│   ├── job.ts           # cursor_status, cursor_stop
-│   ├── session.ts       # cursor_new_session, cursor_session_info
-│   ├── git.ts           # cursor_diff, cursor_revert
-│   ├── system.ts        # cursor_agent_info, cursor_agent_status
-│   └── mcpInspect.ts    # cursor_mcp_list, cursor_mcp_tools
-├── schemas.ts           # all zod schemas (single source of truth)
-├── server.ts            # MCP server wiring — registers all tools
-├── handlers.ts          # dispatches by tool name → module
-└── functionTools.ts     # generates provider function-tool defs from schemas
+│   ├── project.ts            # cursor_list_projects, cursor_set_project
+│   ├── model.ts              # cursor_list_models, cursor_set_model
+│   ├── execute.ts            # cursor_submit, cursor_ask
+│   ├── job.ts                # cursor_status, cursor_stop
+│   ├── session.ts            # cursor_new_session, cursor_session_info
+│   ├── gitTools.ts           # cursor_diff, cursor_revert
+│   ├── system.ts             # cursor_agent_info, cursor_agent_status
+│   └── mcpInspect.ts         # cursor_mcp_list, cursor_mcp_tools
+├── schemas.ts                # zod schemas for dispatchTool tools (17 tools)
+├── handlers.ts               # dispatchTool security boundary
+└── functionTools.ts          # generates provider function-tool defs from schemas
 
 src/executor/
-├── cursorAgent.ts       # spawn, flag building, NDJSON readline parsing
+├── cursorAgent.ts       # spawn (supports --worktree, --mode plan|ask|debug)
+├── agentSingleton.ts    # singleton + worktree worker pool, getAllActiveRuns()
+├── jobManager.ts        # submitJob (worktree), getAllActiveJobSummaries(), getJobsHistory()
 ├── watcher.ts           # stream-json event classifier → NarrationEvents
 ├── narrator.ts          # NarrationEvents → inject into realtime session
 └── git.ts               # simple-git: diff, revert, checkpoint
