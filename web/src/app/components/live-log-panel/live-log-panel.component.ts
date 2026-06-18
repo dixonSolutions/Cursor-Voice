@@ -1,4 +1,4 @@
-import type { AfterViewInit, ElementRef } from '@angular/core';
+import type { AfterViewInit, ElementRef, OnDestroy } from '@angular/core';
 import {
   Component,
   ViewChild,
@@ -16,7 +16,7 @@ import { LogService } from '../../services/log.service';
 import { VoiceSessionService } from '../../services/voice-session.service';
 
 const ITEM_HEIGHT_PX = 28;
-const VIEWPORT_HEIGHT_PX = 144;
+const DEFAULT_VIEWPORT_HEIGHT_PX = 144;
 const OVERSCAN = 3;
 /** Within this distance of the bottom, treat scroll as "at bottom" and auto-follow new lines. */
 const SCROLL_STICK_EPS_PX = 12;
@@ -27,7 +27,7 @@ const SCROLL_STICK_EPS_PX = 12;
   imports: [Button, Tag],
   templateUrl: './live-log-panel.component.html',
 })
-export class LiveLogPanelComponent implements AfterViewInit {
+export class LiveLogPanelComponent implements AfterViewInit, OnDestroy {
   protected readonly logs = inject(LogService);
   protected readonly voiceSession = inject(VoiceSessionService);
 
@@ -35,14 +35,11 @@ export class LiveLogPanelComponent implements AfterViewInit {
 
   private readonly scrollTop = signal(0);
   private readonly stickToBottom = signal(true);
+  private readonly viewportHeightPx = signal(DEFAULT_VIEWPORT_HEIGHT_PX);
   private viewReady = false;
+  private resizeObserver?: ResizeObserver;
 
-  protected readonly visible = computed(
-    () =>
-      this.voiceSession.sessionPrepActive() ||
-      this.voiceSession.sessionConnecting() ||
-      this.voiceSession.conversationActive(),
-  );
+  protected readonly visible = computed(() => true);
 
   /** Voice + transcript only — bridge/system logs stay in the Logs tab. */
   protected readonly sessionEntries = computed(() =>
@@ -54,8 +51,9 @@ export class LiveLogPanelComponent implements AfterViewInit {
   protected readonly virtualSlice = computed(() => {
     const entries = this.sessionEntries();
     const scroll = this.scrollTop();
+    const viewportHeight = this.viewportHeightPx();
     const start = Math.max(0, Math.floor(scroll / ITEM_HEIGHT_PX) - OVERSCAN);
-    const visibleCount = Math.ceil(VIEWPORT_HEIGHT_PX / ITEM_HEIGHT_PX) + OVERSCAN * 2;
+    const visibleCount = Math.ceil(viewportHeight / ITEM_HEIGHT_PX) + OVERSCAN * 2;
     const end = Math.min(entries.length, start + visibleCount);
     return {
       items: entries.slice(start, end),
@@ -78,7 +76,24 @@ export class LiveLogPanelComponent implements AfterViewInit {
 
   ngAfterViewInit(): void {
     this.viewReady = true;
+    this.observeViewport();
     this.scrollToBottom();
+  }
+
+  ngOnDestroy(): void {
+    this.resizeObserver?.disconnect();
+  }
+
+  private observeViewport(): void {
+    const el = this.viewport?.nativeElement;
+    if (!el) return;
+    const sync = () => {
+      const h = el.clientHeight;
+      if (h > 0) this.viewportHeightPx.set(h);
+    };
+    sync();
+    this.resizeObserver = new ResizeObserver(sync);
+    this.resizeObserver.observe(el);
   }
 
   protected onScroll(event: Event): void {

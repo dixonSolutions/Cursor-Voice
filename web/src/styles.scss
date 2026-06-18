@@ -9,12 +9,16 @@ body {
 body {
   min-height: 100dvh;
   touch-action: manipulation;
+  -webkit-text-size-adjust: 100%;
+  font-size: 16px;
 }
 
 .cv-shell {
   display: flex;
   flex-direction: column;
   min-height: 100dvh;
+  padding-left: env(safe-area-inset-left, 0);
+  padding-right: env(safe-area-inset-right, 0);
 }
 
 .cv-topbar {
@@ -30,17 +34,30 @@ body {
   max-width: 100%;
 }
 
+.cv-tabbar {
+  display: none;
+}
+
 .cv-main {
   flex: 1;
   width: 100%;
   max-width: 36rem;
   margin: 0 auto;
   padding: 1rem;
+  padding-left: max(1rem, env(safe-area-inset-left, 0));
+  padding-right: max(1rem, env(safe-area-inset-right, 0));
   box-sizing: border-box;
+  min-width: 0;
+  overflow-x: hidden;
 }
 
 .cv-main--wide {
   max-width: 44rem;
+}
+
+.cv-main--fullscreen {
+  max-width: 100%;
+  padding: 0;
 }
 
 .cv-config {
@@ -120,6 +137,7 @@ body {
   z-index: 1200;
   background: var(--p-surface-ground, #0f172a);
   border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+  padding-top: env(safe-area-inset-top, 0);
 }
 
 .cv-topbar {
@@ -127,8 +145,23 @@ body {
 }
 
 .cv-live-log-panel {
-  border-top: 1px solid rgba(59, 130, 246, 0.14);
+  position: relative;
+  z-index: 2;
+  flex-shrink: 0;
+  margin-bottom: 0.75rem;
+  border: 1px solid rgba(59, 130, 246, 0.14);
+  border-radius: 0.5rem;
   background: rgba(15, 23, 42, 0.92);
+}
+
+.cv-main--fullscreen .cv-live-log-panel {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  margin-bottom: 0;
+  border-radius: 0;
+  border-left: none;
+  border-right: none;
 }
 
 .cv-live-log-panel-header {
@@ -158,6 +191,7 @@ body {
   overflow-y: auto;
   overflow-x: hidden;
   overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .cv-live-log-empty {
@@ -248,13 +282,14 @@ body {
 }
 
 .cv-voice-orb-stage--session {
-  position: fixed;
-  inset: 0;
-  z-index: 1100;
+  position: relative;
+  z-index: 1;
+  flex: 1;
   margin: 0;
-  padding: 0;
+  padding: 1.5rem 1rem 2rem;
   gap: 1rem;
   justify-content: center;
+  min-height: min(70dvh, calc(100dvh - 10rem));
   border: none;
   border-radius: 0;
   background: radial-gradient(
@@ -263,6 +298,12 @@ body {
     rgba(15, 23, 42, 0.88) 50%,
     rgba(2, 6, 23, 1) 100%
   );
+}
+
+.cv-main--fullscreen p-fluid {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
 }
 
 .cv-voice-orb-stage--session .cv-voice-orb-caption {
@@ -275,52 +316,19 @@ body {
   padding: 0 1.25rem 1.5rem;
 }
 
-.cv-voice-tool-activity {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.25rem;
-  max-width: min(92vw, 24rem);
-  padding: 0.5rem 0.875rem;
-  margin-bottom: 0.25rem;
-  border-radius: 0.75rem;
-  background: rgba(15, 23, 42, 0.72);
-  border: 1px solid rgba(96, 165, 250, 0.22);
-  text-align: center;
-}
-
-.cv-voice-tool-activity--active {
-  border-color: rgba(56, 189, 248, 0.45);
-  box-shadow: 0 0 24px rgba(59, 130, 246, 0.15);
-}
-
-.cv-voice-tool-activity--error {
-  border-color: rgba(248, 113, 113, 0.45);
-}
-
-.cv-voice-tool-activity-kicker {
-  font-size: 0.6875rem;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  opacity: 0.65;
-  color: var(--p-surface-200, #e2e8f0);
-}
-
-.cv-voice-tool-activity-label {
-  font-size: 0.875rem;
-  line-height: 1.35;
-  color: var(--p-surface-0, #f8fafc);
-}
-
 .cv-voice-orb-btn {
   appearance: none;
   border: none;
   background: transparent;
-  padding: 0;
+  padding: 0.5rem;
   cursor: pointer;
   border-radius: 50%;
   line-height: 0;
+  min-width: 44px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   transition: transform 0.15s ease;
 
   &:not(:disabled):active {
@@ -343,10 +351,6 @@ body {
   font-weight: 600;
   letter-spacing: 0.02em;
   color: var(--p-surface-0, #f8fafc);
-}
-
-.cv-voice-orb-caption--active {
-  color: #bbf7d0;
 }
 
 .cv-voice-orb-hint {
@@ -384,4 +388,220 @@ body {
   font-size: 0.75rem;
   opacity: 0.7;
   font-variant-numeric: tabular-nums;
+}
+
+/* ── Voice tab layout ─────────────────────────────────────────── */
+
+.cv-voice-fluid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.cv-voice-setup {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 0.65rem;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.cv-voice-setup-summary {
+  padding: 0.75rem 1rem;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+
+  &::-webkit-details-marker {
+    display: none;
+  }
+
+  &::before {
+    content: '▸';
+    margin-right: 0.5rem;
+    opacity: 0.65;
+    transition: transform 0.15s ease;
+  }
+}
+
+.cv-voice-setup[open] .cv-voice-setup-summary::before {
+  transform: rotate(90deg);
+}
+
+.cv-voice-setup-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0 0.75rem 0.75rem;
+}
+
+.cv-voice-card .p-card-body {
+  padding: 1rem;
+}
+
+.cv-voice-mute-btn {
+  min-height: 44px;
+}
+
+/* ── Mobile (phone) ───────────────────────────────────────────── */
+
+@media (max-width: 640px) {
+  .cv-tabnav--top {
+    display: none;
+  }
+
+  .cv-tabbar {
+    display: flex;
+    position: sticky;
+    bottom: 0;
+    z-index: 1200;
+    flex-shrink: 0;
+    align-items: stretch;
+    justify-content: space-around;
+    gap: 0.25rem;
+    padding: 0.35rem 0.5rem;
+    padding-bottom: max(0.35rem, env(safe-area-inset-bottom, 0));
+    background: var(--p-surface-ground, #0f172a);
+    border-top: 1px solid rgba(148, 163, 184, 0.12);
+  }
+
+  .cv-tabbar-item {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.2rem;
+    min-height: 52px;
+    min-width: 0;
+    padding: 0.35rem 0.25rem;
+    border: none;
+    border-radius: 0.65rem;
+    background: transparent;
+    color: var(--p-text-muted-color, #94a3b8);
+    font-size: 0.6875rem;
+    font-weight: 500;
+    line-height: 1.2;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+
+    i {
+      font-size: 1.125rem;
+    }
+
+    &:active {
+      background: rgba(59, 130, 246, 0.12);
+    }
+  }
+
+  .cv-tabbar-item--active {
+    color: var(--p-primary-color, #60a5fa);
+    background: rgba(59, 130, 246, 0.1);
+  }
+
+  .cv-main {
+    padding: 0.75rem;
+    padding-bottom: 0.5rem;
+  }
+
+  .cv-main--fullscreen {
+    padding: 0;
+  }
+
+  .cv-brand-tag {
+    display: none;
+  }
+
+  .cv-status-tag {
+    font-size: 0.75rem;
+  }
+
+  .cv-voice-card .p-card-header {
+    padding: 0.75rem 1rem 0;
+    font-size: 1rem;
+  }
+
+  .cv-voice-card .p-card-body {
+    padding: 0.75rem;
+  }
+
+  .cv-live-log-panel {
+    margin-bottom: 0.5rem;
+    border-radius: 0.65rem;
+  }
+
+  .cv-live-log-viewport {
+    height: min(28vh, 10rem);
+  }
+
+  .cv-live-log-viewport:has(.cv-live-log-empty) {
+    height: 4.5rem;
+  }
+
+  .cv-main--fullscreen .cv-live-log-viewport {
+    height: min(36vh, 14rem);
+  }
+
+  .cv-live-log-panel-header {
+    padding: 0.5rem 0.75rem;
+    min-height: 44px;
+  }
+
+  .cv-live-log-panel-actions .p-button {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  .cv-live-log-row {
+    grid-template-columns: 3.75rem 3rem 1fr;
+    height: 32px;
+    line-height: 32px;
+    font-size: 0.8125rem;
+    padding: 0 0.65rem;
+  }
+
+  .cv-voice-orb-stage {
+    margin: 0;
+    padding: 0.75rem 0.75rem 0.5rem;
+  }
+
+  .cv-voice-orb-stage:not(.cv-voice-orb-stage--session) {
+    padding-top: 0.25rem;
+  }
+
+  .cv-voice-orb-stage--session {
+    min-height: min(58dvh, calc(100dvh - 14rem));
+    padding: 0.75rem 0.75rem max(1rem, env(safe-area-inset-bottom, 0));
+  }
+
+  .cv-voice-orb-hint {
+    font-size: 0.875rem;
+    line-height: 1.5;
+    padding: 0 0.75rem;
+  }
+
+  .cv-voice-summary-hint {
+    font-size: 0.875rem;
+  }
+
+  .cv-config-json {
+    min-height: 14rem;
+    font-size: 0.875rem;
+  }
+
+  .cv-config-json-actions .p-button,
+  .cv-config-toolbar .p-button,
+  .cv-config-sections .p-button {
+    min-height: 44px;
+  }
+
+  .p-dialog {
+    max-width: calc(100vw - 1.5rem) !important;
+  }
 }

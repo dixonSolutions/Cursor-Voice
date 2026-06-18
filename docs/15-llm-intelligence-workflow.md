@@ -34,7 +34,6 @@ iPhone PWA (WebKit STT/TTS or Amazon fallback)
           "region": "us-east-1",
           "maxTokens": 4096
         },
-        "systemPrompts": ["prompts/llm-intelligence/systemprompts.json"],
         "memory": {
           "maxTurns": 10,
           "keepTurns": 4,
@@ -62,7 +61,6 @@ iPhone PWA (WebKit STT/TTS or Amazon fallback)
 | `workflow.default` | `cursor_native` or `llm_intelligence` |
 | `llmIntelligence.llm.model` | Bedrock Converse model (Claude 4 needs `us.anthropic.…` prefix) |
 | `llmIntelligence.llm.region` | AWS region for Bedrock |
-| `llmIntelligence.systemPrompts` | Manifest under `prompts/llm-intelligence/` |
 | `llmIntelligence.memory.*` | Sliding window + summarisation |
 | `llmIntelligence.audio.*` | Polly/Transcribe preferences |
 

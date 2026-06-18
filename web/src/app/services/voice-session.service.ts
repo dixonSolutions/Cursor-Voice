@@ -259,10 +259,7 @@ export class VoiceSessionService {
       onUserTranscript: (text) => this.addEntry(text, 'user'),
       onAssistantTranscript: (text) => {
         this.addEntry(text, 'assistant');
-        const workflow = this.bridge.settings()?.workflow.default ?? 'cursor_native';
-        if (workflow === 'llm_intelligence') {
-          scheduleTtsFallback(text, () => this._speaking());
-        }
+        scheduleTtsFallback(text, () => this._speaking());
       },
       onSpeaking: (speaking) => {
         if (speaking) cancelTtsFallback();

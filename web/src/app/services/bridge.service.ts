@@ -1,6 +1,5 @@
 import { Injectable, signal } from '@angular/core';
 import { Subject } from 'rxjs';
-
 export type WsStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
 export type WorkflowId = 'cursor_native' | 'llm_intelligence';
@@ -65,6 +64,41 @@ export interface NarrationEvent {
   kind?: string;
 }
 
+// ── Approval push types ────────────────────────────────────────────────────
+
+export type InputType = 'yesno' | 'choice' | 'freetext';
+
+export interface UserInputRequest {
+  kind: 'user_input';
+  request_id: string;
+  question: string;
+  input_type: InputType;
+  options?: string[];
+}
+
+export interface PlanApprovalRequest {
+  kind: 'plan_approval';
+  request_id: string;
+  title: string;
+  steps: string[];
+  estimated_impact?: string;
+}
+
+export type ApprovalRequest = UserInputRequest | PlanApprovalRequest;
+
+export interface UserInputResponse {
+  kind: 'user_input';
+  answer: string;
+}
+
+export interface PlanApprovalResponse {
+  kind: 'plan_approval';
+  decision: 'approved' | 'rejected' | 'modified';
+  notes?: string;
+}
+
+export type ApprovalResponse = UserInputResponse | PlanApprovalResponse;
+
 interface PendingCall {
   resolve: (value: unknown) => void;
   reject: (reason: Error) => void;
@@ -97,6 +131,14 @@ export class BridgeService {
 
   /** Emits when the bridge pushes a narration event. AppComponent routes to voice session. */
   readonly narration$ = new Subject<NarrationEvent>();
+
+  // ── Approval push observable ───────────────────────────────────────────
+
+  /** Emits when the bridge pushes a user_input_request or plan_approval_request. */
+  readonly approvalRequest$ = new Subject<ApprovalRequest>();
+
+  /** The currently pending approval request, if any (shown in ApprovalPanelComponent). */
+  readonly pendingApproval = signal<ApprovalRequest | null>(null);
 
   // ── Private ────────────────────────────────────────────────────────────
 
@@ -408,6 +450,21 @@ export class BridgeService {
     }
   }
 
+  /**
+   * Send the user's answer back to the bridge so the blocked MCP tool call can resolve.
+   * Called by ApprovalPanelComponent when the user taps approve / answer.
+   */
+  sendApprovalResponse(request_id: string, response: ApprovalResponse): void {
+    if (this._ws?.readyState === WebSocket.OPEN) {
+      this._ws.send(JSON.stringify({ type: 'approval_response', request_id, response }));
+    }
+    // Clear the pending signal immediately so the UI dismisses without waiting for ack.
+    const current = this.pendingApproval();
+    if (current?.request_id === request_id) {
+      this.pendingApproval.set(null);
+    }
+  }
+
   // ── Private ────────────────────────────────────────────────────────────
 
   private _handleWsMessage(raw: string): void {
@@ -432,6 +489,32 @@ export class BridgeService {
         if (typeof text === 'string' && text) {
           this.narration$.next({ text, kind });
         }
+        break;
+      }
+
+      case 'user_input_request': {
+        const req: UserInputRequest = {
+          kind: 'user_input',
+          request_id: msg['request_id'] as string,
+          question: msg['question'] as string,
+          input_type: msg['input_type'] as InputType,
+          options: Array.isArray(msg['options']) ? (msg['options'] as string[]) : undefined,
+        };
+        this.approvalRequest$.next(req);
+        this.pendingApproval.set(req);
+        break;
+      }
+
+      case 'plan_approval_request': {
+        const req: PlanApprovalRequest = {
+          kind: 'plan_approval',
+          request_id: msg['request_id'] as string,
+          title: msg['title'] as string,
+          steps: msg['steps'] as string[],
+          estimated_impact: typeof msg['estimated_impact'] === 'string' ? msg['estimated_impact'] : undefined,
+        };
+        this.approvalRequest$.next(req);
+        this.pendingApproval.set(req);
         break;
       }
 

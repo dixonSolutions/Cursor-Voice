@@ -1,69 +1,12 @@
-<p-card header="Voice">
-  <p-fluid>
-    <div class="cv-voice-project-row">
-      <p-iftalabel class="cv-voice-project-col">
-        <p-select
-          inputId="project-select"
-          [options]="projectOptions()"
-          [(ngModel)]="selectedProject"
-          optionLabel="label"
-          optionValue="value"
-          placeholder="Select a project…"
-          [disabled]="projectOptions().length === 0 || !isBridgeConnected()"
-          (onChange)="onProjectChange(selectedProject)"
-          [fluid]="true" />
-        <label for="project-select">Project</label>
-      </p-iftalabel>
-
-      <p-iftalabel class="cv-voice-session-col">
-        <p-select
-          inputId="session-select"
-          [options]="sessionOptions()"
-          [(ngModel)]="selectedSessionId"
-          optionLabel="label"
-          optionValue="value"
-          placeholder="Cursor session…"
-          [disabled]="!selectedProject || !isBridgeConnected() || loadingSessions()"
-          [loading]="loadingSessions()"
-          [filter]="sessionOptions().length > 6"
-          (ngModelChange)="onSessionChange($event)"
-          [fluid]="true" />
-        <label for="session-select">Cursor session</label>
-      </p-iftalabel>
-    </div>
-
-    <p-message severity="secondary" variant="simple" [text]="sessionHint()" />
-
-    @if (workflowLabel(); as label) {
-      <div class="cv-voice-summary">
-        <span>Workflow</span>
-        <p-tag [value]="label" severity="info" />
-        @if (audioBackendLabel(); as audio) {
-          <p-tag [value]="audio" severity="secondary" />
-        }
-      </div>
-      <p-message severity="secondary" variant="simple" [text]="workflowHint()" />
-    } @else {
-      <p-message
-        severity="warn"
-        variant="simple"
-        text="Bridge settings not loaded. Check Connection under Config tab." />
-    }
+<p-card header="Voice" styleClass="cv-voice-card">
+  <p-fluid class="cv-voice-fluid">
+    <cv-live-log-panel />
 
     <div
       class="cv-voice-orb-stage"
       [class.cv-voice-orb-stage--session]="
         voiceSession.conversationActive() || voiceSession.sessionConnecting()
       ">
-      @if (voiceSession.toolActivity(); as tool) {
-        <div
-          class="cv-voice-tool-activity"
-          [class.cv-voice-tool-activity--active]="tool.phase === 'start'"
-          [class.cv-voice-tool-activity--error]="tool.phase === 'error'">
-          <span class="cv-voice-tool-activity-kicker">Live</span>
-          <span class="cv-voice-tool-activity-label">{{ tool.label }}</span>
-        </div>
-      }
       <button
         type="button"
         class="cv-voice-orb-btn"
@@ -80,34 +23,84 @@
             voiceSession.conversationActive() || voiceSession.sessionConnecting()
           " />
       </button>
-      @if (orbActiveStatus(); as activeStatus) {
-        <p class="cv-voice-orb-caption cv-voice-orb-caption--active">{{ activeStatus }}</p>
-      } @else if (showOrbCaption()) {
-        <p class="cv-voice-orb-caption">{{ orbStateLabel() }}</p>
-      }
-      @if (wakeHint(); as hint) {
-        <p class="cv-voice-orb-hint">{{ hint }}</p>
+      @if (!isLiveSession()) {
+        @if (showOrbCaption()) {
+          <p class="cv-voice-orb-caption">{{ orbStateLabel() }}</p>
+        }
+        @if (wakeHint(); as hint) {
+          <p class="cv-voice-orb-hint">{{ hint }}</p>
+        }
       }
       @if (voiceSession.conversationActive()) {
         <p-button
+          class="cv-voice-mute-btn"
           [icon]="voiceSession.micMuted() ? 'pi pi-volume-off' : 'pi pi-microphone'"
           [label]="voiceSession.micMuted() ? 'Unmute' : 'Mute'"
           [severity]="voiceSession.micMuted() ? 'warn' : 'secondary'"
           [outlined]="true"
-          size="small"
           (onClick)="toggleMicMute()" />
       }
     </div>
 
-    @if (showTextInput()) {
-      <p-fieldset legend="Type to test">
-        <p-fluid>
-          @if (!voiceSession.conversationActive()) {
+    @if (!isLiveSession()) {
+      <details class="cv-voice-setup">
+        <summary class="cv-voice-setup-summary">Project &amp; session</summary>
+        <div class="cv-voice-setup-body">
+          <div class="cv-voice-project-row">
+            <p-iftalabel class="cv-voice-project-col">
+              <p-select
+                inputId="project-select"
+                [options]="projectOptions()"
+                [(ngModel)]="selectedProject"
+                optionLabel="label"
+                optionValue="value"
+                placeholder="Select a project…"
+                [disabled]="projectOptions().length === 0 || !isBridgeConnected()"
+                (onChange)="onProjectChange(selectedProject)"
+                [fluid]="true" />
+              <label for="project-select">Project</label>
+            </p-iftalabel>
+
+            <p-iftalabel class="cv-voice-session-col">
+              <p-select
+                inputId="session-select"
+                [options]="sessionOptions()"
+                [(ngModel)]="selectedSessionId"
+                optionLabel="label"
+                optionValue="value"
+                placeholder="Cursor session…"
+                [disabled]="!selectedProject || !isBridgeConnected() || loadingSessions()"
+                [loading]="loadingSessions()"
+                [filter]="sessionOptions().length > 6"
+                (ngModelChange)="onSessionChange($event)"
+                [fluid]="true" />
+              <label for="session-select">Cursor session</label>
+            </p-iftalabel>
+          </div>
+
+          <p-message severity="secondary" variant="simple" [text]="sessionHint()" />
+
+          @if (workflowLabel(); as label) {
+            <div class="cv-voice-summary">
+              <span>Workflow</span>
+              <p-tag [value]="label" severity="info" />
+              @if (audioBackendLabel(); as audio) {
+                <p-tag [value]="audio" severity="secondary" />
+              }
+            </div>
+          } @else {
             <p-message
-              severity="info"
+              severity="warn"
               variant="simple"
-              text="Send starts a session automatically — no wake phrase needed for typed messages." />
+              text="Bridge settings not loaded. Check Connection under Config tab." />
           }
+        </div>
+      </details>
+    }
+
+    @if (showTextInput()) {
+      <p-fieldset legend="Type to test" styleClass="cv-voice-type-fieldset">
+        <p-fluid>
           <p-iftalabel>
             <input
               pInputText
@@ -125,10 +118,7 @@
         </p-fluid>
       </p-fieldset>
     }
-
-    <p-message
-      severity="secondary"
-      variant="simple"
-      text="Wake phrase, VAD, and submit settings live on the Config tab. Changes apply the next time you tap the orb." />
   </p-fluid>
 </p-card>
+
+<cv-approval-panel />

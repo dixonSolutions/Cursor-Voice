@@ -36,38 +36,39 @@
 
 @if (bridge.hasCredentials()) {
   <div class="cv-shell">
-    <header class="cv-shell-header">
-      <p-toolbar class="cv-topbar">
-        <ng-template #start>
-          <p-avatar icon="pi pi-microphone" shape="circle" />
-          <p-tag value="Cursor Voice" severity="secondary" />
-        </ng-template>
+    @if (!isLiveVoice()) {
+      <header class="cv-shell-header">
+        <p-toolbar class="cv-topbar">
+          <ng-template #start>
+            <p-avatar icon="pi pi-microphone" shape="circle" />
+            <p-tag value="Cursor Voice" severity="secondary" class="cv-brand-tag" />
+          </ng-template>
 
-        <ng-template #center>
-          <nav class="cv-tabnav" aria-label="Main">
-            @for (tab of visibleTabs(); track tab.id) {
-              <p-button
-                [label]="tab.label"
-                [icon]="tab.icon"
-                [text]="!isActiveTab(tab.id)"
-                [severity]="isActiveTab(tab.id) ? 'primary' : 'secondary'"
-                (onClick)="setTab(tab.id)" />
-            }
-          </nav>
-        </ng-template>
+          <ng-template #center>
+            <nav class="cv-tabnav cv-tabnav--top" aria-label="Main">
+              @for (tab of visibleTabs(); track tab.id) {
+                <p-button
+                  [label]="tab.label"
+                  [icon]="tab.icon"
+                  [text]="!isActiveTab(tab.id)"
+                  [severity]="isActiveTab(tab.id) ? 'primary' : 'secondary'"
+                  (onClick)="setTab(tab.id)" />
+              }
+            </nav>
+          </ng-template>
 
-        <ng-template #end>
-          <p-tag
-            [value]="statusLabel()"
-            [severity]="statusSeverity()"
-            [icon]="statusIcon()" />
-        </ng-template>
-      </p-toolbar>
+          <ng-template #end>
+            <p-tag
+              [value]="statusLabel()"
+              [severity]="statusSeverity()"
+              [icon]="statusIcon()"
+              class="cv-status-tag" />
+          </ng-template>
+        </p-toolbar>
+      </header>
+    }
 
-      <cv-live-log-panel />
-    </header>
-
-    <main class="cv-main" [class.cv-main--wide]="activeTab() === 'config'">
+    <main class="cv-main" [class.cv-main--wide]="activeTab() === 'config'" [class.cv-main--fullscreen]="isLiveVoice()">
       @switch (activeTab()) {
         @case ('voice') {
           <cv-voice-tab />
@@ -83,5 +84,21 @@
         }
       }
     </main>
+
+    @if (!isLiveVoice()) {
+      <nav class="cv-tabbar" aria-label="Main navigation">
+        @for (tab of visibleTabs(); track tab.id) {
+          <button
+            type="button"
+            class="cv-tabbar-item"
+            [class.cv-tabbar-item--active]="isActiveTab(tab.id)"
+            [attr.aria-current]="isActiveTab(tab.id) ? 'page' : null"
+            (click)="setTab(tab.id)">
+            <i [class]="tab.icon" aria-hidden="true"></i>
+            <span>{{ tab.label }}</span>
+          </button>
+        }
+      </nav>
+    }
   </div>
 }

@@ -17,6 +17,18 @@ import { voiceTurnQueue } from './turnQueue.js';
 
 const log = childLogger('mcp:server:voiceTools');
 
+/** Tracks whether the current voice turn produced any speak() calls. */
+let spokeThisTurn = false;
+
+/** Reset at the start of each user turn (before the agent responds). */
+export function resetTurnSpeakTracking(): void {
+  spokeThisTurn = false;
+}
+
+export function hadSpeakThisTurn(): boolean {
+  return spokeThisTurn;
+}
+
 // ── Session broadcast registry ────────────────────────────────────────────
 //
 // Intelligence WebSocket connections register here so speak() can push audio.
@@ -103,6 +115,8 @@ export function broadcastVoiceAgentStatus(payload: VoiceAgentStatusPayload): voi
 
 export interface SpeakArgs {
   text: string;
+  /** When false, plays TTS but does not count as the agent having spoken this turn. */
+  countTowardTurn?: boolean;
 }
 
 export interface SpeakResult {
@@ -120,6 +134,9 @@ export function handleSpeak(args: SpeakArgs): SpeakResult {
     return { ok: false, sessions: 0 };
   }
 
+  if (args.countTowardTurn !== false) {
+    spokeThisTurn = true;
+  }
   log.info({ text: text.slice(0, 80), sessions: activeSessions.size }, 'speak called');
   // eslint-disable-next-line no-console
   console.log(`[voice] ◀ speak: "${text.slice(0, 120)}${text.length > 120 ? '…' : ''}"`);
@@ -144,6 +161,7 @@ export function handleDone(): DoneResult {
 
 /** Re-arm PWA mic — after done() or when the voice agent process exits. */
 export function broadcastVoiceTurnIdle(): void {
+  spokeThisTurn = false;
   log.info('voice turn idle — re-arming mic');
   // eslint-disable-next-line no-console
   console.log('[voice] ✓ done — mic re-arming, waiting for next wake phrase');

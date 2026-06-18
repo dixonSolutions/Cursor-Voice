@@ -20,9 +20,6 @@
           "region": "us-east-1",
           "maxTokens": 4096
         },
-        "systemPrompts": [
-          "prompts/llm-intelligence/systemprompts.json"
-        ],
         "memory": {
           "maxTurns": 10,
           "keepTurns": 4,

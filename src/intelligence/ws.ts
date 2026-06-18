@@ -33,6 +33,8 @@ import { parseTtsInterrupt } from '../voice/ttsInterrupt.js';
 import {
   registerTurnCompleteHook,
   registerVoiceSession,
+  handleSpeak,
+  resetTurnSpeakTracking,
 } from '../mcp/server/voiceToolHandlers.js';
 import {
   spawnVoiceAgent,
@@ -202,6 +204,9 @@ export function registerIntelligenceWebSocket(app: FastifyInstance): void {
             intelSession.busy = true;
             send(socket, { type: 'thinking', value: true });
 
+            resetTurnSpeakTracking();
+            handleSpeak({ text: 'Got it.', countTowardTurn: false });
+
             const ttsInterrupt = parseTtsInterrupt(msg['tts_interrupt']);
             const isInterrupt = Boolean(msg['is_interrupt']) || Boolean(ttsInterrupt);
             voiceTurnQueue.enqueue(text, { isInterrupt, ttsInterrupt });
@@ -223,7 +228,7 @@ export function registerIntelligenceWebSocket(app: FastifyInstance): void {
 
               project = refreshProjectForVoice(project);
               try {
-                spawnVoiceAgent(project, bridgeSession);
+                spawnVoiceAgent(project, bridgeSession, text);
               } catch (err) {
                 const message = err instanceof Error ? err.message : String(err);
                 log.error({ err, sessionKey }, 'voice agent spawn failed');
@@ -237,25 +242,11 @@ export function registerIntelligenceWebSocket(app: FastifyInstance): void {
             }
 
             const va = getActiveVoiceAgent();
-            const sessionLabel = va?.sessionId
-              ? va.sessionId.slice(0, 8)
-              : project?.resumeId?.slice(0, 8) ?? 'new';
-            const detail = va
-              ? `Turn queued — agent run ${va.runId.slice(0, 8)}… pid ${va.pid} session ${sessionLabel}…`
-              : 'Turn queued — starting agent…';
 
             log.info(
               { sessionKey, runId: va?.runId, pid: va?.pid, sessionId: va?.sessionId },
               'cursor_native turn queued',
             );
-
-            send(socket, {
-              type: 'tool_activity',
-              tool: 'next_voice_turn',
-              phase: 'start',
-              label: 'Waiting for Cursor',
-              detail,
-            });
             return;
           }
 

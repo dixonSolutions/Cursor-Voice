@@ -20,6 +20,8 @@ import {
 import { ToastService } from '../../services/toast.service';
 import { VoiceProvidersService } from '../../services/voice-providers.service';
 import { VoiceSessionService } from '../../services/voice-session.service';
+import { ApprovalPanelComponent } from '../approval-panel/approval-panel.component';
+import { LiveLogPanelComponent } from '../live-log-panel/live-log-panel.component';
 import { VoiceOrbComponent, type OrbColorMode } from '../voice-orb/voice-orb.component';
 
 interface ProjectOption {
@@ -48,7 +50,9 @@ interface SessionOption {
     Message,
     Select,
     Tag,
+    ApprovalPanelComponent,
     VoiceOrbComponent,
+    LiveLogPanelComponent,
   ],
   templateUrl: './voice-tab.component.html',
 })
@@ -85,26 +89,32 @@ export class VoiceTabComponent {
     () => this.voiceProviders.data()?.turnSubmit.vadEnabled !== false,
   );
 
+  protected readonly cancelPhrase = computed(
+    () => this.voiceProviders.data()?.wakeWords.cancel?.trim() || 'cancel',
+  );
+
   protected readonly workflowHint = computed(() => {
     const start = this.activationPhrase();
     const end = this.submitPhrase();
+    const cancel = this.cancelPhrase();
     const silence = this.silenceSubmitLabel();
+    const cancelNote = `Say "${cancel}" to abort a turn without sending.`;
     if (this.vadEnabledEffective()) {
       if (this.isCursorNative()) {
         return (
           `Cursor-first voice: say "${start}" to activate, then pause ${silence} to send. ` +
-          'The bridge auto-starts a Cursor agent when you speak — session id appears in logs.'
+          `${cancelNote} The bridge auto-starts a Cursor agent when you speak — session id appears in logs.`
         );
       }
-      return `Say "${start}" to activate. After that, Silero VAD sends your turn when you pause ${silence}. Vosk detects the wake phrase offline. Type below to test without a mic.`;
+      return `Say "${start}" to activate. After that, Silero VAD sends your turn when you pause ${silence}. ${cancelNote} Vosk detects the wake phrase offline. Type below to test without a mic.`;
     }
     if (this.isCursorNative()) {
       return (
         `Cursor-first voice: say "${start}" to activate, then pause ${silence} or say "${end}" to send. ` +
-        'The bridge auto-starts a Cursor agent when you speak — session id appears in logs.'
+        `${cancelNote} The bridge auto-starts a Cursor agent when you speak — session id appears in logs.`
       );
     }
-    return `Say "${start}" to activate. After that, pause ${silence} or say "${end}" to send. Vosk detects start/end offline. Type below to test without a mic.`;
+    return `Say "${start}" to activate. After that, pause ${silence} or say "${end}" to send. ${cancelNote} Vosk detects start/end offline. Type below to test without a mic.`;
   });
 
   protected readonly sessionHint = computed(() => {
@@ -148,6 +158,14 @@ export class VoiceTabComponent {
 
   protected readonly showTextInput = computed(
     () => this.isBridgeConnected() && this.isCascadeWorkflow(),
+  );
+
+  /** Hide project/setup chrome while a voice session is starting or live. */
+  protected readonly isLiveSession = computed(
+    () =>
+      this.voiceSession.sessionPrepActive() ||
+      this.voiceSession.sessionConnecting() ||
+      this.voiceSession.conversationActive(),
   );
 
   protected readonly projectOptions = computed<ProjectOption[]>(() =>
@@ -209,79 +227,24 @@ export class VoiceTabComponent {
     return 'red';
   });
 
-  protected readonly orbActiveStatus = computed((): string | null => {
-    if (this.voiceSession.submittingTurn()) return 'Submitting…';
-    const agent = this.voiceSession.agentStatus();
-    if (agent && (agent.state === 'starting' || agent.state === 'running')) {
-      const sid = agent.sessionId ? `${agent.sessionId.slice(0, 8)}…` : '…';
-      return `Agent pid ${agent.pid} · session ${sid}`;
-    }
-    if (!this.voiceSession.voiceActivated()) {
-      if (this.voiceSession.conversationActive()) {
-        const start = this.activationPhrase();
-        return `Say "${start}" to activate`;
-      }
-      return null;
-    }
-    if (this.voiceSession.micMuted()) return 'Muted';
-    const tool = this.voiceSession.toolActivity();
-    if (tool?.phase === 'start') return tool.label;
-    if (this.appState.state() === 'working') return 'Waiting for Cursor…';
-    if (this.voiceSession.speaking()) return 'Replying…';
-    const levels = this.voiceSession.audioSpectrum();
-    if (levels.mic >= 0.028) return 'Speaking…';
-    if (this.voiceSession.vadListening()) {
-      return 'Pause when finished — VAD will send';
-    }
-    if (this.voiceSession.endPhraseArmed()) {
-      const end = this.submitPhrase();
-      return `Say "${end}" to send`;
-    }
-    return 'Ready — speak your request';
-  });
-
   protected readonly showOrbCaption = computed(
-    () =>
-      this.orbColorMode() === 'blue' ||
-      this.voiceSession.submittingTurn() ||
-      this.orbActiveStatus() !== null,
+    () => !this.isLiveSession() && this.orbColorMode() === 'blue',
   );
 
   protected readonly orbStateLabel = computed(() => {
-    const levels = this.voiceSession.audioSpectrum();
-    if (levels.active >= 0.028) {
-      return levels.out >= levels.mic ? 'Speaking' : 'Listening';
-    }
     if (this.voiceSession.sessionConnecting()) return 'Connecting…';
     if (!this.voiceSession.conversationActive()) return 'Tap to start';
-    if (this.appState.state() === 'working') return 'Thinking';
-    if (this.appState.state() === 'listening') return 'Ready — speak';
-    return 'Mic on — say activation phrase';
+    return 'Tap to start';
   });
 
   protected readonly pttAriaLabel = computed(() => this.appState.pttLabel());
 
   protected readonly wakeHint = computed(() => {
-    if (this.orbColorMode() === 'red') return null;
+    if (this.isLiveSession()) return null;
     const start = this.activationPhrase();
-    const st = this.appState.state();
     const backends = this.voiceSession.audioBackends();
     if (backends?.stt === 'text_only') {
       return 'No mic STT — type below. Mic path requires WebKit or Amazon Transcribe.';
-    }
-    if (st === 'inactive' && this.voiceSession.conversationActive()) {
-      return `Say "${start}" to activate — other speech is ignored. Or type below. Tap the orb to hang up.`;
-    }
-    if (st === 'working') {
-      return 'Cursor is working — mic pauses while Claude thinks or speaks. Type below anytime.';
-    }
-    if (st === 'listening' && this.voiceSession.conversationActive()) {
-      const end = this.submitPhrase();
-      const silence = this.silenceSubmitLabel();
-      if (this.vadEnabledEffective()) {
-        return `Active — speak, then pause ${silence} to send. Tap the orb to hang up.`;
-      }
-      return `Active — speak, pause ${silence}, or say "${end}" to send. Tap the orb to hang up.`;
     }
     return `Tap the orb — then say "${start}" to activate. Background noise is filtered.`;
   });

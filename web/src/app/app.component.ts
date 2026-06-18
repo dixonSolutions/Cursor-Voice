@@ -15,7 +15,6 @@ import { Toast } from 'primeng/toast';
 import { Toolbar } from 'primeng/toolbar';
 
 import { ConfigTabComponent } from './components/config-tab/config-tab.component';
-import { LiveLogPanelComponent } from './components/live-log-panel/live-log-panel.component';
 import { LogsTabComponent } from './components/logs-tab/logs-tab.component';
 import { VoiceTabComponent } from './components/voice-tab/voice-tab.component';
 import { WakeWordTestComponent } from './components/wake-word-test/wake-word-test.component';
@@ -52,7 +51,6 @@ interface TabItem {
     Tag,
     Toast,
     Toolbar,
-    LiveLogPanelComponent,
     VoiceTabComponent,
     WakeWordTestComponent,
     ConfigTabComponent,
@@ -78,6 +76,9 @@ export class AppComponent implements OnInit, OnDestroy {
   ];
 
   protected readonly visibleTabs = computed(() => this.tabs);
+
+  /** Hide the top bar while the voice session is live (mic on / listening / working). */
+  protected readonly isLiveVoice = computed(() => this.appState.state() !== 'idle');
 
   protected readonly statusLabel = computed(() => {
     const ws = this.bridge.wsStatus();

@@ -1,12 +1,33 @@
 /**
  * System prompt assembly for the llm_intelligence orchestrator.
  *
- * Uses prompts/llm-intelligence/ manifest from config.json → settings.workflow.llmIntelligence.
+ * Prompt text is inlined here — editable prompt files under prompts/ are
+ * reserved for the cursor_native workflow only.
  */
 
 import { listProjects, getSessionState } from '../state/registry.js';
-import { getConfig } from '../config.js';
 import { getWakeWordsFromConfig } from '../voice/wakeWordsConfig.js';
+
+const INLINE_ACTIVATION_RULES = `## Activation rules
+
+- You are **inactive** until the user says **"{{WAKE_START}}"** (from config).
+- After **"{{WAKE_START}}"**, you are **active** — listen and respond until the user taps the orb to hang up.
+- While active, **always respond** if the user speaks (even while Cursor is working).
+- While **inactive**, do **not** call \`speak\` or tools. Wait silently.
+- **No spoken phrase ends the call** — only the user tapping the orb disconnects.`;
+
+const INLINE_ORCHESTRATOR_TEMPLATE = `You are the **voice orchestrator** for Cursor Voice — an intelligence-first coding assistant.
+
+The user **cannot see the screen**. You must **speak out loud** using the \`speak\` tool whenever you communicate.
+You do not know the codebase — **Cursor** (cursor-agent CLI) does. Never guess or hallucinate repo facts.
+
+**Active project:** {{ACTIVE_PROJECT}}
+
+{{ACTIVATION_RULES}}
+
+## Projects
+
+{{PROJECT_CATALOG}}`;
 
 function applyWakeWordPlaceholders(text: string, start: string): string {
   return text.replaceAll('{{WAKE_START}}', start);
@@ -42,19 +63,13 @@ function buildProjectCatalog(): string {
 
 /** Full orchestrator system prompt with placeholders resolved. */
 export function buildIntelligenceSystemPrompt(): string {
-  const { activationRules, template } = getConfig().settings.workflow.llmIntelligence.systemPrompt;
   const { start } = getWakeWordsFromConfig();
-  const activationBlock = applyWakeWordPlaceholders(activationRules, start);
+  const activationBlock = applyWakeWordPlaceholders(INLINE_ACTIVATION_RULES, start);
 
   return applyWakeWordPlaceholders(
-    template
-      .replace('{{ACTIVATION_RULES}}', activationBlock)
+    INLINE_ORCHESTRATOR_TEMPLATE.replace('{{ACTIVATION_RULES}}', activationBlock)
       .replace('{{ACTIVE_PROJECT}}', buildActiveProjectBlock())
-      .replace('{{PROJECT_CATALOG}}', catalogBlock()),
+      .replace('{{PROJECT_CATALOG}}', buildProjectCatalog()),
     start,
   );
-}
-
-function catalogBlock(): string {
-  return buildProjectCatalog();
 }

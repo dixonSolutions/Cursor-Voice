@@ -14,7 +14,12 @@ import stripAnsi from 'strip-ansi';
 import { getConfig } from '../config.js';
 import { childLogger } from '../log.js';
 import { cursorVoiceRuleBody } from '../mcp/loadCursorVoicePrompt.js';
-import { broadcastVoiceAgentStatus, broadcastVoiceTurnIdle } from '../mcp/server/voiceToolHandlers.js';
+import {
+  broadcastVoiceAgentStatus,
+  broadcastVoiceTurnIdle,
+  hadSpeakThisTurn,
+  handleSpeak,
+} from '../mcp/server/voiceToolHandlers.js';
 import {
   createVoiceAgentRun,
   updateVoiceAgentRun,
@@ -68,17 +73,71 @@ export function getActiveVoiceAgent(): Readonly<ActiveVoiceAgent> | null {
   return activeVoiceAgent;
 }
 
-function buildVoiceBootPrompt(project: Project): string {
+function buildPendingTurnBlock(pendingTurn?: string): string {
+  const text = pendingTurn?.trim();
+  if (!text) return '';
+  return (
+    `\n\nUser just spoke (also queued for next_voice_turn()):\n"${text}"\n\n` +
+    'You MUST answer via speak() — text-only replies are inaudible. Call speak() then done().'
+  );
+}
+
+function buildVoiceBootPrompt(project: Project, pendingTurn?: string): string {
+  const turnBlock = buildPendingTurnBlock(pendingTurn);
   const isResume = Boolean(project.resumeId);
   // Do NOT trim VOICE_RESUME_SUFFIX — it starts with "---" after trimming,
   // which cursor-agent CLI parses as an unknown option flag (exit code 1).
   // The leading "\n\n" keeps it from being treated as a CLI flag.
   return isResume
-    ? VOICE_RESUME_SUFFIX
-    : `${cursorVoiceRuleBody()}${VOICE_BOOT_SUFFIX}`;
+    ? `${VOICE_RESUME_SUFFIX}${turnBlock}`
+    : `${cursorVoiceRuleBody()}${VOICE_BOOT_SUFFIX}${turnBlock}`;
 }
 
-function buildVoiceAgentArgs(project: Project, session: SessionState): string[] {
+/** First sentence(s) of assistant text for TTS when speak() was never called. */
+function summarizeForSpeechFallback(text: string): string {
+  const clean = text.replace(/\s+/g, ' ').trim();
+  if (!clean) return '';
+  const sentences = clean.match(/[^.!?]+[.!?]+|[^.!?]+$/g) ?? [clean];
+  const lead = sentences.slice(0, 2).join(' ').trim();
+  const max = 320;
+  if (lead.length <= max) return lead;
+  const cut = lead.slice(0, max);
+  const lastBreak = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('! '), cut.lastIndexOf('? '));
+  return (lastBreak > max * 0.4 ? cut.slice(0, lastBreak + 1) : cut).trimEnd() + '…';
+}
+
+function extractAssistantText(event: Record<string, unknown>): string | null {
+  if (event['type'] === 'result') {
+    if (typeof event['result'] === 'string' && event['result'].trim()) {
+      return event['result'].trim();
+    }
+    const msg = event['message'];
+    if (typeof msg === 'string' && msg.trim()) return msg.trim();
+  }
+
+  if (event['type'] === 'assistant') {
+    const msg = event['message'];
+    if (
+      typeof msg === 'object' &&
+      msg !== null &&
+      'content' in msg &&
+      Array.isArray((msg as { content: unknown[] }).content)
+    ) {
+      const textPart = (msg as { content: Array<{ text?: string }> }).content.find(
+        (c) => typeof c.text === 'string' && c.text.trim(),
+      );
+      if (textPart?.text) return textPart.text.trim();
+    }
+  }
+
+  return null;
+}
+
+function buildVoiceAgentArgs(
+  project: Project,
+  session: SessionState,
+  pendingTurn?: string,
+): string[] {
   const { settings } = getConfig();
 
   const args: string[] = [
@@ -104,21 +163,25 @@ function buildVoiceAgentArgs(project: Project, session: SessionState): string[] 
     }
   }
 
-  args.push(buildVoiceBootPrompt(project));
+  args.push(buildVoiceBootPrompt(project, pendingTurn));
   return args;
 }
 
 /**
  * Spawn the conversational cursor-agent loop. At most one voice agent runs at a time.
  */
-export function spawnVoiceAgent(project: Project, session: SessionState): VoiceAgentHandle {
+export function spawnVoiceAgent(
+  project: Project,
+  session: SessionState,
+  pendingTurn?: string,
+): VoiceAgentHandle {
   if (activeVoiceAgent) {
     throw new Error(
       `Voice agent already running (pid ${activeVoiceAgent.pid}, run ${activeVoiceAgent.runId})`,
     );
   }
 
-  const args = buildVoiceAgentArgs(project, session);
+  const args = buildVoiceAgentArgs(project, session, pendingTurn);
   const runId = createVoiceAgentRun({ project: project.name });
 
   log.info(
@@ -150,6 +213,7 @@ export function spawnVoiceAgent(project: Project, session: SessionState): VoiceA
 
   const eventListeners: Array<(event: VoiceAgentEvent) => void> = [];
   let capturedSessionId: string | null = project.resumeId;
+  let lastAssistantText = '';
 
   broadcastVoiceAgentStatus({
     runId,
@@ -200,6 +264,11 @@ export function spawnVoiceAgent(project: Project, session: SessionState): VoiceA
           cb({ type: 'session_id', value: sid });
         }
       }
+    }
+
+    const assistantText = extractAssistantText(event);
+    if (assistantText) {
+      lastAssistantText = assistantText;
     }
 
     const typed = event as StreamJsonEvent;
@@ -268,6 +337,25 @@ export function spawnVoiceAgent(project: Project, session: SessionState): VoiceA
       state: exitCode === 0 ? 'done' : 'error',
       project: project.name,
     });
+
+    if (!hadSpeakThisTurn()) {
+      const fallback = summarizeForSpeechFallback(lastAssistantText);
+      if (fallback) {
+        log.warn(
+          { runId, pid, textLen: fallback.length },
+          'voice agent exited without speak() — streaming TTS fallback',
+        );
+        handleSpeak({ text: fallback });
+      } else {
+        log.warn(
+          { runId, pid },
+          'voice agent exited without speak() and no assistant text — user heard nothing',
+        );
+        handleSpeak({
+          text: 'I finished but did not speak aloud — please try again.',
+        });
+      }
+    }
 
     console.log(`[voice] ✗ conversational agent exited — run ${runId}, code ${exitCode}`);
 

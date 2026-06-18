@@ -41,6 +41,8 @@ import { registerVoiceSessionPrepareRoutes } from './routes/voiceSessionPrepare.
 import { registerConfigRoutes } from './routes/config.js';
 import { registerMcpServer } from './mcp/server/index.js';
 import { attachDevWebProxy, registerProductionWeb } from './webDispatch.js';
+import { registerControlSocket } from './state/controlSocket.js';
+import { resolveRequest } from './mcp/server/approvalRegistry.js';
 
 /** Required for vosk-browser SharedArrayBuffer (wake-word WASM). */
 const CROSS_ORIGIN_ISOLATION_HEADERS = {
@@ -274,6 +276,11 @@ export async function buildServer(): Promise<FastifyInstance> {
           });
           void getNarrator().setSession(relaySession);
 
+          // Register socket broadcaster for approval push events.
+          registerControlSocket((data) => {
+            if (socket.readyState === socket.OPEN) socket.send(data);
+          });
+
           socket.send(JSON.stringify({ type: 'auth_ok', sessionKey }));
           log.info({ sessionKey }, 'ws authenticated');
           return;
@@ -291,6 +298,28 @@ export async function buildServer(): Promise<FastifyInstance> {
         // TTS state update (for narrator cadence)
         if (msg['type'] === 'speaking' && typeof msg['value'] === 'boolean') {
           relaySession?.setSpeaking(msg['value']);
+          return;
+        }
+
+        // PWA → bridge: user answered an agent question or approved a plan
+        if (msg['type'] === 'approval_response') {
+          const request_id = typeof msg['request_id'] === 'string' ? msg['request_id'] : null;
+          const response = msg['response'];
+          if (request_id && response && typeof response === 'object') {
+            const r = response as Record<string, unknown>;
+            const kind = r['kind'] as string | undefined;
+            let resolved = false;
+            if (kind === 'user_input' && typeof r['answer'] === 'string') {
+              resolved = resolveRequest(request_id, { kind: 'user_input', answer: r['answer'] });
+            } else if (kind === 'plan_approval' && typeof r['decision'] === 'string') {
+              resolved = resolveRequest(request_id, {
+                kind: 'plan_approval',
+                decision: r['decision'] as 'approved' | 'rejected' | 'modified',
+                notes: typeof r['notes'] === 'string' ? r['notes'] : undefined,
+              });
+            }
+            socket.send(JSON.stringify({ type: 'approval_ack', request_id, ok: resolved }));
+          }
           return;
         }
 
@@ -330,6 +359,8 @@ export async function buildServer(): Promise<FastifyInstance> {
           void getNarrator().setSession(null);
           relaySession = null;
         }
+        // Deregister control socket broadcaster.
+        registerControlSocket(null);
       });
 
       socket.on('error', (err: Error) => {
