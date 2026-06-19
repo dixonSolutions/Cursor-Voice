@@ -10,7 +10,7 @@
     "build": "npm run build:backend && npm run build:web",
     "build:backend": "tsup",
     "build:web": "ng build cursor-voice-web --configuration production",
-    "dev": "NODE_ENV=development concurrently -n web,server -c cyan,magenta \"ng serve cursor-voice-web\" \"nodemon\"",
+    "dev": "bash scripts/dev.sh",
     "dev:web": "ng serve cursor-voice-web",
     "gen-icons": "node scripts/gen-icons.mjs",
     "prepare:vosk": "node scripts/download-vosk-model.mjs",
