@@ -7,12 +7,12 @@ const { resolve } = require('node:path');
 
 function readBackendPort() {
   const configPath = resolve(process.cwd(), 'config.json');
-  if (!existsSync(configPath)) return 3000;
+  if (!existsSync(configPath)) return 5089;
   try {
     const cfg = JSON.parse(readFileSync(configPath, 'utf8'));
-    return cfg.settings?.runModes?.test?.backendPort ?? 3000;
+    return cfg.settings?.runModes?.test?.backendPort ?? 5089;
   } catch {
-    return 3000;
+    return 5089;
   }
 }
 

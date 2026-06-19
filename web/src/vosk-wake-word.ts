@@ -15,7 +15,8 @@ export const VOSK_SAMPLE_RATE = 16000;
 
 export interface VoskGrammarSpotterCallbacks {
   onReady?: () => void;
-  onMatch?: (phrase: string) => void;
+  /** `heard` is the raw Vosk transcript; `phrase` is the configured grammar phrase. */
+  onMatch?: (phrase: string, heard: string) => void;
   onPartial?: (text: string) => void;
   onError?: (message: string) => void;
   onStatus?: (status: string) => void;
@@ -173,7 +174,7 @@ export class VoskGrammarSpotter {
     if (this.triggered || !text?.trim()) return;
     if (!voskPhraseMatches(text, this.phrase)) return;
     this.triggered = true;
-    this.cb.onMatch?.(this.phrase);
+    this.cb.onMatch?.(this.phrase, text.trim());
   }
 }
 
@@ -189,8 +190,8 @@ export class VoskWakeWordDetector extends VoskGrammarSpotter {
       onPartial: cb.onPartial,
       onError: cb.onError,
       onStatus: cb.onStatus,
-      onMatch: (word) => {
-        cb.onMatch?.(word);
+      onMatch: (word, heard) => {
+        cb.onMatch?.(word, heard);
         cb.onWakeWord?.(word);
       },
     });

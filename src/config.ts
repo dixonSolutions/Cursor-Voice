@@ -61,7 +61,7 @@ export const RUN_MODES = ['test', 'serve'] as const;
 export type RunMode = (typeof RUN_MODES)[number];
 
 const TestRunModeSchema = z.object({
-  backendPort: z.number().int().min(1024).max(65535).default(3000),
+  backendPort: z.number().int().min(1024).max(65535).default(5089),
   webPort: z.number().int().min(1024).max(65535).default(4200),
 });
 
@@ -298,10 +298,25 @@ function loadFromDisk(): AppConfig {
   const configFile = cfgResult.data;
   const workflow = resolveWorkflowSettings(configFile.settings.workflow);
 
+  // Local development (`npm run dev` sets NODE_ENV=development) always uses the
+  // `test` run profile, so the dev bridge binds the local dev port on 127.0.0.1
+  // and never collides with the production host running in `serve` mode on
+  // 0.0.0.0:<serve.backendPort>. config.json's `runMode` controls the HOST only;
+  // run dev and host side by side on different ports. See docs/07-data-and-deployment.md.
+  const isDevelopment = process.env.NODE_ENV === 'development';
+  const runMode = isDevelopment ? 'test' : configFile.settings.runMode;
+  if (isDevelopment && configFile.settings.runMode !== 'test') {
+    log.info(
+      { configRunMode: configFile.settings.runMode, effectiveRunMode: 'test' },
+      'development detected — overriding runMode to test (local dev profile)',
+    );
+  }
+
   return {
     env,
     settings: {
       ...configFile.settings,
+      runMode,
       voice: configFile.settings.voice,
       workflow,
     },

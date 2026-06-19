@@ -12,7 +12,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
   ensureGlobalMcpSetup,
-  warnLegacyProjectMcp,
+  cleanupLegacyProjectMcp,
   type SessionLogEvent,
 } from '../mcp/globalMcpSetup.js';
 import { getConfig } from '../config.js';
@@ -78,7 +78,7 @@ export async function registerVoiceSessionPrepareRoutes(app: FastifyInstance): P
           writeSse(reply, 'session_log', event);
         });
 
-        warnLegacyProjectMcp(project, (event) => {
+        cleanupLegacyProjectMcp(project, (event) => {
           logs.push(event);
           writeSse(reply, 'session_log', event);
         });

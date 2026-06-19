@@ -62,8 +62,19 @@ browser TTS fallback (`web/src/tts-fallback.ts`).
 
 ## TTS barge-in
 
-User can say the wake phrase during assistant playback. Client stops TTS and sends
-`tts_interrupt` metadata with the next `user_turn` so Cursor knows what was heard.
+User can say the wake phrase during assistant playback. The client:
+
+1. Stops TTS and snapshots what was playing (`heard_complete`, `heard_partial`, `not_spoken`)
+2. Opens mic capture for the new request
+3. Sends `tts_interrupt` with the next `user_turn` so Cursor knows what was heard
+
+Cursor receives the snapshot via `next_voice_turn()` → `tts_interrupt`.
+
+**Wake-word echo:** If assistant TTS says the wake phrase aloud, Vosk may hear it
+from the speaker. The client ignores that detection when the **current TTS line**
+contains the wake phrase — barge-in stays enabled for real user interrupts.
+
+Full flow, data shapes, and file map: [`17-tts-barge-in-and-wake-echo.md`](./17-tts-barge-in-and-wake-echo.md).
 
 Types: `src/voice/ttsInterrupt.ts`, `web/src/tts-interrupt.ts`.
 
@@ -82,6 +93,7 @@ Types: `src/voice/ttsInterrupt.ts`, `web/src/tts-interrupt.ts`.
 
 ## Related docs
 
+- [`17-tts-barge-in-and-wake-echo.md`](./17-tts-barge-in-and-wake-echo.md) — barge-in snapshot + wake echo filter
 - [`16-mcp-server-cursor-as-brain.md`](./16-mcp-server-cursor-as-brain.md) — Cursor voice loop
 - [`15-llm-intelligence-workflow.md`](./15-llm-intelligence-workflow.md) — Bedrock orchestrator
 - [`13-voice-providers.md`](./13-voice-providers.md) — wake word config

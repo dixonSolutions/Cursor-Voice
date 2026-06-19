@@ -26,3 +26,4 @@ Loader: `src/mcp/loadCursorVoicePrompt.ts`.
 ## Related docs
 
 - [`16-mcp-server-cursor-as-brain.md`](./16-mcp-server-cursor-as-brain.md) — voice agent boot prompting
+- [`17-tts-barge-in-and-wake-echo.md`](./17-tts-barge-in-and-wake-echo.md) — `tts_interrupt` fields referenced in barge-in prompt section
