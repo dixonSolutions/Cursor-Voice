@@ -242,6 +242,24 @@ GET request. Cursor supports custom headers in `mcp.json`:
 
 The token is the same app token used by the PWA.
 
+### 8.7 TTS Wake-Word Echo vs Barge-In
+
+**Problem:** Assistant `speak()` output can include the wake phrase. Vosk on the
+mic hears speaker echo and fires a false barge-in — stopping TTS and queuing a
+spurious interrupt turn.
+
+**Rejected fix:** Pause the wake spotter while TTS plays. That stops echo but also
+blocks real user interrupts during speech.
+
+**Resolution adopted:** On Vosk match during TTS, compare the heard transcript
+with the **current TTS line** (`TtsPile.getCurrentLine()`). If the line contains
+the wake phrase as whole words, reset the spotter and ignore. Otherwise:
+`interruptWithSnapshot()` → `pendingTtsInterrupt` → attach to the next
+`user_turn` as `tts_interrupt` → `voiceTurnQueue` → `next_voice_turn()`.
+
+See [`17-tts-barge-in-and-wake-echo.md`](./17-tts-barge-in-and-wake-echo.md) and
+**ADR-018** in [`08-decisions-and-risks.md`](./08-decisions-and-risks.md).
+
 ---
 
 ## 9 — Implementation Roadmap

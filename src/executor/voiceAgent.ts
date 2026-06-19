@@ -36,10 +36,14 @@ import type { StreamJsonEvent } from './watcher.js';
 const log = childLogger('voice-agent');
 
 const VOICE_BOOT_SUFFIX =
-  '\n\n---\nThe cursor-voice MCP server is connected. Start the voice loop now — call next_voice_turn() immediately.';
+  '\n\n---\nThe cursor-voice MCP server is connected. ' +
+  'Speak one sentence to greet or acknowledge the user first, then call next_voice_turn() to receive their request. ' +
+  'Never start a session in silent tool mode.';
 
 const VOICE_RESUME_SUFFIX =
-  '\n\n---\n@cursor-voice\n\nThe cursor-voice MCP server is connected. Resume the voice loop — call next_voice_turn() immediately.';
+  '\n\n---\n@cursor-voice\n\nThe cursor-voice MCP server is connected. ' +
+  'Speak one sentence to acknowledge the user first, then call next_voice_turn() immediately. ' +
+  'If a worker is running, narrate its live progress via get_agent_status() — do not go silent.';
 
 export interface VoiceAgentEvent {
   type: 'spawned' | 'session_id' | 'exit';

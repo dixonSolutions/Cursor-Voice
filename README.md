@@ -90,6 +90,28 @@ bash scripts/restart.sh
 bash scripts/doctor.sh
 ```
 
+**Local development vs. the production host:**
+
+The two run on **separate ports**, so they never collide and can run side by side:
+
+| | Command | Run profile | Bridge port |
+| --- | --- | --- | --- |
+| **Dev** (hot reload) | `npm run dev` | `test` (forced when `NODE_ENV=development`) | `5089` (loopback) |
+| **Host** (background service) | `npm run start:service` | `serve` (from `config.json`) | `8787` (Tailscale) |
+
+```bash
+# Hot-reload dev server. Open http://localhost:4200 — /api + /ws proxy to :5089.
+npm run dev
+
+# Manage the long-running production host service (independent of dev):
+npm run stop            # stop the host service + its rebuild watcher, free :8787
+npm run start:service   # start the host service back up (health-checked)
+```
+
+> `config.json` → `settings.runMode` controls the **host** only. `npm run dev`
+> always uses the `test` profile (port `runModes.test.backendPort`, default `5089`),
+> regardless of `runMode`.
+
 ## Documentation
 
 Full design in [`docs/`](./docs) — start with [`docs/README.md`](./docs/README.md).

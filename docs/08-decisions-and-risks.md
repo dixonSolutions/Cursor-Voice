@@ -199,6 +199,26 @@ the deny-list guardrails (which `--force` honors).
 **Consequence:** Changing run posture (e.g., propose-only, add `--sandbox`) is a
 config edit. "Skip questions" is a prompt-engineering concern, not a flag.
 
+### ADR-018 — TTS wake-word echo: compare Vosk heard text to current TTS line
+
+**Decision:** Keep the Vosk wake spotter **active during TTS** so user barge-in
+works. When Vosk fires while TTS is playing, ignore the detection if the wake
+phrase appears in `TtsPile.getCurrentLine()` (assistant echo from the speaker).
+Otherwise run the normal barge-in path: stop TTS, snapshot
+`heard_complete` / `heard_partial` / `not_spoken`, attach as `tts_interrupt` on
+the next `user_turn`, deliver to Cursor via `next_voice_turn()`.
+
+**Rejected:** Pausing the wake spotter for the duration of TTS — prevents echo but
+also prevents the user from interrupting speech.
+
+**Rationale:** Hands-free users need both barge-in and stable playback when the
+assistant mentions the wake phrase in spoken output. Line-level TTS bookkeeping
+plus whole-word phrase matching is sufficient without playback-position APIs.
+
+**Consequence:** `TtsPile.getCurrentLine()`, `textContainsWakePhrase()` in
+`wake-words.ts`, Vosk `onMatch(phrase, heard)` passes raw transcript. Documented
+in [`17-tts-barge-in-and-wake-echo.md`](./17-tts-barge-in-and-wake-echo.md).
+
 ## Open items / risks (to resolve during build)
 
 | ID | Item | Plan to resolve | Severity |

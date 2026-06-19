@@ -148,7 +148,20 @@ Bridge → http://127.0.0.1:<backendPort>   (API + WebSockets only in test mode)
 ```
 
 - **`test`:** run `npm run dev`. Open **`http://localhost:4200`**. Leave Bridge URL blank in the PWA.
+  The dev bridge binds `runModes.test.backendPort` (default **`5089`**) on `127.0.0.1`.
 - **`serve`:** `npm run build && npm start`. Open `publicBaseUrl` (or `127.0.0.1:8787` locally). Set `runMode` to `"serve"` before deploying.
+
+**Dev port is decoupled from the host.** `npm run dev` sets `NODE_ENV=development`,
+which forces the **`test`** run profile *regardless* of `config.json` → `settings.runMode`.
+So the dev server binds `runModes.test.backendPort` (default `5089`, loopback) while the
+production host service runs in `serve` mode on `8787` (`0.0.0.0` for Tailscale). They use
+different ports and can run **side by side** — no `EADDRINUSE` collision.
+
+**Host service control** (independent of `npm run dev`):
+
+- `npm run stop` — stops the `cursor-voice` systemd service **and** its rebuild watcher
+  (`cursor-voice-watch.path`), then frees the host port (`8787`). Windows: `scripts\stop.ps1`.
+- `npm run start:service` — starts the host service back up, health-checked. Windows: `scripts\start.ps1`.
 
 `GET /healthz` returns `runMode`, `backendUrl`, `webUrl`, and `useDevWebServer` for quick sanity checks.
 

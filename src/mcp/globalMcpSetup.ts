@@ -7,11 +7,13 @@
  *   3. Compares embedded version — updates if older
  *   4. Enables the server entry
  *
- * Project-level `.cursor/mcp.json` is not required (and is not written).
+ * Project-level `.cursor/mcp.json` is not required (and is not written). Any stale
+ * project-level cursor-voice entry is removed on session prepare so it can't
+ * register a second, conflicting server pointing at an outdated port.
  * See docs/16-mcp-server-cursor-as-brain.md.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { getConfig } from '../config.js';
 import { getRunModeInfo } from '../runMode.js';
@@ -184,9 +186,17 @@ ${body}
 }
 
 /**
- * Log a hint when a project still has a legacy project-level cursor-voice entry.
+ * Remove a stale project-level cursor-voice entry from `.cursor/mcp.json`.
+ *
+ * The global ~/.cursor/mcp.json is the single source of truth and always points
+ * at the live bridge URL/port. A leftover project-level entry (e.g. from an older
+ * install that used a different port) registers a SECOND, conflicting
+ * "cursor-voice" server in Cursor — the agent may then connect to a dead port and
+ * resource/tool lookups fail intermittently. We strip only our own entry,
+ * preserving any other MCP servers the user configured, and delete the file if it
+ * becomes empty.
  */
-export function warnLegacyProjectMcp(
+export function cleanupLegacyProjectMcp(
   projectName: string | undefined,
   onLog?: SessionLogCallback,
 ): void {
@@ -200,12 +210,32 @@ export function warnLegacyProjectMcp(
   const legacy = readGlobalMcpFile(legacyPath);
   if (!legacy?.mcpServers[CURSOR_VOICE_MCP_SERVER_NAME]) return;
 
-  emitLog(
-    onLog,
-    'check',
-    'warn',
-    `Project ${project.name} still has .cursor/mcp.json — global ${formatPathForLog(resolveGlobalMcpJsonPath())} is used for all workspaces.`,
-  );
+  const legacyUrl = legacy.mcpServers[CURSOR_VOICE_MCP_SERVER_NAME]?.url ?? 'unknown URL';
+  delete legacy.mcpServers[CURSOR_VOICE_MCP_SERVER_NAME];
+  const label = formatPathForLog(legacyPath);
+
+  try {
+    if (Object.keys(legacy.mcpServers).length === 0) {
+      unlinkSync(legacyPath);
+      emitLog(
+        onLog,
+        'update',
+        'info',
+        `Removed stale project ${label} (registered cursor-voice at ${legacyUrl}) — global ${formatPathForLog(resolveGlobalMcpJsonPath())} is authoritative.`,
+      );
+    } else {
+      writeGlobalMcpFile(legacyPath, legacy);
+      emitLog(
+        onLog,
+        'update',
+        'info',
+        `Removed stale cursor-voice entry (${legacyUrl}) from project ${label} — kept other MCP servers; global config is authoritative.`,
+      );
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    emitLog(onLog, 'error', 'warn', `Could not clean stale project ${label}: ${message}`);
+  }
 }
 
 /**

@@ -211,13 +211,14 @@ export async function handleNextVoiceTurn(
     MAX_POLL_MS,
   );
 
-  broadcastToVoiceSessions({ type: 'thinking', value: true });
-
   const turn = await voiceTurnQueue.dequeue(timeoutMs);
 
   if (!turn) {
     return { turn: null, is_interrupt: false, received_at: null, queue_depth: 0 };
   }
+
+  // Only signal thinking once a real user turn has arrived — not on every poll start.
+  broadcastToVoiceSessions({ type: 'thinking', value: true });
 
   broadcastToVoiceSessions({
     type: 'tool_activity',
