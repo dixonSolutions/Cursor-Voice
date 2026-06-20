@@ -11,7 +11,7 @@
  * Cache is versioned — bump CACHE_NAME when deploying a new build.
  */
 
-const CACHE_NAME = 'cursor-voice-v2';
+const CACHE_NAME = 'cursor-voice-v3';
 const VOSK_CACHE_NAME = 'cursor-voice-vosk-v1';
 const VOSK_MODEL_PATH = '/vosk/model.tar.gz';
 
@@ -91,5 +91,51 @@ self.addEventListener('fetch', (event) => {
         return res;
       })
       .catch(() => caches.match(event.request).then((cached) => cached ?? Response.error())),
+  );
+});
+
+// ── Web Push: agent approvals, job done, images ───────────────────────────
+
+self.addEventListener('push', (event) => {
+  if (!event.data) return;
+  let payload = {};
+  try {
+    payload = event.data.json();
+  } catch {
+    payload = { body: event.data.text() };
+  }
+  const p = payload;
+  const title = p.title || 'Cursor Voice';
+  const body = p.body || 'New update from Cursor';
+  const tag = p.tag || 'cursor-voice';
+  const url = p.url || '/?tab=voice';
+
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body,
+      tag,
+      icon: '/icon-192.png',
+      badge: '/icon-192.png',
+      data: { url },
+      requireInteraction: p.type === 'user_input_request' || p.type === 'plan_approval_request',
+    }),
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const url = event.notification.data?.url || '/?tab=voice';
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+      for (const client of clients) {
+        if ('focus' in client) {
+          client.navigate(url);
+          return client.focus();
+        }
+      }
+      if (self.clients.openWindow) {
+        return self.clients.openWindow(url);
+      }
+    }),
   );
 });

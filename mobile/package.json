@@ -1,0 +1,21 @@
+{
+  "name": "cursor-voice-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Capacitor native shell for Cursor Voice (CallKit + push)",
+  "scripts": {
+    "sync": "cap sync",
+    "ios": "cap open ios",
+    "android": "cap open android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.2.0",
+    "@capacitor/core": "^7.2.0",
+    "@capacitor/ios": "^7.2.0",
+    "@capacitor/push-notifications": "^7.0.1",
+    "@cursor-voice/call-session": "file:./plugins/call-session"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.2.0"
+  }
+}

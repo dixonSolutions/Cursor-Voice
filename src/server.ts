@@ -44,6 +44,7 @@ import { registerProjectsAdminRoutes } from './routes/projectsAdmin.js';
 import { registerMcpServer } from './mcp/server/index.js';
 import { attachDevWebProxy, registerProductionWeb } from './webDispatch.js';
 import { registerControlSocket } from './state/controlSocket.js';
+import { registerPushRoutes } from './routes/push.js';
 import { resolveRequest } from './mcp/server/approvalRegistry.js';
 import { getImage, readImageBytes, clearImages } from './mcp/server/imageRegistry.js';
 
@@ -234,6 +235,7 @@ export async function buildServer(): Promise<FastifyInstance> {
   await registerVoiceSessionPrepareRoutes(app);
   await registerAdminSettingsRoutes(app);
   await registerProjectsAdminRoutes(app);
+  registerPushRoutes(app);
 
   /** GET /api/settings — non-secret operational settings. */
   app.get('/api/settings', async () => {

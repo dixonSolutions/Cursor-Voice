@@ -47,7 +47,7 @@ import { dispatchTool } from '../handlers.js';
 import { cursorVoiceMcpInstructions } from '../loadCursorVoicePrompt.js';
 import { bindVoiceAgentMcpSession } from '../../executor/voiceAgent.js';
 import { registerRequest, type UserInputRequest, type PlanApprovalRequest } from './approvalRegistry.js';
-import { pushToPhone } from '../../state/controlSocket.js';
+import { notifyPhone } from '../../push/notifyPhone.js';
 import { instrumentMcpToolLogging } from './toolLogging.js';
 import { handleShowImages } from './imageToolHandlers.js';
 
@@ -694,7 +694,7 @@ function buildMcpServer(sessionKey: string): McpServer {
           input_type,
           options,
         };
-        pushToPhone({ type: 'user_input_request', ...req });
+        void notifyPhone({ type: 'user_input_request', ...req });
         return req;
       }, timeout);
 
@@ -751,7 +751,7 @@ function buildMcpServer(sessionKey: string): McpServer {
           steps,
           estimated_impact,
         };
-        pushToPhone({ type: 'plan_approval_request', ...req });
+        void notifyPhone({ type: 'plan_approval_request', ...req });
         return req;
       }, timeout);
 

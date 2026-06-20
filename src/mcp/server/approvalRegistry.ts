@@ -60,6 +60,7 @@ interface Deferred {
 // ── Registry ──────────────────────────────────────────────────────────────
 
 const pending = new Map<string, Deferred>();
+const pendingPayloads = new Map<string, ApprovalRequest>();
 
 /**
  * Register a new pending request. Returns the `request_id` and a Promise that
@@ -70,11 +71,14 @@ export function registerRequest(
   timeoutMs: number,
 ): { request_id: string; promise: Promise<ApprovalResponse> } {
   const request_id = randomUUID();
+  const payload = requestFactory(request_id);
+  pendingPayloads.set(request_id, payload);
 
   const promise = new Promise<ApprovalResponse>((resolve, reject) => {
     const timeoutHandle = setTimeout(() => {
       if (pending.has(request_id)) {
         pending.delete(request_id);
+        pendingPayloads.delete(request_id);
         log.warn({ request_id }, 'approval request timed out');
         reject(new Error(`User did not respond within ${Math.round(timeoutMs / 1000)}s`));
       }
@@ -82,9 +86,6 @@ export function registerRequest(
 
     pending.set(request_id, { resolve, reject, timeoutHandle });
   });
-
-  // Build the request payload (needs the id)
-  requestFactory(request_id);
 
   return { request_id, promise };
 }
@@ -102,6 +103,7 @@ export function resolveRequest(request_id: string, response: ApprovalResponse): 
   }
   clearTimeout(deferred.timeoutHandle);
   pending.delete(request_id);
+  pendingPayloads.delete(request_id);
   deferred.resolve(response);
   log.info({ request_id, kind: response.kind }, 'approval request resolved');
   return true;
@@ -113,6 +115,7 @@ export function cancelRequest(request_id: string, reason = 'Cancelled'): boolean
   if (!deferred) return false;
   clearTimeout(deferred.timeoutHandle);
   pending.delete(request_id);
+  pendingPayloads.delete(request_id);
   deferred.reject(new Error(reason));
   return true;
 }
@@ -126,4 +129,9 @@ export function cancelAllRequests(reason = 'Bridge shutting down'): void {
 
 export function pendingCount(): number {
   return pending.size;
+}
+
+/** Pending approval payloads for clients reconnecting after background/kill. */
+export function getPendingApprovals(): ApprovalRequest[] {
+  return [...pendingPayloads.values()];
 }

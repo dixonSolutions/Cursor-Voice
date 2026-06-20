@@ -24,6 +24,7 @@ import { LogService } from './services/log.service';
 import { ToastService } from './services/toast.service';
 import { VoiceProvidersService } from './services/voice-providers.service';
 import { VoiceSessionService } from './services/voice-session.service';
+import { PushService } from './services/push.service';
 
 export type AppTab = 'voice' | 'wake' | 'config' | 'logs';
 
@@ -64,6 +65,7 @@ export class AppComponent implements OnInit, OnDestroy {
   protected readonly voiceProviders = inject(VoiceProvidersService);
   private readonly toast = inject(ToastService);
   private readonly logs = inject(LogService);
+  private readonly push = inject(PushService);
 
   protected tokenInput = '';
   protected readonly activeTab = signal<AppTab>('voice');
@@ -123,6 +125,8 @@ export class AppComponent implements OnInit, OnDestroy {
     this._connectEffect = effect(() => {
       if (this.bridge.wsStatus() === 'connected') {
         void this.voiceProviders.refresh();
+        void this.push.ensureRegistered();
+        void this.push.syncPendingApprovals();
       }
       if (this.bridge.apiStatus() === 'error' && !this._apiWarned) {
         this._apiWarned = true;

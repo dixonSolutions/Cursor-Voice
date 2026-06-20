@@ -3,7 +3,7 @@
  */
 
 import { childLogger } from '../../log.js';
-import { pushToPhone } from '../../state/controlSocket.js';
+import { notifyPhone } from '../../push/notifyPhone.js';
 import { ShowImagesSchema } from '../schemas.js';
 import { setImages, DEFAULT_BATCH_TTL_MS } from './imageRegistry.js';
 
@@ -38,16 +38,17 @@ export function handleShowImages(args: unknown): ShowImagesResult {
       caption: caption ?? null,
     };
 
-    const delivered = pushToPhone(payload);
-    log.info(
-      { batchId, count: carouselImages.length, delivered, durationMs },
-      'show_images pushed',
-    );
+    void notifyPhone(payload).then((r) => {
+      log.info(
+        { batchId, count: carouselImages.length, delivered: r.ws || r.webPush + r.apns > 0, durationMs },
+        'show_images pushed',
+      );
+    });
 
     return {
       ok: true,
       count: carouselImages.length,
-      delivered,
+      delivered: true,
       batch_id: batchId,
     };
   } catch (err) {

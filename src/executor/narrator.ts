@@ -21,6 +21,7 @@
 
 import { getConfig } from '../config.js';
 import { childLogger } from '../log.js';
+import { notifyPhone } from '../push/notifyPhone.js';
 import type { NarrationEvent } from './watcher.js';
 
 const log = childLogger('narrator');
@@ -217,10 +218,10 @@ export class PhoneRelaySession implements NarratorSession {
   }
 
   async injectText(text: string): Promise<void> {
-    this.send(JSON.stringify({ type: 'narration', text }));
+    await notifyPhone({ type: 'narration', text });
   }
 
   async injectTextWithKind(text: string, kind: string): Promise<void> {
-    this.send(JSON.stringify({ type: 'narration', text, kind }));
+    await notifyPhone({ type: 'narration', text, kind });
   }
 }
