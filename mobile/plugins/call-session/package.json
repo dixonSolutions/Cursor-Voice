@@ -1,0 +1,19 @@
+{
+  "name": "@cursor-voice/call-session",
+  "version": "0.1.0",
+  "description": "CallKit (iOS) and foreground call service (Android) for Cursor Voice",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist/", "ios/", "android/"],
+  "peerDependencies": {
+    "@capacitor/core": ">=7.0.0"
+  },
+  "capacitor": {
+    "ios": {
+      "src": "ios"
+    },
+    "android": {
+      "src": "android"
+    }
+  }
+}

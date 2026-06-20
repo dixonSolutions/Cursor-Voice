@@ -11,8 +11,10 @@ import { BridgeService } from './bridge.service';
 import { LogService } from './log.service';
 import { ToastService } from './toast.service';
 import { VoiceProvidersService } from './voice-providers.service';
+import { PushService } from './push.service';
 import { cancelTtsFallback, clearTranscriptTts, configureTranscriptTts, scheduleTtsFallback, stopAllTts } from '../../tts-fallback.js';
 import { primeTtsPlaybackUnlock } from '../../audio.js';
+import { CallSession, isNativeShell } from '../../native/call-session.js';
 import { SessionKeepAlive } from '../../session-keepalive.js';
 import { preloadVoiceCues } from '../../sound-effects.js';
 import type { SttBackend, TtsBackend } from '../../intelligence-audio.js';
@@ -52,6 +54,7 @@ export class VoiceSessionService {
   private readonly appState = inject(AppStateService);
   private readonly toast = inject(ToastService);
   private readonly voiceProviders = inject(VoiceProvidersService);
+  private readonly push = inject(PushService);
   private readonly logs = inject(LogService);
 
   private _session: ActiveSession | null = null;
@@ -126,6 +129,14 @@ export class VoiceSessionService {
 
     this.ensureKeepAliveWiring();
     this.resumeOnVisible = false;
+
+    if (isNativeShell()) {
+      try {
+        await CallSession.startCall();
+      } catch {
+        this.toast.warn('Call session', 'Could not start native call — voice may drop when screen locks.');
+      }
+    }
 
     const project = this.bridge.activeProject();
     if (!project) {
@@ -207,6 +218,9 @@ export class VoiceSessionService {
     if (userInitiated || !options?.keepKeepalive) {
       this.keepalive.stop();
     }
+    if (userInitiated && isNativeShell()) {
+      void CallSession.endCall().catch(() => {});
+    }
 
     this._session?.close();
     this._session = null;
@@ -266,6 +280,16 @@ export class VoiceSessionService {
     this.keepalive.onVisible(() => {
       void this.tryResumeAfterBackground();
     });
+    if (isNativeShell()) {
+      void CallSession.addListener('callEnded', () => {
+        if (this.conversationActive()) {
+          this.stopSession();
+        }
+      });
+      void CallSession.addListener('incomingCallAnswered', () => {
+        void this.push.syncPendingApprovals();
+      });
+    }
   }
 
   private async tryResumeAfterBackground(): Promise<void> {

@@ -3,7 +3,7 @@
 Self-hosted voice bridge for driving [Cursor's coding agent](https://cursor.com/docs/cli)
 (`cursor-agent`) by **speech, from your phone**.
 
-Speak from an iPhone PWA; **Cursor IDE** is the reasoning layer via the
+Speak from an iPhone **native app (CallKit)** or PWA; **Cursor IDE** is the reasoning layer via the
 **cursor-voice MCP server** (`speak`, `done`, `next_voice_turn`). Coding work is
 delegated to worker agents via `spawn_agent`. Audio uses browser STT/TTS with
 Amazon Polly/Transcribe fallback. Networking is private over Tailscale.
@@ -128,6 +128,7 @@ Full design in [`docs/`](./docs) — start with [`docs/README.md`](./docs/README
 | [`06-voice-audio-webrtc.md`](./docs/06-voice-audio-webrtc.md) | STT, TTS, VAD, wake words |
 | [`16-mcp-server-cursor-as-brain.md`](./docs/16-mcp-server-cursor-as-brain.md) | Default Cursor voice workflow |
 | [`11-mcp-tool-surface.md`](./docs/11-mcp-tool-surface.md) | MCP tool inventory |
+| [`20-native-callkit-shell.md`](./docs/20-native-callkit-shell.md) | CallKit native app + push notifications |
 
 ## Stack
 

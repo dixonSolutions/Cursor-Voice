@@ -32,6 +32,17 @@ const EnvSchema = z.object({
   PORT: z.coerce.number().int().min(1024).max(65535).default(8787),
   CONFIG_PATH: z.string().default('./config.json'),
   DB_PATH: z.string().default('./data/state.db'),
+  /** Web Push VAPID keys — generate: npx web-push generate-vapid-keys */
+  WEB_PUSH_VAPID_PUBLIC_KEY: z.string().optional(),
+  WEB_PUSH_VAPID_PRIVATE_KEY: z.string().optional(),
+  WEB_PUSH_VAPID_SUBJECT: z.string().optional(),
+  /** Apple Push Notification service (.p8 key) for native iOS app */
+  APNS_KEY_ID: z.string().optional(),
+  APNS_TEAM_ID: z.string().optional(),
+  APNS_KEY: z.string().optional(),
+  APNS_KEY_PATH: z.string().optional(),
+  APNS_BUNDLE_ID: z.string().optional(),
+  APNS_PRODUCTION: z.string().optional(),
 });
 
 // ── Voice settings (config.json) ─────────────────────────────────────────────
