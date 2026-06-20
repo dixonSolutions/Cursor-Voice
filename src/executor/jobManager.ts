@@ -212,6 +212,7 @@ export async function submitJob(
   prompt: string,
   mode: JobMode = 'agent',
   worktree?: string,
+  browser?: boolean,
 ): Promise<SubmitResult> {
   const { settings } = getConfig();
   const session = getSessionState(sessionKey);
@@ -248,7 +249,7 @@ export async function submitJob(
   });
 
   // Spawn the agent process (with optional worktree for parallel execution).
-  const handle = spawnAgent({ project, session, prompt, mode, worktree });
+  const handle = spawnAgent({ project, session, prompt, mode, worktree, browser });
 
   // Wire watcher → narrator.
   const watcher = new Watcher(jobId, project.name, () => {

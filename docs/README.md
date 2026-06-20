@@ -28,6 +28,7 @@ on projects hosted on a home machine.
 | [`15-llm-intelligence-workflow.md`](./15-llm-intelligence-workflow.md) | Alternate cascade workflow (STT→Claude→TTS) | Using Bedrock orchestrator mode |
 | [`16-mcp-server-cursor-as-brain.md`](./16-mcp-server-cursor-as-brain.md) | **Default** `cursor_native` workflow — Cursor as reasoning layer | Primary voice path |
 | [`17-tts-barge-in-and-wake-echo.md`](./17-tts-barge-in-and-wake-echo.md) | TTS interrupt snapshot, `tts_interrupt` delivery, wake-word echo filter | Barge-in bugs or agent heard/not-heard context |
+| [`18-image-carousel.md`](./18-image-carousel.md) | `show_images` tool, carousel PWA, Browser snapshot workflow | UI review on phone |
 
 ## One-paragraph summary
 

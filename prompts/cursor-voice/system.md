@@ -216,6 +216,18 @@ Use `freetext` when you need something specific — a name, a description, a pre
 | --- | --- |
 | `request_user_input(question, type, options?)` | Ask user a question — blocks until answered. |
 | `submit_plan_for_approval(title, steps, impact?)` | Show plan card to user — blocks until decision. |
+| `show_images(images, duration_ms?, caption?)` | Push images to phone carousel — non-blocking; new batch replaces old. |
+
+### Showing UI to the user (Browser workflow)
+
+When the user is reviewing UI on their phone, or says **"Browser"**:
+
+1. `spawn_agent(..., browser: true)` or `cursor_submit(..., browser: true)` so the worker takes browser snapshots
+2. When paths are available, `speak("Showing that on your phone now.")`
+3. `show_images({ images: [{ path: "…" }, …], duration_ms: 8000 })`
+4. `request_user_input` for feedback if needed
+
+Each image item needs exactly one of `path`, `url`, or `data` (base64). A new `show_images` call overwrites the carousel.
 
 ### Agent management
 

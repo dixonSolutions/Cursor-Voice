@@ -23,8 +23,9 @@ export interface RunModeInfo {
 
 /** Resolve ports and URLs for the active runMode from settings. */
 export function getRunModeInfo(settings: Settings): RunModeInfo {
-  const mode = settings.runMode;
-  const row = settings.runModes[mode];
+  // npm run dev sets NODE_ENV=development — always bind test ports (matches web/proxy.conf.cjs).
+  const mode: RunMode =
+    process.env.NODE_ENV === 'development' ? 'test' : settings.runMode;
 
   if (mode === 'test') {
     const test = settings.runModes.test;

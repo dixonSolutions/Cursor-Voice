@@ -23,6 +23,15 @@ Boot prompt lifecycle: see [`16-mcp-server-cursor-as-brain.md`](./16-mcp-server-
 
 Loader: `src/mcp/loadCursorVoicePrompt.ts`.
 
+## Browser / UI snapshots
+
+When the user reviews UI on their phone or says **"Browser"**:
+
+- Set `browser: true` on `spawn_agent` or `cursor_submit` (worker takes browser snapshots).
+- Brain calls `show_images` with screenshot paths from the worker summary.
+
+See [`18-image-carousel.md`](./18-image-carousel.md).
+
 ## Related docs
 
 - [`16-mcp-server-cursor-as-brain.md`](./16-mcp-server-cursor-as-brain.md) — voice agent boot prompting

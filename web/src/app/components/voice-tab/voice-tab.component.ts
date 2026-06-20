@@ -21,6 +21,7 @@ import { ToastService } from '../../services/toast.service';
 import { VoiceProvidersService } from '../../services/voice-providers.service';
 import { VoiceSessionService } from '../../services/voice-session.service';
 import { ApprovalPanelComponent } from '../approval-panel/approval-panel.component';
+import { ImageCarouselComponent } from '../image-carousel/image-carousel.component';
 import { LiveLogPanelComponent } from '../live-log-panel/live-log-panel.component';
 import { VoiceOrbComponent, type OrbColorMode } from '../voice-orb/voice-orb.component';
 
@@ -51,6 +52,7 @@ interface SessionOption {
     Select,
     Tag,
     ApprovalPanelComponent,
+    ImageCarouselComponent,
     VoiceOrbComponent,
     LiveLogPanelComponent,
   ],

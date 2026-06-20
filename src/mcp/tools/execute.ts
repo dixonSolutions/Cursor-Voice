@@ -29,6 +29,7 @@ export interface SubmitArgs {
   prompt: string;
   project?: string;
   mode?: 'agent' | 'plan';
+  browser?: boolean;
 }
 
 export interface SubmitResult {
@@ -75,7 +76,7 @@ export async function handleCursorSubmit(
   }
 
   const mode = args.mode ?? 'agent';
-  const result = await submitJob(project, sessionKey, args.prompt, mode);
+  const result = await submitJob(project, sessionKey, args.prompt, mode, undefined, args.browser);
 
   return {
     job_id: result.jobId,

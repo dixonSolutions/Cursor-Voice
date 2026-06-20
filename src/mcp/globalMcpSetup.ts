@@ -31,7 +31,7 @@ import { cursorVoiceRuleBody } from './loadCursorVoicePrompt.js';
 const log = childLogger('mcp:global-setup');
 
 /** Bump when the generated mcp.json shape or defaults change. */
-export const CURSOR_VOICE_MCP_VERSION = '0.2.1';
+export const CURSOR_VOICE_MCP_VERSION = '0.2.2';
 
 export const CURSOR_VOICE_MCP_SERVER_NAME = 'cursor-voice';
 

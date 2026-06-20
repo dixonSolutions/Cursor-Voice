@@ -43,6 +43,7 @@ import { registerMcpServer } from './mcp/server/index.js';
 import { attachDevWebProxy, registerProductionWeb } from './webDispatch.js';
 import { registerControlSocket } from './state/controlSocket.js';
 import { resolveRequest } from './mcp/server/approvalRegistry.js';
+import { getImage, readImageBytes, clearImages } from './mcp/server/imageRegistry.js';
 
 /** Required for vosk-browser SharedArrayBuffer (wake-word WASM). */
 const CROSS_ORIGIN_ISOLATION_HEADERS = {
@@ -141,9 +142,40 @@ export async function buildServer(): Promise<FastifyInstance> {
   app.addHook('preHandler', async (req, reply) => {
     if (req.method === 'OPTIONS') return;
     if (req.url.startsWith('/api/')) {
+      // Ephemeral key auth — img tags cannot send Bearer tokens.
+      if (req.url.startsWith('/api/images/')) return;
       await requireAuth(req, reply);
     }
   });
+
+  /** GET /api/images/:id?k= — serve carousel images (ephemeral key, not Bearer). */
+  app.get<{ Params: { id: string }; Querystring: { k?: string } }>(
+    '/api/images/:id',
+    async (req, reply) => {
+      const accessKey = typeof req.query.k === 'string' ? req.query.k : '';
+      if (!accessKey) {
+        return reply.code(401).send({ error: 'Missing access key' });
+      }
+
+      const stored = getImage(req.params.id, accessKey);
+      if (!stored) {
+        return reply.code(404).send({ error: 'Image not found or expired' });
+      }
+
+      if (stored.kind === 'url') {
+        return reply.redirect(stored.value);
+      }
+
+      const bytes = readImageBytes(stored);
+      if (!bytes) {
+        return reply.code(404).send({ error: 'Image not readable' });
+      }
+
+      reply.header('Content-Type', stored.mime);
+      reply.header('Cache-Control', 'private, no-store');
+      return reply.send(bytes);
+    },
+  );
 
   // ── Project endpoints ──────────────────────────────────────────────────
 
@@ -361,6 +393,7 @@ export async function buildServer(): Promise<FastifyInstance> {
         }
         // Deregister control socket broadcaster.
         registerControlSocket(null);
+        clearImages();
       });
 
       socket.on('error', (err: Error) => {
