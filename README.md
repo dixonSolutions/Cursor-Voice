@@ -90,6 +90,12 @@ bash scripts/restart.sh
 bash scripts/doctor.sh
 ```
 
+**Already hosted manually?** Install the systemd user service without re-running full setup:
+
+```bash
+bash scripts/install-systemd.sh
+```
+
 **Local development vs. the production host:**
 
 The two run on **separate ports**, so they never collide and can run side by side:
