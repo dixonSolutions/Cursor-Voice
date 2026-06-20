@@ -13,6 +13,7 @@ import { ToastService } from './toast.service';
 import { VoiceProvidersService } from './voice-providers.service';
 import { cancelTtsFallback, clearTranscriptTts, configureTranscriptTts, scheduleTtsFallback, stopAllTts } from '../../tts-fallback.js';
 import { primeTtsPlaybackUnlock } from '../../audio.js';
+import { SessionKeepAlive } from '../../session-keepalive.js';
 import { preloadVoiceCues } from '../../sound-effects.js';
 import type { SttBackend, TtsBackend } from '../../intelligence-audio.js';
 
@@ -54,6 +55,10 @@ export class VoiceSessionService {
   private readonly logs = inject(LogService);
 
   private _session: ActiveSession | null = null;
+  private readonly keepalive = new SessionKeepAlive();
+  private keepaliveWired = false;
+  /** Reconnect intelligence session after OS background suspend (not user hang-up). */
+  private resumeOnVisible = false;
   private readonly _voiceActivated = signal(false);
   private readonly _speaking = signal(false);
   private readonly _jobRunning = signal(false);
@@ -118,6 +123,9 @@ export class VoiceSessionService {
 
   async startSession(): Promise<void> {
     if (this._session || this.sessionConnecting()) return;
+
+    this.ensureKeepAliveWiring();
+    this.resumeOnVisible = false;
 
     const project = this.bridge.activeProject();
     if (!project) {
@@ -191,7 +199,15 @@ export class VoiceSessionService {
     }
   }
 
-  stopSession(): void {
+  stopSession(options?: { userInitiated?: boolean; keepKeepalive?: boolean }): void {
+    const userInitiated = options?.userInitiated !== false;
+    if (userInitiated) {
+      this.resumeOnVisible = false;
+    }
+    if (userInitiated || !options?.keepKeepalive) {
+      this.keepalive.stop();
+    }
+
     this._session?.close();
     this._session = null;
     this.sessionConnecting.set(false);
@@ -244,6 +260,21 @@ export class VoiceSessionService {
     });
   }
 
+  private ensureKeepAliveWiring(): void {
+    if (this.keepaliveWired) return;
+    this.keepaliveWired = true;
+    this.keepalive.onVisible(() => {
+      void this.tryResumeAfterBackground();
+    });
+  }
+
+  private async tryResumeAfterBackground(): Promise<void> {
+    if (!this.resumeOnVisible) return;
+    if (this._session || this.sessionConnecting()) return;
+    this.resumeOnVisible = false;
+    await this.startSession();
+  }
+
   private syncAppState(): void {
     if (this._jobRunning()) {
       this.appState.transitionTo('working');
@@ -266,6 +297,10 @@ export class VoiceSessionService {
           this._voiceActivated.set(false);
           this.startMeterPoll();
           this.syncAppState();
+          void this.keepalive.start({
+            title: 'Cursor Voice',
+            artist: 'Voice session active',
+          });
         }
         if (s === 'error') {
           this.toast.error(
@@ -326,6 +361,13 @@ export class VoiceSessionService {
         this.logs.append('info', 'voice', label);
       },
       onClosed: (reason) => {
+        const backgrounded =
+          typeof document !== 'undefined' && document.hidden;
+        if (backgrounded) {
+          this.resumeOnVisible = true;
+          this.stopSession({ userInitiated: false, keepKeepalive: true });
+          return;
+        }
         if (reason) {
           this.toast.warn('Voice disconnected', reason);
         }

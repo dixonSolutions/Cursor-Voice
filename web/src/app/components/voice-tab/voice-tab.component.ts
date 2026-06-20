@@ -251,6 +251,11 @@ export class VoiceTabComponent {
     return `Tap the orb — then say "${start}" to activate. Background noise is filtered.`;
   });
 
+  protected readonly liveSessionHint = computed(() => {
+    if (!this.voiceSession.conversationActive()) return null;
+    return 'Keep this app open — voice pauses if you switch apps. Screen stays on while connected.';
+  });
+
   constructor() {
     effect(() => {
       if (this.bridge.wsStatus() === 'connected') {

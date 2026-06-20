@@ -39,6 +39,9 @@
           [severity]="voiceSession.micMuted() ? 'warn' : 'secondary'"
           [outlined]="true"
           (onClick)="toggleMicMute()" />
+        @if (liveSessionHint(); as hint) {
+          <p class="cv-voice-orb-hint cv-voice-orb-hint--live">{{ hint }}</p>
+        }
       }
     </div>
 
