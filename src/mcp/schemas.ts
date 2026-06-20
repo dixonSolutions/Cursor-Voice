@@ -50,6 +50,12 @@ export const CursorSubmitSchema = z.object({
   prompt: promptString.describe("The user's intent — relay with minimal editing"),
   project: optionalProject.describe('Target project (defaults to active project)'),
   mode: z.enum(['agent', 'plan']).optional().describe('Execution mode (default: agent)'),
+  browser: z
+    .boolean()
+    .optional()
+    .describe(
+      'Append browser snapshot workflow to the worker prompt — use for UI tasks or when the user says "Browser".',
+    ),
 });
 
 export const CursorAskSchema = z.object({
@@ -114,6 +120,52 @@ export const CursorMcpToolsSchema = z.object({
   server: z.string().describe('MCP server identifier (from cursor_mcp_list)'),
 });
 
+// ── Group: User display ───────────────────────────────────────────────────
+
+const imageItemSchema = z
+  .object({
+    path: z.string().min(1).optional().describe('Local file path (must be under project or temp dirs)'),
+    url: z
+      .string()
+      .min(1)
+      .optional()
+      .describe('http(s) URL — loaded directly by the PWA'),
+    data: z
+      .string()
+      .min(1)
+      .optional()
+      .describe('Base64 or data-URI image payload'),
+    mime: z.string().optional().describe('MIME type (auto-detected when omitted)'),
+    caption: z.string().max(500).optional().describe('Short label for this image'),
+  })
+  .refine(
+    (item) => {
+      const count = [item.path, item.url, item.data].filter((v) => v != null && v !== '').length;
+      return count === 1;
+    },
+    { message: 'Each image must have exactly one of path, url, or data' },
+  );
+
+export const ShowImagesSchema = z.object({
+  images: z
+    .array(imageItemSchema)
+    .min(1)
+    .max(10)
+    .describe('Images to show — a new call replaces the previous carousel'),
+  duration_ms: z
+    .number()
+    .int()
+    .min(3000)
+    .max(120_000)
+    .optional()
+    .describe('How long the carousel stays expanded before minimizing (default 8000 ms)'),
+  caption: z
+    .string()
+    .max(300)
+    .optional()
+    .describe('Optional title shown above the carousel'),
+});
+
 // ── Schema registry ───────────────────────────────────────────────────────
 
 export const TOOL_SCHEMAS = {
@@ -134,6 +186,7 @@ export const TOOL_SCHEMAS = {
   cursor_agent_status: CursorAgentStatusSchema,
   cursor_mcp_list: CursorMcpListSchema,
   cursor_mcp_tools: CursorMcpToolsSchema,
+  show_images: ShowImagesSchema,
 } as const;
 
 export type ToolName = keyof typeof TOOL_SCHEMAS;

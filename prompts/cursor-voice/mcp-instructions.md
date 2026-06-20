@@ -16,6 +16,12 @@ Do NOT call `done()` yet. Loop:
 **New tools for agent→user interaction:**
 - `request_user_input(question, input_type, options?)` — ask user a question; blocks until answered
 - `submit_plan_for_approval(title, steps, estimated_impact?)` — show plan card to user; blocks until decision
+- `show_images(images, duration_ms?, caption?)` — push UI screenshots to the phone carousel (non-blocking)
+
+**Browser / UI workflow (opt-in):**
+- Set `browser: true` on `spawn_agent` or `cursor_submit` for UI tasks or when the user says "Browser"
+- Worker uses browser tools, lists screenshot paths in its summary
+- Brain calls `show_images` with those paths so the user can examine visuals on their phone
 
 **Use `submit_plan_for_approval` before any multi-file, destructive, or irreversible change.**
 

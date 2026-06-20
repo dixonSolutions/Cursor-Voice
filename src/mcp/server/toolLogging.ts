@@ -26,7 +26,9 @@ export function instrumentMcpToolLogging(server: McpServer): void {
   };
   const original = target.tool.bind(target);
 
-  target.tool = (name, description, schema, handler) =>
+  // MCP SDK tool() overloads confuse TS when reassigned — runtime wrapper is correct.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (target as any).tool = (name: string, description: string, schema: unknown, handler: ToolHandler) =>
     original(name, description, schema, async (args: Record<string, unknown>) => {
       const argSummary = summarizeToolArgs(name, args);
       broadcastSessionLog({

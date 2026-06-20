@@ -6,7 +6,8 @@ registration and the provider function-tool definition (DRY).
 
 Verified against the live CLI (`cursor-agent 2026.06.04-5fd875e`, June 2026).
 
-> **Total: 30 tools** — 3 voice I/O + 10 agent/job self-management + 17 cursor-agent wrappers.
+> **Total: 33 tools** — 3 voice I/O + 10 agent/job self-management + 2 user display +
+> 17 cursor-agent wrappers + 2 user interaction (blocking) + 1 identity tool.
 > All are registered in `src/mcp/server/index.ts` and callable by Cursor's conversational agent.
 
 ---
@@ -39,7 +40,7 @@ Use this to orient after a resume or when session state is unclear.
 | `list_agents()` | All running workers (singleton + worktree pool) + voice agent. Shows id, kind, pid, activity, elapsed, worktree. |
 | `get_agent_status(id)` | Live detail: activity, files_written, files_read, shell_commands, elapsed_ms. Falls back to DB for completed jobs. |
 | `get_agent_output(id, offset?, limit?)` | Paginated full event log (tool calls, file writes, shell runs, output text). In-memory for live; DB for completed. |
-| `spawn_agent(instructions, mode?, use_worktree?, worktree_name?)` | Start a worker. Modes: agent/plan/ask/debug. `use_worktree: true` runs in isolated git worktree for parallel execution. |
+| `spawn_agent(instructions, mode?, use_worktree?, worktree_name?, browser?)` | Start a worker. Modes: agent/plan/ask/debug. `browser: true` appends snapshot workflow for UI tasks. `use_worktree: true` runs in isolated git worktree for parallel execution. |
 | `stop_agent(id)` | SIGTERM → SIGKILL a worker (singleton or worktree). |
 | `inject(id, message)` | Best-effort stdin context injection. Fallback: stop + respawn with amended instructions. |
 | `revert_agent(id, confirm?)` | Revert project to the git checkpoint taken before job `id` ran. Uncommitted → stash; committed → reset --hard (requires confirm: true). |
@@ -62,6 +63,19 @@ Parallel Agents capability exposed via voice.
 | `set_mode(id?, mode)` | Store preferred spawn mode for this session (agent/plan/ask/debug). Applied to next `spawn_agent`. Does NOT restart running agents. |
 | `execute_plan(id)` | Trigger plan execution: submits a follow-up that applies the proposed plan. |
 
+### Group: User interaction (blocking)
+
+| Tool | Purpose |
+| --- | --- |
+| `request_user_input(question, input_type, options?)` | Ask user a question; blocks until answered. |
+| `submit_plan_for_approval(title, steps, estimated_impact?)` | Show plan card; blocks until approve/reject/modify. |
+
+### Group: User display (non-blocking)
+
+| Tool | Purpose |
+| --- | --- |
+| `show_images(images, duration_ms?, caption?)` | Push image carousel to PWA. New batch replaces old. See [`17-image-carousel.md`](./17-image-carousel.md). |
+
 ---
 
 ---
@@ -72,7 +86,7 @@ Parallel Agents capability exposed via voice.
 | --- | --- | --- |
 | **Project** | `cursor_list_projects`, `cursor_set_project` | Custom (registry) |
 | **Model** | `cursor_list_models`, `cursor_set_model` | CLI: `cursor-agent models` |
-| **Execute** | `cursor_submit`, `cursor_ask`, `cursor_recall_answer` | CLI: `-p --output-format stream-json/json` |
+| **Execute** | `cursor_submit`, `cursor_ask`, `cursor_recall_answer` | CLI: `-p --output-format stream-json/json` (`cursor_submit` accepts optional `browser`) |
 | **Job** | `cursor_status`, `cursor_stop` | Bridge state (DB) |
 | **Session** | `cursor_new_session`, `cursor_session_info` | CLI: `create-chat`, registry |
 | **Git** | `cursor_diff`, `cursor_revert` | `simple-git` |

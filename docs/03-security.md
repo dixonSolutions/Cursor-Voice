@@ -72,6 +72,20 @@ ever receives filesystem paths:
 - Secrets are isolated in `.env` (keys only); settings + project list live in
   non-secret `config.json` (see `07`).
 
+### Image carousel (`show_images`)
+
+UI screenshots are served through `GET /api/images/:id?k=<ephemeral-key>` — **not**
+the long-lived app token, because `<img>` cannot send `Authorization` headers.
+
+1. **Ephemeral key** — each `show_images` batch gets a random UUID access key (30 min TTL).
+   The endpoint rejects missing/wrong/expired keys (401/404).
+2. **Path allowlist** — `path` items must resolve under enabled project directories,
+   OS temp, `~/.cursor`, or bridge `data/`. Traversal via `../` is blocked.
+3. **No persistent URLs** — keys are in-memory only; batch cleared on control WS disconnect.
+4. **Size limits** — max 10 images per batch, 4 MB decoded per base64 item.
+
+Full design: [`17-image-carousel.md`](./17-image-carousel.md).
+
 ### Why the prompt string is acceptable model-controlled input
 
 `cursor-agent` interprets the prompt as a task, not as host shell. We never build

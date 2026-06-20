@@ -39,6 +39,8 @@ export interface SpawnOptions {
    * CLI flag: -w <name>
    */
   worktree?: string;
+  /** Append browser snapshot instructions to the worker prompt. */
+  browser?: boolean;
 }
 
 export interface AgentHandle {
@@ -65,7 +67,7 @@ export interface AgentResult {
  * Shell interpolation is impossible here — this is an array, not a string.
  */
 export function buildArgs(opts: SpawnOptions): string[] {
-  const { project, session, prompt, mode = 'agent', oneShot = false, worktree } = opts;
+  const { project, session, prompt, mode = 'agent', oneShot = false, worktree, browser } = opts;
   const { settings } = getConfig();
 
   const args: string[] = [
@@ -109,7 +111,7 @@ export function buildArgs(opts: SpawnOptions): string[] {
   if (mode === 'ask') {
     args.push(buildAskPrompt(prompt));
   } else {
-    args.push(buildAgentPrompt(prompt));
+    args.push(buildAgentPrompt(prompt, { browser }));
   }
 
   return args;

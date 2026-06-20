@@ -159,6 +159,8 @@ export interface SpawnAgentArgs {
   use_worktree?: boolean;
   /** Override worktree name (auto-generated if not given). */
   worktree_name?: string;
+  /** Append browser snapshot workflow to the worker prompt (UI / "Browser" tasks). */
+  browser?: boolean;
 }
 
 export interface SpawnAgentResult {
@@ -545,6 +547,7 @@ export function makeAgentHandlers(sessionKey: string): AgentToolHandlers {
         debugPrefix + args.instructions,
         cliMode === 'debug' ? 'agent' : cliMode,
         worktreeName,
+        args.browser,
       );
 
       log.info(

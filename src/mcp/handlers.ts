@@ -30,6 +30,7 @@ import { handleNewSession, handleSessionInfo } from './tools/session.js';
 import { handleCursorDiff, handleCursorRevert } from './tools/gitTools.js';
 import { handleCursorAgentInfo, handleCursorAgentStatus } from './tools/system.js';
 import { handleMcpList, handleMcpTools } from './tools/mcpInspect.js';
+import { handleShowImages } from './server/imageToolHandlers.js';
 
 const log = childLogger('handlers');
 
@@ -142,6 +143,8 @@ async function route(
       return handleMcpList();
     case 'cursor_mcp_tools':
       return handleMcpTools(a);
+    case 'show_images':
+      return handleShowImages(a);
     default: {
       const _exhaustive: never = name;
       throw new Error(`Unhandled tool: ${_exhaustive}`);

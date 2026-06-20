@@ -27,6 +27,7 @@ on projects hosted on a home machine.
 | [`14-prompts.md`](./14-prompts.md) | Prompts folder layout and editing | Tuning agent behavior |
 | [`15-llm-intelligence-workflow.md`](./15-llm-intelligence-workflow.md) | Alternate cascade workflow (STT→Claude→TTS) | Using Bedrock orchestrator mode |
 | [`16-mcp-server-cursor-as-brain.md`](./16-mcp-server-cursor-as-brain.md) | **Default** `cursor_native` workflow — Cursor as reasoning layer | Primary voice path |
+| [`17-image-carousel.md`](./17-image-carousel.md) | `show_images` tool, carousel PWA, Browser snapshot workflow | UI review on phone |
 
 ## One-paragraph summary
 

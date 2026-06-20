@@ -19,6 +19,8 @@
  *   Git          — cursor_diff, cursor_revert
  *   System       — cursor_agent_info, cursor_agent_status
  *   MCP inspect  — cursor_mcp_list, cursor_mcp_tools
+ *   User display — show_images
+ *   User interact — request_user_input, submit_plan_for_approval
  *
  * Transport: MCP Streamable HTTP (preferred over legacy SSE).
  * Auth: same Bearer token as /api/*.
@@ -47,6 +49,7 @@ import { bindVoiceAgentMcpSession } from '../../executor/voiceAgent.js';
 import { registerRequest, type UserInputRequest, type PlanApprovalRequest } from './approvalRegistry.js';
 import { pushToPhone } from '../../state/controlSocket.js';
 import { instrumentMcpToolLogging } from './toolLogging.js';
+import { handleShowImages } from './imageToolHandlers.js';
 
 const log = childLogger('mcp:server');
 
@@ -194,13 +197,20 @@ function buildMcpServer(sessionKey: string): McpServer {
         .string()
         .optional()
         .describe('Optional worktree name (auto-generated if not set). Alphanumeric + hyphens.'),
+      browser: z
+        .boolean()
+        .optional()
+        .describe(
+          'Append browser snapshot workflow — use for UI work or when the user says "Browser".',
+        ),
     },
-    async ({ instructions, mode, use_worktree, worktree_name }) => {
+    async ({ instructions, mode, use_worktree, worktree_name, browser }) => {
       const result = await agentTools.handleSpawnAgent({
         instructions,
         mode,
         use_worktree,
         worktree_name,
+        browser,
       });
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     },
@@ -390,9 +400,19 @@ function buildMcpServer(sessionKey: string): McpServer {
         .enum(['agent', 'plan'])
         .optional()
         .describe('agent = apply changes; plan = propose only. Default: agent.'),
+      browser: z
+        .boolean()
+        .optional()
+        .describe(
+          'Append browser snapshot workflow — use for UI work or when the user says "Browser".',
+        ),
     },
-    async ({ prompt, project, mode }) => {
-      const result = await dispatchTool('cursor_submit', { prompt, project, mode }, sessionKey);
+    async ({ prompt, project, mode, browser }) => {
+      const result = await dispatchTool(
+        'cursor_submit',
+        { prompt, project, mode, browser },
+        sessionKey,
+      );
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     },
   );
@@ -577,6 +597,54 @@ function buildMcpServer(sessionKey: string): McpServer {
     },
     async ({ server }) => {
       const result = await dispatchTool('cursor_mcp_tools', { server }, sessionKey);
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    },
+  );
+
+  // ── User display ─────────────────────────────────────────────────────────
+
+  server.tool(
+    'show_images',
+    'Push images to the user\'s phone as a browsable carousel (non-blocking). ' +
+      'Use after browser snapshots or when the user needs to see UI. ' +
+      'Each item needs exactly one of path (local file), url (http/https), or data (base64). ' +
+      'A new call replaces the previous carousel. ' +
+      'Speak a short line like "I\'m showing that on your phone now." then call this tool.',
+    {
+      images: z
+        .array(
+          z
+            .object({
+              path: z.string().min(1).optional().describe('Local file path under project or temp'),
+              url: z.string().min(1).optional().describe('http(s) URL loaded directly by PWA'),
+              data: z.string().min(1).optional().describe('Base64 or data-URI payload'),
+              mime: z.string().optional().describe('MIME type when not auto-detected'),
+              caption: z.string().max(500).optional().describe('Per-image caption'),
+            })
+            .refine(
+              (item) =>
+                [item.path, item.url, item.data].filter((v) => v != null && v !== '').length === 1,
+              { message: 'Each image must have exactly one of path, url, or data' },
+            ),
+        )
+        .min(1)
+        .max(10)
+        .describe('Images to display — overwrites any previous carousel'),
+      duration_ms: z
+        .number()
+        .int()
+        .min(3000)
+        .max(120_000)
+        .optional()
+        .describe('Expanded display time before minimizing to toggle (default 8000 ms)'),
+      caption: z
+        .string()
+        .max(300)
+        .optional()
+        .describe('Optional title above the carousel'),
+    },
+    async (args) => {
+      const result = handleShowImages(args);
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     },
   );
@@ -835,5 +903,5 @@ export function registerMcpServer(app: FastifyInstance): void {
     await reply.code(204).send();
   });
 
-  log.info('mcp server registered at /mcp (32 tools)');
+  log.info('mcp server registered at /mcp (33 tools)');
 }

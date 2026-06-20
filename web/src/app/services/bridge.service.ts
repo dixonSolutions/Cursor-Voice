@@ -99,6 +99,14 @@ export interface PlanApprovalResponse {
 
 export type ApprovalResponse = UserInputResponse | PlanApprovalResponse;
 
+// ── Image carousel push types ─────────────────────────────────────────────
+
+export interface CarouselImage {
+  id: string;
+  src: string;
+  caption?: string;
+}
+
 interface PendingCall {
   resolve: (value: unknown) => void;
   reject: (reason: Error) => void;
@@ -139,6 +147,13 @@ export class BridgeService {
 
   /** The currently pending approval request, if any (shown in ApprovalPanelComponent). */
   readonly pendingApproval = signal<ApprovalRequest | null>(null);
+
+  // ── Image carousel signals ─────────────────────────────────────────────
+
+  readonly carouselImages = signal<CarouselImage[]>([]);
+  readonly carouselBatchId = signal<string | null>(null);
+  readonly carouselDurationMs = signal<number>(8000);
+  readonly carouselCaption = signal<string | null>(null);
 
   // ── Private ────────────────────────────────────────────────────────────
 
@@ -515,6 +530,33 @@ export class BridgeService {
         };
         this.approvalRequest$.next(req);
         this.pendingApproval.set(req);
+        break;
+      }
+
+      case 'show_images': {
+        const rawImages = msg['images'];
+        if (!Array.isArray(rawImages)) break;
+        const images: CarouselImage[] = rawImages
+          .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
+          .map((item) => ({
+            id: String(item['id'] ?? ''),
+            src: String(item['src'] ?? ''),
+            caption: typeof item['caption'] === 'string' ? item['caption'] : undefined,
+          }))
+          .filter((item) => item.id && item.src);
+        if (images.length === 0) break;
+
+        const duration =
+          typeof msg['duration_ms'] === 'number' && msg['duration_ms'] > 0
+            ? msg['duration_ms']
+            : 8000;
+        const batchId = typeof msg['batch_id'] === 'string' ? msg['batch_id'] : null;
+        const caption = typeof msg['caption'] === 'string' ? msg['caption'] : null;
+
+        this.carouselImages.set(images);
+        this.carouselBatchId.set(batchId);
+        this.carouselDurationMs.set(duration);
+        this.carouselCaption.set(caption);
         break;
       }
 
