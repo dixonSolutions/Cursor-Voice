@@ -12,6 +12,8 @@ import { LogService } from './log.service';
 import { ToastService } from './toast.service';
 import { VoiceProvidersService } from './voice-providers.service';
 import { cancelTtsFallback, clearTranscriptTts, configureTranscriptTts, scheduleTtsFallback, stopAllTts } from '../../tts-fallback.js';
+import { primeTtsPlaybackUnlock } from '../../audio.js';
+import { preloadVoiceCues } from '../../sound-effects.js';
 import type { SttBackend, TtsBackend } from '../../intelligence-audio.js';
 
 export interface TranscriptEntry {
@@ -102,6 +104,13 @@ export class VoiceSessionService {
     }
   }
 
+  /** Apply updated per-browser TTS profile to an active session. */
+  refreshBrowserTtsOptions(): void {
+    if (this._session instanceof LlmIntelligenceSession) {
+      this._session.refreshBrowserTtsOptions();
+    }
+  }
+
   notifyJobRunning(running: boolean): void {
     this._jobRunning.set(running);
     this.syncAppState();
@@ -121,6 +130,10 @@ export class VoiceSessionService {
     this._voiceActivated.set(false);
     this._jobRunning.set(false);
     this._micMuted.set(false);
+
+    // iOS Safari: unlock TTS in the user-gesture stack before any long await.
+    await primeTtsPlaybackUnlock();
+    void preloadVoiceCues();
 
     try {
       await this.bridge.setActiveProject(project);
@@ -395,6 +408,15 @@ export class VoiceSessionService {
           undefined,
           'pipeline',
         );
+      },
+      onTurnCancelled: (phrase) => {
+        this.submittingTurn.set(false);
+        this.vadListening.set(false);
+        this.endPhraseArmed.set(false);
+        this._voiceActivated.set(false);
+        this.syncAppState();
+        this.logs.append('info', 'voice', `Turn cancelled — "${phrase}"`);
+        this.toast.info('Cancelled', 'Turn discarded — back to wake listen.');
       },
       onVoiceLog: (event) => {
         this.logs.voiceLog(event.subcategory, event.level, event.summary, event.detail);

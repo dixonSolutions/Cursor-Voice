@@ -2,17 +2,42 @@
  * Amazon Polly TTS playback — fallback when WebKit speechSynthesis is unavailable.
  */
 
+import { getSharedAudioContext, unlockAudioContext } from './audio.js';
 import type { TtsPlayContext } from './tts-interrupt.js';
 import { canUseWebkitTts } from './webkit-capabilities.js';
 
 const MAX_TTS_CHARS = 3000;
 let currentAudio: HTMLAudioElement | null = null;
+let currentBufferSource: AudioBufferSourceNode | null = null;
+let currentGainNode: GainNode | null = null;
 
 function cleanText(text: string): string {
   return text.replace(/^\[Speak to user\]:\s*/i, '').trim().slice(0, MAX_TTS_CHARS);
 }
 
+function isIosDevice(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent;
+  return (
+    /iPad|iPhone|iPod/.test(ua) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+  );
+}
+
 export function stopAmazonTts(): void {
+  if (currentBufferSource) {
+    try {
+      currentBufferSource.stop();
+    } catch {
+      // already stopped
+    }
+    currentBufferSource.disconnect();
+    currentBufferSource = null;
+  }
+  if (currentGainNode) {
+    currentGainNode.disconnect();
+    currentGainNode = null;
+  }
   if (currentAudio) {
     currentAudio.pause();
     currentAudio.src = '';
@@ -59,9 +84,17 @@ export async function speakAmazonPolly(
   }
 
   const blob = await res.blob();
+
+  if (isIosDevice()) {
+    await playBlobViaAudioContext(blob, ctx);
+    return;
+  }
+
   const url = URL.createObjectURL(blob);
   const audio = new Audio(url);
   audio.setAttribute('webkit-playsinline', 'true');
+  const baseVol = ctx?.baseVolume ?? 1;
+  audio.volume = baseVol;
   currentAudio = audio;
 
   await new Promise<void>((resolve, reject) => {
@@ -79,6 +112,14 @@ export async function speakAmazonPolly(
 
     ctx?.signal.addEventListener('abort', onAbort, { once: true });
 
+    if (ctx?.volume) {
+      const orig = ctx.volume.setVolume.bind(ctx.volume);
+      ctx.volume.setVolume = (multiplier: number) => {
+        orig(multiplier);
+        audio.volume = Math.max(0, Math.min(1, baseVol * multiplier));
+      };
+    }
+
     audio.onplay = () => ctx?.onStart();
     audio.onended = () => {
       URL.revokeObjectURL(url);
@@ -91,5 +132,62 @@ export async function speakAmazonPolly(
       reject(new Error('Polly audio playback failed'));
     };
     void audio.play().catch(reject);
+  });
+}
+
+async function playBlobViaAudioContext(blob: Blob, ctx?: TtsPlayContext): Promise<void> {
+  await unlockAudioContext();
+  const audioCtx = getSharedAudioContext();
+  if (audioCtx.state === 'suspended') {
+    await audioCtx.resume();
+  }
+
+  const buffer = await audioCtx.decodeAudioData(await blob.arrayBuffer());
+  const source = audioCtx.createBufferSource();
+  const gain = audioCtx.createGain();
+  const baseVol = ctx?.baseVolume ?? 1;
+  gain.gain.value = baseVol;
+  source.buffer = buffer;
+  source.connect(gain);
+  gain.connect(audioCtx.destination);
+  currentBufferSource = source;
+  currentGainNode = gain;
+
+  await new Promise<void>((resolve, reject) => {
+    const finish = () => {
+      ctx?.signal.removeEventListener('abort', onAbort);
+      if (currentBufferSource === source) currentBufferSource = null;
+      if (currentGainNode === gain) currentGainNode = null;
+      resolve();
+    };
+
+    const onAbort = () => {
+      try {
+        source.stop();
+      } catch {
+        // already stopped
+      }
+      source.disconnect();
+      gain.disconnect();
+      finish();
+    };
+
+    ctx?.signal.addEventListener('abort', onAbort, { once: true });
+
+    if (ctx?.volume) {
+      const orig = ctx.volume.setVolume.bind(ctx.volume);
+      ctx.volume.setVolume = (multiplier: number) => {
+        orig(multiplier);
+        gain.gain.value = Math.max(0, Math.min(1, baseVol * multiplier));
+      };
+    }
+
+    source.onended = finish;
+    try {
+      source.start(0);
+      ctx?.onStart();
+    } catch (err) {
+      reject(err instanceof Error ? err : new Error(String(err)));
+    }
   });
 }

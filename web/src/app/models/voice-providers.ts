@@ -11,7 +11,23 @@ export interface TurnSubmit {
   vadEnabled?: boolean;
 }
 
+export interface WebkitTtsDefaults {
+  rate: number;
+  pitch: number;
+  volume: number;
+  lang: string;
+}
+
+export interface VoiceTtsSettings {
+  cursorVoiceEnabled: boolean;
+  interruptMode: 'deafen' | 'stop';
+  interruptDeafenFactor: number;
+  webkit: WebkitTtsDefaults;
+}
+
 export interface VoiceSettingsResponse {
   wakeWords: WakeWords;
   turnSubmit: TurnSubmit;
+  tts: VoiceTtsSettings;
+  userName?: string;
 }

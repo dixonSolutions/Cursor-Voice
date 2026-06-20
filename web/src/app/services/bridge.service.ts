@@ -620,6 +620,22 @@ export class BridgeService {
     return res.json() as Promise<T>;
   }
 
+  apiGet<T>(path: string): Promise<T> {
+    return this.apiFetch<T>(path);
+  }
+
+  apiPost<T>(path: string, body: unknown = {}): Promise<T> {
+    return this.apiFetch<T>(path, { method: 'POST', body: JSON.stringify(body) });
+  }
+
+  apiPatch<T>(path: string, body: unknown): Promise<T> {
+    return this.apiFetch<T>(path, { method: 'PATCH', body: JSON.stringify(body) });
+  }
+
+  apiDelete<T>(path: string): Promise<T> {
+    return this.apiFetch<T>(path, { method: 'DELETE' });
+  }
+
   async loadConfigFile(): Promise<Record<string, unknown>> {
     return this.apiFetch<Record<string, unknown>>('/api/config');
   }

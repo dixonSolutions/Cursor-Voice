@@ -7,6 +7,7 @@
 
 import { listProjects, getSessionState } from '../state/registry.js';
 import { getWakeWordsFromConfig } from '../voice/wakeWordsConfig.js';
+import { getConfig } from '../config.js';
 
 const INLINE_ACTIVATION_RULES = `## Activation rules
 
@@ -22,6 +23,8 @@ The user **cannot see the screen**. You must **speak out loud** using the \`spea
 You do not know the codebase — **Cursor** (cursor-agent CLI) does. Never guess or hallucinate repo facts.
 
 **Active project:** {{ACTIVE_PROJECT}}
+
+{{USER_CONTEXT}}
 
 {{ACTIVATION_RULES}}
 
@@ -61,14 +64,23 @@ function buildProjectCatalog(): string {
     .join('\n');
 }
 
+function buildUserContextBlock(): string {
+  const { userName } = getConfig().settings;
+  if (!userName) return '';
+  return `**User:** Address the user as **${userName}** throughout the conversation.`;
+}
+
 /** Full orchestrator system prompt with placeholders resolved. */
 export function buildIntelligenceSystemPrompt(): string {
   const { start } = getWakeWordsFromConfig();
   const activationBlock = applyWakeWordPlaceholders(INLINE_ACTIVATION_RULES, start);
+  const userContextBlock = buildUserContextBlock();
 
   return applyWakeWordPlaceholders(
     INLINE_ORCHESTRATOR_TEMPLATE.replace('{{ACTIVATION_RULES}}', activationBlock)
       .replace('{{ACTIVE_PROJECT}}', buildActiveProjectBlock())
+      .replace('{{USER_CONTEXT}}\n\n', userContextBlock ? `${userContextBlock}\n\n` : '')
+      .replace('{{USER_CONTEXT}}', userContextBlock)
       .replace('{{PROJECT_CATALOG}}', buildProjectCatalog()),
     start,
   );

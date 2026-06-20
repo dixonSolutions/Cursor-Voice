@@ -50,9 +50,36 @@ export const TurnSubmitSchema = z.object({
   vadEnabled: z.boolean().default(true),
 });
 
+/** Default WebKit speechSynthesis parameters (overridden per device in PWA localStorage). */
+export const WebkitTtsDefaultsSchema = z.object({
+  /** Speech rate — Web API range 0.1–10; we clamp to 0.5–2 in the UI. */
+  rate: z.number().min(0.1).max(10).default(1.02),
+  /** Pitch multiplier — Web API range 0–2, default 1. */
+  pitch: z.number().min(0).max(2).default(1),
+  /** Base volume — Web API range 0–1, default 1. */
+  volume: z.number().min(0).max(1).default(1),
+  /** BCP-47 language tag when no voiceURI is set. */
+  lang: z.string().min(2).max(16).default('en-US'),
+});
+
+export const VoiceTtsSchema = z.object({
+  /** When false, MCP speak() lines are shown in UI but not played aloud. */
+  cursorVoiceEnabled: z.boolean().default(true),
+  /**
+   * Barge-in behaviour: `deafen` ducks assistant volume until the user submits;
+   * `stop` cancels playback immediately (legacy).
+   */
+  interruptMode: z.enum(['deafen', 'stop']).default('deafen'),
+  /** Volume multiplier (0–1) while the user is capturing after barge-in (deafen mode). */
+  interruptDeafenFactor: z.number().min(0).max(1).default(0.2),
+  /** Server defaults for browser TTS — per-device overrides live in PWA localStorage. */
+  webkit: WebkitTtsDefaultsSchema.default({}),
+}).default({});
+
 export const VoiceSettingsSchema = z.object({
   wakeWords: WakeWordsSchema,
   turnSubmit: TurnSubmitSchema.default({}),
+  tts: VoiceTtsSchema,
 });
 
 // ── Run mode (test vs serve) ────────────────────────────────────────────────
@@ -139,6 +166,8 @@ const SettingsSchema = z.object({
   /** Kill cursor-agent immediately if it tries to spawn Task/subagent sessions. */
   ghostKillEnabled: z.boolean().default(true),
   logLevel: z.enum(['trace', 'debug', 'info', 'warn', 'error']).default('info'),
+  /** Optional name the voice agent uses when addressing the user. */
+  userName: z.string().min(1).max(64).optional(),
 });
 
 const ProjectConfigSchema = z.object({
@@ -164,6 +193,8 @@ export const ConfigFileSchema = z.object({
 export type AppEnv = z.infer<typeof EnvSchema>;
 export type WakeWords = z.infer<typeof WakeWordsSchema>;
 export type TurnSubmit = z.infer<typeof TurnSubmitSchema>;
+export type WebkitTtsDefaults = z.infer<typeof WebkitTtsDefaultsSchema>;
+export type VoiceTtsSettings = z.infer<typeof VoiceTtsSchema>;
 export type VoiceSettingsInput = z.infer<typeof VoiceSettingsSchema>;
 export type VoiceSettings = VoiceSettingsInput;
 export type RunModes = z.infer<typeof RunModesSchema>;
@@ -206,6 +237,15 @@ function migrateRawConfig(raw: unknown): unknown {
     } else {
       const ts = voice['turnSubmit'] as Record<string, unknown>;
       if (ts['vadEnabled'] === undefined) ts['vadEnabled'] = true;
+    }
+    if (!voice['tts'] || typeof voice['tts'] !== 'object') {
+      voice['tts'] = {
+        cursorVoiceEnabled: true,
+        interruptMode: 'deafen',
+        interruptDeafenFactor: 0.2,
+        webkit: { rate: 1.02, pitch: 1, volume: 1, lang: 'en-US' },
+      };
+      log.info('Migrated config — added default settings.voice.tts');
     }
     if (!voice['wakeWords'] || typeof voice['wakeWords'] !== 'object') {
       throw new Error(
@@ -260,20 +300,22 @@ function resolveWorkflowSettings(
 
 let _config: AppConfig | null = null;
 let _configPath = './config.json';
+/** Parsed config.json — kept in memory to avoid disk + Zod on every read. */
+let _configFileCache: ConfigFile | null = null;
 
 export function getConfigPath(): string {
   return _configPath;
 }
 
-function loadFromDisk(): AppConfig {
+function parseEnv(): AppEnv {
   const envResult = EnvSchema.safeParse(process.env);
   if (!envResult.success) {
     throw new Error(`Invalid environment variables:\n${envResult.error.message}`);
   }
-  const env = envResult.data;
-  _configPath = env.CONFIG_PATH;
+  return envResult.data;
+}
 
-  const configPath = resolve(env.CONFIG_PATH);
+function parseConfigFileFromDisk(configPath: string): ConfigFile {
   if (!existsSync(configPath)) {
     throw new Error(
       `config.json not found at ${configPath}.\n` +
@@ -295,14 +337,12 @@ function loadFromDisk(): AppConfig {
     throw new Error(`Invalid config.json:\n${cfgResult.error.message}`);
   }
 
-  const configFile = cfgResult.data;
+  return cfgResult.data;
+}
+
+function buildAppConfig(env: AppEnv, configFile: ConfigFile): AppConfig {
   const workflow = resolveWorkflowSettings(configFile.settings.workflow);
 
-  // Local development (`npm run dev` sets NODE_ENV=development) always uses the
-  // `test` run profile, so the dev bridge binds the local dev port on 127.0.0.1
-  // and never collides with the production host running in `serve` mode on
-  // 0.0.0.0:<serve.backendPort>. config.json's `runMode` controls the HOST only;
-  // run dev and host side by side on different ports. See docs/07-data-and-deployment.md.
   const isDevelopment = process.env.NODE_ENV === 'development';
   const runMode = isDevelopment ? 'test' : configFile.settings.runMode;
   if (isDevelopment && configFile.settings.runMode !== 'test') {
@@ -324,6 +364,28 @@ function loadFromDisk(): AppConfig {
   };
 }
 
+function loadFromDisk(): AppConfig {
+  const env = parseEnv();
+  _configPath = env.CONFIG_PATH;
+  const configPath = resolve(env.CONFIG_PATH);
+  const configFile = parseConfigFileFromDisk(configPath);
+  _configFileCache = configFile;
+  return buildAppConfig(env, configFile);
+}
+
+/** Fast read of validated config.json from memory (no disk I/O). */
+export function getCachedConfigFile(): ConfigFile {
+  if (!_configFileCache) {
+    throw new Error('Config not loaded — call loadConfig() first');
+  }
+  return _configFileCache;
+}
+
+/** Clone for callers that mutate before write. */
+export function cloneConfigFile(): ConfigFile {
+  return structuredClone(getCachedConfigFile());
+}
+
 export function loadConfig(): AppConfig {
   if (_config) return _config;
   _config = loadFromDisk();
@@ -342,8 +404,23 @@ export function loadConfig(): AppConfig {
   return _config;
 }
 
-/** Reload config from disk (after config.json or .env key updates). */
-export function reloadConfig(): AppConfig {
+/**
+ * Reload config from disk, or from an already-validated config.json object
+ * (skips disk read + parse when the caller just wrote the file).
+ */
+export function reloadConfig(file?: ConfigFile): AppConfig {
+  if (file !== undefined) {
+    const validated = ConfigFileSchema.safeParse(file);
+    if (!validated.success) {
+      throw new Error(`Invalid config.json:\n${validated.error.message}`);
+    }
+    _configFileCache = validated.data;
+    const env = _config?.env ?? parseEnv();
+    _configPath = env.CONFIG_PATH;
+    _config = buildAppConfig(env, validated.data);
+    return _config;
+  }
+
   _config = loadFromDisk();
   return _config;
 }

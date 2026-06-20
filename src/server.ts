@@ -39,6 +39,8 @@ import { registerIntelligenceAudioRoutes } from './routes/intelligenceAudio.js';
 import { registerCursorSessionRoutes } from './routes/cursorSessions.js';
 import { registerVoiceSessionPrepareRoutes } from './routes/voiceSessionPrepare.js';
 import { registerConfigRoutes } from './routes/config.js';
+import { registerAdminSettingsRoutes } from './routes/adminSettings.js';
+import { registerProjectsAdminRoutes } from './routes/projectsAdmin.js';
 import { registerMcpServer } from './mcp/server/index.js';
 import { attachDevWebProxy, registerProductionWeb } from './webDispatch.js';
 import { registerControlSocket } from './state/controlSocket.js';
@@ -230,6 +232,8 @@ export async function buildServer(): Promise<FastifyInstance> {
   await registerIntelligenceAudioRoutes(app);
   await registerCursorSessionRoutes(app);
   await registerVoiceSessionPrepareRoutes(app);
+  await registerAdminSettingsRoutes(app);
+  await registerProjectsAdminRoutes(app);
 
   /** GET /api/settings — non-secret operational settings. */
   app.get('/api/settings', async () => {

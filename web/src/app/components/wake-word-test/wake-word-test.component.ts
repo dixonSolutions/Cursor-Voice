@@ -8,6 +8,7 @@ import { Message } from 'primeng/message';
 import { Tag } from 'primeng/tag';
 
 import { captureMicStream, unlockAudioContext } from '../../../audio.js';
+import { playVoiceCueNow } from '../../../sound-effects.js';
 import { isCrossOriginIsolated } from '../../../cross-origin-isolation.js';
 import { SileroVadDetector } from '../../../silero-vad.js';
 import { VoskGrammarSpotter } from '../../../vosk-wake-word.js';
@@ -301,6 +302,7 @@ export class WakeWordTestComponent implements OnInit, OnDestroy {
     this.capturePhaseStartedAt = Date.now();
 
     this.phase.set('stt_listening');
+    void playVoiceCueNow('listening');
     if (this.vadEnabled()) {
       this.statusText.set(
         `Wake phrase "${start}" OK — STT would be recording. Speak your message, then pause (${(silence / 1000).toFixed(1)}s) for VAD to finish.`,
@@ -375,6 +377,7 @@ export class WakeWordTestComponent implements OnInit, OnDestroy {
       console.debug('[wake-test] ignored — too soon after wake');
       return;
     }
+    playVoiceCueNow('sent');
     await this.returnToAwaitingWake(reason);
   }
 
