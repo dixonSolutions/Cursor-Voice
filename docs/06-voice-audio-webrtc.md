@@ -131,6 +131,15 @@ Preview uses `speechSynthesis.speak()` directly from the Config tab (no bridge r
 | `/ws/intelligence` | Voice turns, speak events, tool activity, agent status |
 | `/ws/control` | Legacy tool relay + narrator (worker jobs) |
 
+## Mobile session keepalive
+
+While a voice session is active on a phone, `web/src/session-keepalive.ts` keeps the app
+in a foreground media session (Screen Wake Lock + silent looping audio + Media Session API).
+If the OS suspends the intelligence WebSocket while backgrounded, the session auto-reconnects
+when the user returns.
+
+Limits and user guidance: [`19-mobile-session-keepalive.md`](./19-mobile-session-keepalive.md).
+
 ## Audio processing
 
 `web/src/audio.ts` — mic capture, echo cancellation, noise gate.
@@ -143,3 +152,4 @@ Preview uses `speechSynthesis.speak()` directly from the Config tab (no bridge r
 - [`16-mcp-server-cursor-as-brain.md`](./16-mcp-server-cursor-as-brain.md) — Cursor voice loop
 - [`15-llm-intelligence-workflow.md`](./15-llm-intelligence-workflow.md) — Bedrock orchestrator
 - [`13-voice-providers.md`](./13-voice-providers.md) — wake word config
+- [`19-mobile-session-keepalive.md`](./19-mobile-session-keepalive.md) — mobile screen-off / reconnect

@@ -399,6 +399,14 @@ body {
   color: var(--p-surface-200, #e2e8f0);
 }
 
+.cv-voice-orb-hint--live {
+  max-width: 24rem;
+  margin-top: 0.75rem;
+  padding: 0 1.25rem;
+  font-size: 0.8125rem;
+  opacity: 0.65;
+}
+
 .cv-logs-toolbar {
   display: flex;
   flex-wrap: wrap;
