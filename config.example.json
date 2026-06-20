@@ -37,11 +37,23 @@
     "voice": {
       "wakeWords": {
         "start": "cursor listen",
-        "end": "cursor send"
+        "end": "cursor send",
+        "cancel": "cancel"
       },
       "turnSubmit": {
         "silenceMs": 1500,
         "vadEnabled": true
+      },
+      "tts": {
+        "cursorVoiceEnabled": true,
+        "interruptMode": "deafen",
+        "interruptDeafenFactor": 0.2,
+        "webkit": {
+          "rate": 1.02,
+          "pitch": 1,
+          "volume": 1,
+          "lang": "en-US"
+        }
       }
     },
     "defaultMode": "agent",
@@ -57,7 +69,8 @@
     "narratorCadenceMs": 15000,
     "narratorMaxBufferEvents": 50,
     "ghostKillEnabled": true,
-    "logLevel": "info"
+    "logLevel": "info",
+    "userName": "Alex"
   },
   "projects": [
     {

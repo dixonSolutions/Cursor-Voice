@@ -5,8 +5,10 @@
 import {
   canUseWebkitStt,
   canUseWebkitTts,
+  isIosStandalonePwa,
   probeMicAccess,
   webkitSttSkipReason,
+  webkitTtsSkipReason,
 } from './webkit-capabilities.js';
 
 export interface IntelligenceAudioConfig {
@@ -33,6 +35,9 @@ export function resolveSttBackend(
 }
 
 export function resolveTtsBackend(config: IntelligenceAudioConfig): TtsBackend {
+  if (isIosStandalonePwa() && config.amazonAvailable && config.ttsFallback === 'amazon_polly') {
+    return 'amazon_polly';
+  }
   if (config.preferWebkit && canUseWebkitTts()) return 'webkit';
   if (config.amazonAvailable && config.ttsFallback === 'amazon_polly') {
     return 'amazon_polly';
@@ -55,6 +60,8 @@ export interface AudioBackendResolution {
   tts: TtsBackend;
   /** Why WebKit STT was not selected, if applicable. */
   sttNote?: string;
+  /** Why WebKit TTS was not selected, if applicable. */
+  ttsNote?: string;
 }
 
 /** Session init — probe mic after user gesture; fall back to Amazon when WebKit STT unavailable. */
@@ -79,5 +86,13 @@ export async function resolveAudioBackendsAsync(
     sttNote = 'No STT backend — configure AWS IAM keys for Amazon Transcribe fallback';
   }
 
-  return { stt, tts, sttNote };
+  let ttsNote: string | undefined;
+  if (tts !== 'webkit' && config.preferWebkit) {
+    ttsNote = webkitTtsSkipReason() ?? undefined;
+  }
+  if (tts === 'none' && !ttsNote) {
+    ttsNote = 'No TTS backend — configure AWS IAM keys for Amazon Polly fallback';
+  }
+
+  return { stt, tts, sttNote, ttsNote };
 }

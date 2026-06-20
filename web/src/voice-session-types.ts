@@ -38,6 +38,8 @@ export interface SessionCallbacks {
   onEndPhraseArmed?(phrase: string): void;
   onEndPhraseDetected?(phrase: string): void;
   onTurnSubmitted?(reason: 'silence' | 'vad' | 'end_word'): void;
+  /** User spoke the cancel phrase — turn discarded, mic returns to wake listen. */
+  onTurnCancelled?(phrase: string): void;
   onVoiceLog?(event: VoiceSessionLogEvent): void;
   relayToolCall(callId: string, name: string, args: unknown): Promise<unknown>;
   onToolActivity?(event: {

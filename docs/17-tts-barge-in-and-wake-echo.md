@@ -86,10 +86,18 @@ sequenceDiagram
     PWA->>Vosk: resetTrigger()
     Note over PWA: No interrupt — TTS continues
   else Genuine barge-in
-    PWA->>TTS: interruptWithSnapshot()
-    TTS-->>PWA: heard_complete / heard_partial / not_spoken
-    PWA->>PWA: pendingTtsInterrupt = snapshot
-    PWA->>PWA: enterCapturePhase — user speaks request
+    alt interruptMode = deafen (default)
+      PWA->>TTS: deafen(factor)
+      Note over TTS: Volume ducked — playback continues
+      PWA->>PWA: enterCapturePhase
+      PWA->>TTS: finishDeferredInterrupt() on submit
+      TTS-->>PWA: heard_complete / heard_partial / not_spoken
+    else interruptMode = stop
+      PWA->>TTS: interruptWithSnapshot()
+      TTS-->>PWA: heard_complete / heard_partial / not_spoken
+      PWA->>PWA: pendingTtsInterrupt = snapshot
+      PWA->>PWA: enterCapturePhase
+    end
     PWA->>WS: user_turn + is_interrupt + tts_interrupt
     WS->>Q: enqueue(text, options)
     MCP->>Q: dequeue (long poll)
@@ -115,11 +123,19 @@ If true → `startSpotter.resetTrigger()` and **return**. No TTS stop, no
 
 If false → real barge-in (user said wake word while TTS was saying something else).
 
+**Interrupt modes** (`settings.voice.tts.interruptMode`):
+
+| Mode | Client action | Snapshot timing |
+| --- | --- | --- |
+| `deafen` | `TtsPile.deafen(factor)` — ducks volume, keeps queue draining | `finishDeferredInterrupt()` on turn submit or cancel |
+| `stop` | `interruptWithSnapshot()` — cancels immediately | At barge-in (stored in `pendingTtsInterrupt`) |
+
 ### Step 3 — Snapshot stored locally
 
-`bargeInDuringTts()` calls `ttsPile.interruptWithSnapshot()` and assigns the
-result to `pendingTtsInterrupt`. TTS stops; the session enters utterance capture
-(wake → VAD/end phrase → STT).
+`bargeInDuringTts()` calls `ttsPile.deafen()` or `ttsPile.interruptWithSnapshot()` depending on
+`interruptMode`. In **stop** mode the snapshot is assigned to `pendingTtsInterrupt` immediately.
+In **deafen** mode the snapshot is taken on submit via `finishDeferredInterrupt()`. TTS either
+stops or is ducked; the session enters utterance capture (wake → VAD/end phrase → STT).
 
 The snapshot is **not** sent yet — it waits for the user's transcribed request.
 

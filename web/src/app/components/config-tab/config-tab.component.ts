@@ -1,31 +1,156 @@
 import type { OnInit } from '@angular/core';
-import { Component, computed, inject, signal } from '@angular/core';
+import { ChangeDetectorRef, Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 
 import { Button } from 'primeng/button';
 import { Card } from 'primeng/card';
+import { Checkbox } from 'primeng/checkbox';
+import { Chip } from 'primeng/chip';
+import { Divider } from 'primeng/divider';
 import { Fieldset } from 'primeng/fieldset';
 import { Fluid } from 'primeng/fluid';
 import { IftaLabel } from 'primeng/iftalabel';
+import { InputNumber } from 'primeng/inputnumber';
 import { InputText } from 'primeng/inputtext';
 import { Message } from 'primeng/message';
-import { SelectButton } from 'primeng/selectbutton';
+import { Password } from 'primeng/password';
+import { ProgressSpinner } from 'primeng/progressspinner';
+import { Select } from 'primeng/select';
 import { Tag } from 'primeng/tag';
 import { Textarea } from 'primeng/textarea';
+import { ToggleSwitch } from 'primeng/toggleswitch';
 
 import { phrasesConflict } from '../../../wake-words.js';
+import {
+  currentBrowserProfileId,
+  deleteBrowserTtsProfile,
+  detectBrowserLabel,
+  listBrowserTtsProfiles,
+  listBrowserTtsVoices,
+  saveBrowserTtsProfile,
+  type BrowserTtsProfile,
+} from '../../../browser-tts-settings.js';
+import { AdminService } from '../../services/admin.service';
 import { BridgeService } from '../../services/bridge.service';
 import { ToastService } from '../../services/toast.service';
 import { VoiceProvidersService } from '../../services/voice-providers.service';
 import { VoiceSessionService } from '../../services/voice-session.service';
 import { ConnectionTabComponent } from '../connection-tab/connection-tab.component';
+import type {
+  AdminProject,
+  AuditEntry,
+  AwsKeyStatus,
+  DbStats,
+  HostingSettings,
+  JobSettings,
+  NarratorSettings,
+  WorkflowSettings,
+} from '../../models/admin-settings';
 
-type ConfigView = 'form' | 'json';
+// ── Section definition ─────────────────────────────────────────────────────
 
-interface ViewOption {
+type SectionId =
+  | 'connection'
+  | 'voice'
+  | 'personal'
+  | 'projects'
+  | 'keys'
+  | 'workflow'
+  | 'hosting'
+  | 'jobs'
+  | 'narrator'
+  | 'database'
+  | 'debug';
+
+interface ConfigSection {
+  id: SectionId;
   label: string;
-  value: ConfigView;
+  icon: string;
+  description: string;
+  keywords: string[];
 }
+
+const ALL_SECTIONS: ConfigSection[] = [
+  {
+    id: 'connection',
+    label: 'Connection',
+    icon: 'pi-wifi',
+    description: 'Bridge URL, app token, connection status',
+    keywords: ['bridge', 'token', 'url', 'connect', 'disconnect', 'server'],
+  },
+  {
+    id: 'voice',
+    label: 'Voice & Wake Words',
+    icon: 'pi-microphone',
+    description: 'Activation phrases, VAD, silence threshold, sound effects, TTS',
+    keywords: ['wake', 'phrase', 'vad', 'silence', 'start', 'end', 'cancel', 'audio', 'sound', 'cue', 'tts', 'voice', 'deafen', 'interrupt', 'browser'],
+  },
+  {
+    id: 'personal',
+    label: 'Personal',
+    icon: 'pi-user',
+    description: 'Your name used by the voice agent',
+    keywords: ['name', 'user', 'personal', 'address'],
+  },
+  {
+    id: 'projects',
+    label: 'Projects',
+    icon: 'pi-folder-open',
+    description: 'Manage workspace paths, aliases, and enabled state',
+    keywords: ['project', 'workspace', 'path', 'alias', 'folder', 'repo', 'enable', 'disable'],
+  },
+  {
+    id: 'keys',
+    label: 'AWS Bedrock Keys',
+    icon: 'pi-key',
+    description: 'IAM access key, secret, region — test credentials with a live ping',
+    keywords: ['aws', 'bedrock', 'key', 'iam', 'access', 'secret', 'region', 'credential', 'polly', 'transcribe'],
+  },
+  {
+    id: 'workflow',
+    label: 'LLM & Workflow',
+    icon: 'pi-microchip-ai',
+    description: 'Default workflow, model, region, audio settings, conversation memory',
+    keywords: ['llm', 'model', 'workflow', 'cursor', 'claude', 'sonnet', 'polly', 'voice', 'tts', 'stt', 'memory', 'webkit', 'tokens'],
+  },
+  {
+    id: 'hosting',
+    label: 'Hosting & Network',
+    icon: 'pi-server',
+    description: 'Run mode, ports, public URL, Tailscale, health check',
+    keywords: ['host', 'port', 'url', 'tailscale', 'serve', 'test', 'public', 'network', 'health', 'ping'],
+  },
+  {
+    id: 'jobs',
+    label: 'Job Settings',
+    icon: 'pi-cog',
+    description: 'Concurrency, timeouts, plan-first mode, pre-run flags, ghost kill',
+    keywords: ['job', 'timeout', 'concurrent', 'plan', 'flags', 'ghost', 'kill', 'cache', 'mode', 'agent'],
+  },
+  {
+    id: 'narrator',
+    label: 'Narrator',
+    icon: 'pi-volume-up',
+    description: 'Voice narration enabled, cadence interval, event buffer',
+    keywords: ['narrator', 'narration', 'cadence', 'buffer', 'speak', 'voice', 'interval'],
+  },
+  {
+    id: 'database',
+    label: 'Database & Sessions',
+    icon: 'pi-database',
+    description: 'DB path, table stats, session state, audit log',
+    keywords: ['database', 'db', 'sqlite', 'session', 'audit', 'log', 'history', 'jobs', 'events'],
+  },
+  {
+    id: 'debug',
+    label: 'Debug & Logs',
+    icon: 'pi-wrench',
+    description: 'Log level, raw config.json editor',
+    keywords: ['debug', 'log', 'level', 'trace', 'json', 'config', 'raw', 'editor'],
+  },
+];
+
+// ── Component ──────────────────────────────────────────────────────────────
 
 @Component({
   selector: 'cv-config-tab',
@@ -33,15 +158,19 @@ interface ViewOption {
   imports: [
     FormsModule,
     Button,
-    Card,
+    Divider,
     Fieldset,
     Fluid,
     IftaLabel,
+    InputNumber,
     InputText,
     Message,
-    SelectButton,
+    Password,
+    ProgressSpinner,
+    Select,
     Tag,
     Textarea,
+    ToggleSwitch,
     ConnectionTabComponent,
   ],
   templateUrl: './config-tab.component.html',
@@ -50,54 +179,193 @@ export class ConfigTabComponent implements OnInit {
   protected readonly bridge = inject(BridgeService);
   protected readonly voiceProviders = inject(VoiceProvidersService);
   protected readonly voiceSession = inject(VoiceSessionService);
+  protected readonly admin = inject(AdminService);
+  private readonly cdr = inject(ChangeDetectorRef);
   private readonly toast = inject(ToastService);
 
-  protected readonly configView = signal<ConfigView>('form');
-  protected readonly viewOptions: ViewOption[] = [
-    { label: 'Sections', value: 'form' },
-    { label: 'Raw JSON', value: 'json' },
-  ];
+  // ── Navigation ─────────────────────────────────────────────────────────
 
-  protected wakeStart = '';
-  protected wakeEnd = 'send';
-  protected vadEnabled = true;
-  protected silenceSubmitMs = 1500;
-  protected savingVoice = false;
+  protected readonly activeSection = signal<SectionId | null>(null);
+  protected readonly searchQuery = signal('');
 
-  protected rawJson = '';
-  protected rawJsonDirty = false;
-  protected loadingJson = false;
-  protected savingJson = false;
+  protected readonly allSections = ALL_SECTIONS;
+
+  protected readonly filteredSections = computed(() => {
+    const q = this.searchQuery().toLowerCase().trim();
+    if (!q) return ALL_SECTIONS;
+    return ALL_SECTIONS.filter(
+      (s) =>
+        s.label.toLowerCase().includes(q) ||
+        s.description.toLowerCase().includes(q) ||
+        s.keywords.some((k) => k.includes(q)),
+    );
+  });
+
+  protected readonly activeSectionMeta = computed(() =>
+    ALL_SECTIONS.find((s) => s.id === this.activeSection()) ?? null,
+  );
 
   protected readonly isBridgeConnected = computed(
     () => this.bridge.wsStatus() === 'connected',
   );
+
+  /** HTTP API works with stored credentials — WebSocket is not required. */
+  protected readonly canUseApi = computed(() => this.bridge.hasCredentials());
+
+  protected navigateTo(id: SectionId): void {
+    this.cancelInFlightLoads();
+    this.activeSection.set(id);
+    void this.loadSection(id);
+  }
+
+  /** Invalidate in-flight section loads when navigating away. */
+  private cancelInFlightLoads(): void {
+    this.projectsLoadSeq++;
+    this.loadingProjects = false;
+    this.keysLoadSeq++;
+    this.loadingKeys = false;
+    this.workflowLoadSeq++;
+    this.loadingWorkflow = false;
+    this.hostingLoadSeq++;
+    this.loadingHosting = false;
+    this.jobsLoadSeq++;
+    this.loadingJobs = false;
+    this.narratorLoadSeq++;
+    this.loadingNarrator = false;
+    this.dbLoadSeq++;
+    this.loadingDb = false;
+    this.jsonLoadSeq++;
+    this.loadingJson = false;
+  }
+
+  protected goBack(): void {
+    this.activeSection.set(null);
+    this.searchQuery.set('');
+  }
+
+  // ── Select options ──────────────────────────────────────────────────────
+
+  protected readonly workflowOptions = [
+    { label: 'Cursor Native', value: 'cursor_native' },
+    { label: 'LLM Intelligence (Bedrock)', value: 'llm_intelligence' },
+  ];
+
+  protected readonly pollyEngineOptions = [
+    { label: 'Neural', value: 'neural' },
+    { label: 'Generative', value: 'generative' },
+    { label: 'Standard', value: 'standard' },
+  ];
+
+  protected readonly runModeOptions = [
+    { label: 'Test (local dev)', value: 'test' },
+    { label: 'Serve (production)', value: 'serve' },
+  ];
+
+  protected readonly defaultModeOptions = [
+    { label: 'Agent', value: 'agent' },
+    { label: 'Plan', value: 'plan' },
+  ];
+
+  protected readonly logLevelOptions = [
+    { label: 'Trace', value: 'trace' },
+    { label: 'Debug', value: 'debug' },
+    { label: 'Info', value: 'info' },
+    { label: 'Warn', value: 'warn' },
+    { label: 'Error', value: 'error' },
+  ];
+
+  // ── Lifecycle ───────────────────────────────────────────────────────────
+
+  ngOnInit(): void {
+    void this.voiceProviders.refresh().then(() => this.syncVoiceForm());
+  }
+
+  private async loadSection(id: SectionId): Promise<void> {
+    if (!this.canUseApi()) return;
+    switch (id) {
+      case 'voice':
+        await this.voiceProviders.refresh();
+        this.syncVoiceForm();
+        this.loadBrowserTtsUi();
+        break;
+      case 'personal':
+        this.syncVoiceForm();
+        break;
+      case 'projects':
+        await this.loadProjects();
+        break;
+      case 'keys':
+        await this.loadKeys();
+        break;
+      case 'workflow':
+        await this.loadWorkflow();
+        break;
+      case 'hosting':
+        await this.loadHosting();
+        break;
+      case 'jobs':
+        await this.loadJobs();
+        break;
+      case 'narrator':
+        await this.loadNarrator();
+        break;
+      case 'database':
+        await this.loadDatabase();
+        break;
+      case 'debug':
+        await this.loadRawJson();
+        break;
+    }
+  }
+
+  // ── Voice section ────────────────────────────────────────────────────────
+
+  protected wakeStart = '';
+  protected wakeEnd = 'send';
+  protected wakeCancel = 'cancel';
+  protected vadEnabled = true;
+  protected silenceSubmitMs = 1500;
+  protected savingVoice = false;
+
+  protected cursorVoiceEnabled = true;
+  protected interruptMode: 'deafen' | 'stop' = 'deafen';
+  protected interruptDeafenFactor = 0.2;
+  protected webkitRate = 1.02;
+  protected webkitPitch = 1;
+  protected webkitVolume = 1;
+  protected webkitLang = 'en-US';
+  protected savingTts = false;
+
+  protected browserVoiceUri = '';
+  protected browserTtsRate = 1.02;
+  protected browserTtsPitch = 1;
+  protected browserTtsVolume = 1;
+  protected browserTtsLang = 'en-US';
+  protected browserProfiles: BrowserTtsProfile[] = [];
+  protected browserVoiceOptions: Array<{ label: string; value: string }> = [];
+  protected readonly currentBrowserLabel = detectBrowserLabel();
+  protected readonly currentBrowserId = currentBrowserProfileId();
+
+  protected readonly interruptModeOptions = [
+    { label: 'Deafen — duck volume until you submit', value: 'deafen' },
+    { label: 'Stop — cancel speech immediately', value: 'stop' },
+  ];
 
   protected readonly phraseConflict = computed(() => {
     if (this.vadEnabled) return false;
     return phrasesConflict(this.wakeStart, this.wakeEnd);
   });
 
-  ngOnInit(): void {
-    void this.voiceProviders.refresh().then(() => this.syncVoiceForm());
-  }
-
-  protected onViewChange(view: ConfigView): void {
-    this.configView.set(view);
-    if (view === 'json' && !this.rawJsonDirty) {
-      void this.loadRawJson();
-    }
-  }
-
   protected async onSaveVoiceSettings(): Promise<void> {
     const start = this.wakeStart.trim();
     const end = this.wakeEnd.trim();
+    const cancel = this.wakeCancel.trim();
     if (!start) {
       this.toast.warn('Activation phrase required', 'Set a non-empty start phrase.');
       return;
     }
     if (!this.vadEnabled && phrasesConflict(start, end)) {
-      this.toast.warn('Phrases conflict', 'Wake and end phrases must be different when VAD is off.');
+      this.toast.warn('Phrase conflict', 'Wake and end phrases must differ when VAD is off.');
       return;
     }
     const silenceMs = Number(this.silenceSubmitMs);
@@ -107,34 +375,634 @@ export class ConfigTabComponent implements OnInit {
     }
     this.savingVoice = true;
     try {
-      await this.voiceProviders.updateWakeWords(start, end, silenceMs, this.vadEnabled);
+      await this.voiceProviders.updateWakeWords(start, end, silenceMs, this.vadEnabled, cancel);
       this.syncVoiceForm();
       this.toast.success(
         'Voice settings saved',
         this.voiceSession.conversationActive()
-          ? 'Tap the orb to hang up, then start again to apply.'
+          ? 'Tap the orb to hang up, then restart to apply.'
           : 'Settings apply the next time you tap the orb.',
       );
     } catch (err) {
-      const detail = err instanceof Error ? err.message : String(err);
-      this.toast.error('Could not save voice settings', detail);
+      this.toast.error('Could not save voice settings', err instanceof Error ? err.message : String(err));
     } finally {
       this.savingVoice = false;
     }
   }
 
+  private syncVoiceForm(): void {
+    const data = this.voiceProviders.data();
+    if (data?.wakeWords.start) this.wakeStart = data.wakeWords.start;
+    if (data?.wakeWords.end) this.wakeEnd = data.wakeWords.end;
+    if (data?.wakeWords.cancel) this.wakeCancel = data.wakeWords.cancel;
+    if (data?.turnSubmit.silenceMs) this.silenceSubmitMs = Number(data.turnSubmit.silenceMs);
+    if (data?.turnSubmit.vadEnabled !== undefined) this.vadEnabled = data.turnSubmit.vadEnabled;
+    this.userName = data?.userName ?? '';
+    if (data?.tts) {
+      this.cursorVoiceEnabled = data.tts.cursorVoiceEnabled;
+      this.interruptMode = data.tts.interruptMode;
+      this.interruptDeafenFactor = data.tts.interruptDeafenFactor;
+      this.webkitRate = data.tts.webkit.rate;
+      this.webkitPitch = data.tts.webkit.pitch;
+      this.webkitVolume = data.tts.webkit.volume;
+      this.webkitLang = data.tts.webkit.lang;
+    }
+  }
+
+  private loadBrowserTtsUi(): void {
+    this.browserProfiles = listBrowserTtsProfiles();
+    const voices = listBrowserTtsVoices();
+    this.browserVoiceOptions = [
+      { label: 'System default', value: '' },
+      ...voices.map((v) => ({
+        label: `${v.name} (${v.lang})`,
+        value: v.voiceURI,
+      })),
+    ];
+    const current = this.browserProfiles.find((p) => p.id === this.currentBrowserId);
+    const opts = current?.options ?? {};
+    this.browserVoiceUri = opts.voiceURI ?? '';
+    this.browserTtsRate = opts.rate ?? this.webkitRate;
+    this.browserTtsPitch = opts.pitch ?? this.webkitPitch;
+    this.browserTtsVolume = opts.volume ?? this.webkitVolume;
+    this.browserTtsLang = opts.lang ?? this.webkitLang;
+  }
+
+  protected async onSaveTtsSettings(): Promise<void> {
+    const factor = Number(this.interruptDeafenFactor);
+    if (!Number.isFinite(factor) || factor < 0 || factor > 1) {
+      this.toast.warn('Invalid deafen factor', 'Use a value between 0 and 1.');
+      return;
+    }
+    this.savingTts = true;
+    try {
+      await this.voiceProviders.updateVoiceTts({
+        cursorVoiceEnabled: this.cursorVoiceEnabled,
+        interruptMode: this.interruptMode,
+        interruptDeafenFactor: factor,
+        webkit: {
+          rate: Number(this.webkitRate),
+          pitch: Number(this.webkitPitch),
+          volume: Number(this.webkitVolume),
+          lang: this.webkitLang.trim() || 'en-US',
+        },
+      });
+      this.syncVoiceForm();
+      this.toast.success(
+        'TTS settings saved',
+        this.voiceSession.conversationActive()
+          ? 'Restart the voice session to apply server defaults.'
+          : 'Settings apply the next time you tap the orb.',
+      );
+    } catch (err) {
+      this.toast.error('Could not save TTS settings', err instanceof Error ? err.message : String(err));
+    } finally {
+      this.savingTts = false;
+    }
+  }
+
+  protected onSaveBrowserTtsProfile(): void {
+    saveBrowserTtsProfile(this.currentBrowserId, {
+      voiceURI: this.browserVoiceUri || undefined,
+      rate: Number(this.browserTtsRate),
+      pitch: Number(this.browserTtsPitch),
+      volume: Number(this.browserTtsVolume),
+      lang: this.browserTtsLang.trim() || 'en-US',
+    });
+    this.loadBrowserTtsUi();
+    this.voiceSession.refreshBrowserTtsOptions();
+    this.toast.success('Browser TTS saved', this.currentBrowserLabel);
+  }
+
+  protected onLoadBrowserProfile(profile: BrowserTtsProfile): void {
+    this.browserVoiceUri = profile.options.voiceURI ?? '';
+    this.browserTtsRate = profile.options.rate ?? this.webkitRate;
+    this.browserTtsPitch = profile.options.pitch ?? this.webkitPitch;
+    this.browserTtsVolume = profile.options.volume ?? this.webkitVolume;
+    this.browserTtsLang = profile.options.lang ?? this.webkitLang;
+  }
+
+  protected onDeleteBrowserProfile(id: string): void {
+    deleteBrowserTtsProfile(id);
+    this.loadBrowserTtsUi();
+    this.toast.success('Profile removed');
+  }
+
+  protected onPreviewBrowserTts(): void {
+    if (typeof window === 'undefined' || !window.speechSynthesis) {
+      this.toast.warn('Browser TTS unavailable', 'speechSynthesis is not supported here.');
+      return;
+    }
+    window.speechSynthesis.cancel();
+    const utter = new SpeechSynthesisUtterance('This is how Cursor Voice will sound on this browser.');
+    utter.rate = Number(this.browserTtsRate) || 1;
+    utter.pitch = Number(this.browserTtsPitch) || 1;
+    utter.volume = Number(this.browserTtsVolume) || 1;
+    utter.lang = this.browserTtsLang.trim() || 'en-US';
+    if (this.browserVoiceUri) {
+      const voice = window.speechSynthesis
+        .getVoices()
+        .find((v) => v.voiceURI === this.browserVoiceUri);
+      if (voice) utter.voice = voice;
+    }
+    window.speechSynthesis.speak(utter);
+  }
+
+  // ── Personal section ─────────────────────────────────────────────────────
+
+  protected userName = '';
+  protected savingUserName = false;
+
+  protected async onSaveUserName(): Promise<void> {
+    this.savingUserName = true;
+    try {
+      await this.voiceProviders.updateUserName(this.userName.trim() || null);
+      this.syncVoiceForm();
+      this.toast.success('Name saved', 'The agent will address you by name.');
+    } catch (err) {
+      this.toast.error('Could not save name', err instanceof Error ? err.message : String(err));
+    } finally {
+      this.savingUserName = false;
+    }
+  }
+
+  // ── Projects section ─────────────────────────────────────────────────────
+
+  protected projects: AdminProject[] = [];
+  protected loadingProjects = false;
+  private projectsLoadSeq = 0;
+  protected pingingProject: string | null = null;
+
+  protected showAddProject = false;
+  protected addProject = { name: '', path: '', description: '', aliases: '', enabled: true };
+  protected savingProject = false;
+
+  protected editingProject: AdminProject | null = null;
+  protected editProject = { path: '', description: '', aliases: '', enabled: true };
+  protected savingEditProject = false;
+
+  private async loadProjects(): Promise<void> {
+    const seq = ++this.projectsLoadSeq;
+    this.loadingProjects = true;
+    try {
+      const res = await this.admin.getAdminProjects();
+      if (seq !== this.projectsLoadSeq) return;
+      this.projects = res.projects;
+    } catch (err) {
+      if (seq !== this.projectsLoadSeq) return;
+      this.toast.error('Could not load projects', err instanceof Error ? err.message : String(err));
+    } finally {
+      if (seq === this.projectsLoadSeq) {
+        this.loadingProjects = false;
+        this.cdr.markForCheck();
+      }
+    }
+  }
+
+  protected openAddProject(): void {
+    this.showAddProject = true;
+    this.addProject = { name: '', path: '', description: '', aliases: '', enabled: true };
+  }
+
+  protected cancelAddProject(): void {
+    this.showAddProject = false;
+  }
+
+  protected async onAddProject(): Promise<void> {
+    const name = this.addProject.name.trim();
+    const path = this.addProject.path.trim();
+    if (!name || !path) {
+      this.toast.warn('Missing fields', 'Name and path are required.');
+      return;
+    }
+    this.savingProject = true;
+    try {
+      const aliases = this.addProject.aliases
+        .split(',')
+        .map((a) => a.trim())
+        .filter(Boolean);
+      await this.admin.createProject({
+        name,
+        path,
+        description: this.addProject.description.trim() || undefined,
+        aliases,
+        enabled: this.addProject.enabled,
+      });
+      this.showAddProject = false;
+      this.toast.success('Project added', name);
+      await this.loadProjects();
+    } catch (err) {
+      this.toast.error('Could not add project', err instanceof Error ? err.message : String(err));
+    } finally {
+      this.savingProject = false;
+    }
+  }
+
+  protected startEditProject(p: AdminProject): void {
+    this.editingProject = p;
+    this.editProject = {
+      path: p.path,
+      description: p.description ?? '',
+      aliases: p.aliases.join(', '),
+      enabled: p.enabled,
+    };
+  }
+
+  protected cancelEditProject(): void {
+    this.editingProject = null;
+  }
+
+  protected async onSaveEditProject(): Promise<void> {
+    if (!this.editingProject) return;
+    this.savingEditProject = true;
+    try {
+      const aliases = this.editProject.aliases
+        .split(',')
+        .map((a) => a.trim())
+        .filter(Boolean);
+      await this.admin.updateProject(this.editingProject.name, {
+        path: this.editProject.path.trim(),
+        description: this.editProject.description.trim() || null,
+        aliases,
+        enabled: this.editProject.enabled,
+      });
+      this.editingProject = null;
+      this.toast.success('Project saved');
+      await this.loadProjects();
+    } catch (err) {
+      this.toast.error('Could not save project', err instanceof Error ? err.message : String(err));
+    } finally {
+      this.savingEditProject = false;
+    }
+  }
+
+  protected async onDeleteProject(name: string): Promise<void> {
+    try {
+      await this.admin.deleteProject(name);
+      this.toast.success('Project removed', name);
+      await this.loadProjects();
+    } catch (err) {
+      this.toast.error('Could not remove project', err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  protected async onPingProject(name: string): Promise<void> {
+    this.pingingProject = name;
+    try {
+      const res = await this.admin.pingProject(name);
+      if (res.exists) {
+        this.toast.success('Path exists', res.path);
+      } else {
+        this.toast.warn('Path not found', res.path);
+      }
+      await this.loadProjects();
+    } catch (err) {
+      this.toast.error('Ping failed', err instanceof Error ? err.message : String(err));
+    } finally {
+      this.pingingProject = null;
+    }
+  }
+
+  // ── Keys section ─────────────────────────────────────────────────────────
+
+  protected keyStatus: AwsKeyStatus[] = [];
+  protected keysViable = false;
+  protected loadingKeys = false;
+  private keysLoadSeq = 0;
+  protected testingKeys = false;
+  protected keyTestResult: { ok: boolean; latencyMs: number; error?: string } | null = null;
+
+  protected keyEdits: Record<string, string> = {};
+  protected savingKeys = false;
+
+  private async loadKeys(): Promise<void> {
+    const seq = ++this.keysLoadSeq;
+    this.loadingKeys = true;
+    try {
+      const res = await this.admin.getKeys();
+      if (seq !== this.keysLoadSeq) return;
+      this.keyStatus = res.keys;
+      this.keysViable = res.viable;
+      this.keyEdits = {};
+    } catch (err) {
+      if (seq !== this.keysLoadSeq) return;
+      this.toast.error('Could not load key status', err instanceof Error ? err.message : String(err));
+    } finally {
+      if (seq === this.keysLoadSeq) {
+        this.loadingKeys = false;
+        this.cdr.markForCheck();
+      }
+    }
+  }
+
+  protected async onSaveKeys(): Promise<void> {
+    const updates: Record<string, string> = {};
+    for (const [k, v] of Object.entries(this.keyEdits)) {
+      if (v.trim()) updates[k] = v.trim();
+    }
+    if (Object.keys(updates).length === 0) {
+      this.toast.warn('Nothing to save', 'Enter at least one key value.');
+      return;
+    }
+    this.savingKeys = true;
+    try {
+      const res = await this.admin.patchKeys(updates);
+      this.keyStatus = res.keys;
+      this.keysViable = res.viable;
+      this.keyEdits = {};
+      this.toast.success('Keys saved', 'Credentials updated in .env file.');
+    } catch (err) {
+      this.toast.error('Could not save keys', err instanceof Error ? err.message : String(err));
+    } finally {
+      this.savingKeys = false;
+    }
+  }
+
+  protected async onTestKeys(): Promise<void> {
+    this.testingKeys = true;
+    this.keyTestResult = null;
+    try {
+      this.keyTestResult = await this.admin.testKeys();
+      if (this.keyTestResult.ok) {
+        this.toast.success('Credentials valid', `STS ping: ${this.keyTestResult.latencyMs} ms`);
+      } else {
+        this.toast.warn('Credentials invalid', this.keyTestResult.error ?? 'Unknown error');
+      }
+    } catch (err) {
+      this.keyTestResult = { ok: false, latencyMs: 0, error: err instanceof Error ? err.message : String(err) };
+    } finally {
+      this.testingKeys = false;
+    }
+  }
+
+  // ── Workflow section ─────────────────────────────────────────────────────
+
+  protected workflowData: WorkflowSettings | null = null;
+  protected loadingWorkflow = false;
+  private workflowLoadSeq = 0;
+  protected savingWorkflow = false;
+
+  private async loadWorkflow(): Promise<void> {
+    const seq = ++this.workflowLoadSeq;
+    this.loadingWorkflow = true;
+    try {
+      const res = await this.admin.getWorkflow();
+      if (seq !== this.workflowLoadSeq) return;
+      this.workflowData = structuredClone(res.workflow);
+    } catch (err) {
+      if (seq !== this.workflowLoadSeq) return;
+      this.toast.error('Could not load workflow settings', err instanceof Error ? err.message : String(err));
+    } finally {
+      if (seq === this.workflowLoadSeq) {
+        this.loadingWorkflow = false;
+        this.cdr.markForCheck();
+      }
+    }
+  }
+
+  protected async onSaveWorkflow(): Promise<void> {
+    if (!this.workflowData) return;
+    this.savingWorkflow = true;
+    try {
+      const res = await this.admin.patchWorkflow(this.workflowData);
+      this.workflowData = structuredClone(res.workflow);
+      this.toast.success('Workflow settings saved');
+    } catch (err) {
+      this.toast.error('Could not save workflow settings', err instanceof Error ? err.message : String(err));
+    } finally {
+      this.savingWorkflow = false;
+    }
+  }
+
+  // ── Hosting section ──────────────────────────────────────────────────────
+
+  protected hostingData: HostingSettings | null = null;
+  protected loadingHosting = false;
+  private hostingLoadSeq = 0;
+  protected savingHosting = false;
+  protected pingResult: { ok: boolean; latencyMs: number; error?: string } | null = null;
+  protected pingingHealth = false;
+
+  private async loadHosting(): Promise<void> {
+    const seq = ++this.hostingLoadSeq;
+    this.loadingHosting = true;
+    try {
+      const data = await this.admin.getHosting();
+      if (seq !== this.hostingLoadSeq) return;
+      this.hostingData = data;
+    } catch (err) {
+      if (seq !== this.hostingLoadSeq) return;
+      this.toast.error('Could not load hosting settings', err instanceof Error ? err.message : String(err));
+    } finally {
+      if (seq === this.hostingLoadSeq) {
+        this.loadingHosting = false;
+        this.cdr.markForCheck();
+      }
+    }
+  }
+
+  protected async onSaveHosting(): Promise<void> {
+    if (!this.hostingData) return;
+    this.savingHosting = true;
+    try {
+      const res = await this.admin.patchHosting(this.hostingData);
+      this.hostingData = { runMode: res.runMode, runModes: res.runModes };
+      this.toast.success('Hosting settings saved', 'Restart the bridge to apply port changes.');
+    } catch (err) {
+      this.toast.error('Could not save hosting settings', err instanceof Error ? err.message : String(err));
+    } finally {
+      this.savingHosting = false;
+    }
+  }
+
+  protected async onPingHealth(): Promise<void> {
+    this.pingingHealth = true;
+    this.pingResult = null;
+    try {
+      this.pingResult = await this.admin.pingHealth();
+      if (this.pingResult.ok) {
+        this.toast.success('Health check passed', `${this.pingResult.latencyMs} ms`);
+      } else {
+        this.toast.warn('Health check failed', this.pingResult.error ?? 'No response');
+      }
+    } finally {
+      this.pingingHealth = false;
+    }
+  }
+
+  // ── Jobs section ─────────────────────────────────────────────────────────
+
+  protected jobsData: JobSettings | null = null;
+  protected loadingJobs = false;
+  private jobsLoadSeq = 0;
+  protected savingJobs = false;
+  protected newPreRunFlag = '';
+
+  private async loadJobs(): Promise<void> {
+    const seq = ++this.jobsLoadSeq;
+    this.loadingJobs = true;
+    try {
+      const data = await this.admin.getJobs();
+      if (seq !== this.jobsLoadSeq) return;
+      this.jobsData = data;
+    } catch (err) {
+      if (seq !== this.jobsLoadSeq) return;
+      this.toast.error('Could not load job settings', err instanceof Error ? err.message : String(err));
+    } finally {
+      if (seq === this.jobsLoadSeq) {
+        this.loadingJobs = false;
+        this.cdr.markForCheck();
+      }
+    }
+  }
+
+  protected onAddFlag(): void {
+    if (!this.jobsData || !this.newPreRunFlag.trim()) return;
+    if (!this.jobsData.preRunFlags.includes(this.newPreRunFlag.trim())) {
+      this.jobsData.preRunFlags = [...this.jobsData.preRunFlags, this.newPreRunFlag.trim()];
+    }
+    this.newPreRunFlag = '';
+  }
+
+  protected onRemoveFlag(flag: string): void {
+    if (!this.jobsData) return;
+    this.jobsData.preRunFlags = this.jobsData.preRunFlags.filter((f) => f !== flag);
+  }
+
+  protected async onSaveJobs(): Promise<void> {
+    if (!this.jobsData) return;
+    this.savingJobs = true;
+    try {
+      const res = await this.admin.patchJobs(this.jobsData);
+      this.jobsData = { ...res };
+      this.toast.success('Job settings saved');
+    } catch (err) {
+      this.toast.error('Could not save job settings', err instanceof Error ? err.message : String(err));
+    } finally {
+      this.savingJobs = false;
+    }
+  }
+
+  // ── Narrator section ─────────────────────────────────────────────────────
+
+  protected narratorData: NarratorSettings | null = null;
+  protected loadingNarrator = false;
+  private narratorLoadSeq = 0;
+  protected savingNarrator = false;
+
+  private async loadNarrator(): Promise<void> {
+    const seq = ++this.narratorLoadSeq;
+    this.loadingNarrator = true;
+    try {
+      const data = await this.admin.getNarrator();
+      if (seq !== this.narratorLoadSeq) return;
+      this.narratorData = data;
+    } catch (err) {
+      if (seq !== this.narratorLoadSeq) return;
+      this.toast.error('Could not load narrator settings', err instanceof Error ? err.message : String(err));
+    } finally {
+      if (seq === this.narratorLoadSeq) {
+        this.loadingNarrator = false;
+        this.cdr.markForCheck();
+      }
+    }
+  }
+
+  protected async onSaveNarrator(): Promise<void> {
+    if (!this.narratorData) return;
+    this.savingNarrator = true;
+    try {
+      const res = await this.admin.patchNarrator(this.narratorData);
+      this.narratorData = { ...res };
+      this.toast.success('Narrator settings saved');
+    } catch (err) {
+      this.toast.error('Could not save narrator settings', err instanceof Error ? err.message : String(err));
+    } finally {
+      this.savingNarrator = false;
+    }
+  }
+
+  // ── Database section ─────────────────────────────────────────────────────
+
+  protected dbStats: DbStats | null = null;
+  protected auditEntries: AuditEntry[] = [];
+  protected loadingDb = false;
+  private dbLoadSeq = 0;
+  protected clearingSessions = false;
+
+  private async loadDatabase(): Promise<void> {
+    const seq = ++this.dbLoadSeq;
+    this.loadingDb = true;
+    try {
+      const [stats, audit] = await Promise.all([
+        this.admin.getDbStats(),
+        this.admin.getAuditLog(30),
+      ]);
+      if (seq !== this.dbLoadSeq) return;
+      this.dbStats = stats;
+      this.auditEntries = audit.entries;
+    } catch (err) {
+      if (seq !== this.dbLoadSeq) return;
+      this.toast.error('Could not load database info', err instanceof Error ? err.message : String(err));
+    } finally {
+      if (seq === this.dbLoadSeq) {
+        this.loadingDb = false;
+        this.cdr.markForCheck();
+      }
+    }
+  }
+
+  protected async onClearSessions(): Promise<void> {
+    this.clearingSessions = true;
+    try {
+      const res = await this.admin.clearSessions();
+      this.toast.success('Sessions cleared', `${res.cleared} row(s) removed.`);
+      await this.loadDatabase();
+    } catch (err) {
+      this.toast.error('Could not clear sessions', err instanceof Error ? err.message : String(err));
+    } finally {
+      this.clearingSessions = false;
+    }
+  }
+
+  protected formatBytes(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  }
+
+  // ── Debug section ────────────────────────────────────────────────────────
+
+  protected rawJson = '';
+  protected rawJsonDirty = false;
+  protected loadingJson = false;
+  private jsonLoadSeq = 0;
+  protected savingJson = false;
+  protected jsonLoadError: string | null = null;
+
   protected async loadRawJson(): Promise<void> {
-    if (!this.isBridgeConnected()) return;
+    if (!this.canUseApi()) {
+      this.jsonLoadError = 'Save your app token in Connection before loading config.json.';
+      return;
+    }
+    const seq = ++this.jsonLoadSeq;
     this.loadingJson = true;
+    this.jsonLoadError = null;
     try {
       const config = await this.bridge.loadConfigFile();
+      if (seq !== this.jsonLoadSeq) return;
       this.rawJson = JSON.stringify(config, null, 2);
       this.rawJsonDirty = false;
     } catch (err) {
+      if (seq !== this.jsonLoadSeq) return;
       const detail = err instanceof Error ? err.message : String(err);
+      this.jsonLoadError = detail;
       this.toast.error('Could not load config.json', detail);
     } finally {
-      this.loadingJson = false;
+      if (seq === this.jsonLoadSeq) {
+        this.loadingJson = false;
+        this.cdr.markForCheck();
+      }
     }
   }
 
@@ -142,7 +1010,7 @@ export class ConfigTabComponent implements OnInit {
     this.rawJsonDirty = true;
   }
 
-  protected async saveRawJson(): Promise<void> {
+  protected async onSaveRawJson(): Promise<void> {
     let parsed: unknown;
     try {
       parsed = JSON.parse(this.rawJson);
@@ -158,8 +1026,7 @@ export class ConfigTabComponent implements OnInit {
       this.rawJsonDirty = false;
       this.toast.success('config.json saved', 'Reload voice session to pick up changes.');
     } catch (err) {
-      const detail = err instanceof Error ? err.message : String(err);
-      this.toast.error('Could not save config.json', detail);
+      this.toast.error('Could not save config.json', err instanceof Error ? err.message : String(err));
     } finally {
       this.savingJson = false;
     }
@@ -175,15 +1042,23 @@ export class ConfigTabComponent implements OnInit {
     }
   }
 
-  private syncVoiceForm(): void {
-    const data = this.voiceProviders.data();
-    if (data?.wakeWords.start) this.wakeStart = data.wakeWords.start;
-    if (data?.wakeWords.end) this.wakeEnd = data.wakeWords.end;
-    if (data?.turnSubmit.silenceMs) {
-      this.silenceSubmitMs = Number(data.turnSubmit.silenceMs);
-    }
-    if (data?.turnSubmit.vadEnabled !== undefined) {
-      this.vadEnabled = data.turnSubmit.vadEnabled;
-    }
+  // ── Helpers ──────────────────────────────────────────────────────────────
+
+  protected keySeverity(key: AwsKeyStatus): 'success' | 'warn' | 'secondary' {
+    if (key.optional && !key.configured) return 'secondary';
+    if (key.complete) return 'success';
+    return 'warn';
+  }
+
+  protected keyStatusLabel(key: AwsKeyStatus): string {
+    if (key.optional && !key.configured) return 'Optional — not set';
+    if (key.complete) return key.secret ? 'Set ••••••••' : 'Set';
+    if (key.configured) return 'Too short';
+    return 'Not set';
+  }
+
+  protected get dbTableEntries(): Array<{ table: string; rows: number }> {
+    if (!this.dbStats) return [];
+    return Object.entries(this.dbStats.counts).map(([table, rows]) => ({ table, rows }));
   }
 }

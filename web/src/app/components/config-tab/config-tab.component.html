@@ -1,151 +1,909 @@
-<div class="cv-config">
-  <div class="cv-config-toolbar">
-    <p-selectButton
-      [options]="viewOptions"
-      [ngModel]="configView()"
-      (ngModelChange)="onViewChange($event)"
-      optionLabel="label"
-      optionValue="value" />
+<div class="cv-cfg">
+
+  <!-- ── Global header: search + status ── -->
+  <div class="cv-cfg-header">
+    @if (activeSection()) {
+      <button class="cv-cfg-back" (click)="goBack()" title="Back to settings">
+        <i class="pi pi-arrow-left"></i>
+        <span>Settings</span>
+      </button>
+      <span class="cv-cfg-section-title">{{ activeSectionMeta()?.label }}</span>
+    } @else {
+      <div class="cv-cfg-search-wrap">
+        <i class="pi pi-search cv-cfg-search-icon"></i>
+        <input
+          class="cv-cfg-search"
+          type="search"
+          placeholder="Search settings…"
+          [ngModel]="searchQuery()"
+          (ngModelChange)="searchQuery.set($event)" />
+      </div>
+    }
     @if (!isBridgeConnected()) {
-      <p-tag value="Bridge offline" severity="warn" />
+      <p-tag value="Offline" severity="warn" styleClass="cv-cfg-offline-tag" />
     }
   </div>
 
-  @if (configView() === 'form') {
-    <div class="cv-config-sections">
-      <p-card header="Voice & submit">
-        <p-fluid>
-          <p-message
-            severity="secondary"
-            variant="simple"
-            text="Wake phrase activates the mic (Vosk). Choose Silero VAD or an end wake phrase to finish a turn." />
+  <!-- ── Section list ── -->
+  @if (!activeSection()) {
+    <div class="cv-cfg-list">
+      @for (section of filteredSections(); track section.id) {
+        <button class="cv-cfg-item" (click)="navigateTo(section.id)">
+          <div class="cv-cfg-item-icon">
+            <i [class]="'pi ' + section.icon"></i>
+          </div>
+          <div class="cv-cfg-item-body">
+            <div class="cv-cfg-item-label">{{ section.label }}</div>
+            <div class="cv-cfg-item-desc">{{ section.description }}</div>
+          </div>
+          <i class="pi pi-chevron-right cv-cfg-item-arrow"></i>
+        </button>
+      }
+      @if (filteredSections().length === 0) {
+        <div class="cv-cfg-empty">
+          <i class="pi pi-search"></i>
+          <span>No settings match "<em>{{ searchQuery() }}</em>"</span>
+        </div>
+      }
+    </div>
+  }
 
-          <p-fieldset legend="Start phrase (wake)">
+  <!-- ═══════════════════════════════════════════════════════════════════
+       SECTION DETAIL VIEWS
+  ═══════════════════════════════════════════════════════════════════ -->
+
+  <!-- ── Connection ── -->
+  @if (activeSection() === 'connection') {
+    <div class="cv-cfg-detail">
+      <cv-connection-tab />
+    </div>
+  }
+
+  <!-- ── Voice & Wake Words ── -->
+  @if (activeSection() === 'voice') {
+    <div class="cv-cfg-detail">
+      <p-fluid>
+
+        <p-message
+          severity="secondary"
+          variant="simple"
+          text="Wake phrase activates the mic (Vosk). Choose Silero VAD or a separate end phrase to finish a turn." />
+
+        <p-fieldset legend="Activation">
+          <p-iftalabel>
+            <input pInputText id="cfg-wake-start" [(ngModel)]="wakeStart"
+              placeholder="cursor listen" [disabled]="!isBridgeConnected()" />
+            <label for="cfg-wake-start">Start phrase (wake)</label>
+          </p-iftalabel>
+          <p-iftalabel>
+            <input pInputText id="cfg-wake-cancel" [(ngModel)]="wakeCancel"
+              placeholder="cancel" [disabled]="!isBridgeConnected()" />
+            <label for="cfg-wake-cancel">Cancel phrase</label>
+          </p-iftalabel>
+        </p-fieldset>
+
+        <p-fieldset legend="Turn submit">
+          <div class="cv-cfg-toggle-row">
+            <p-toggleSwitch id="cfg-vad" [(ngModel)]="vadEnabled" [disabled]="!isBridgeConnected()" />
+            <label for="cfg-vad">Silero VAD — detect speech end automatically</label>
+          </div>
+
+          @if (vadEnabled) {
             <p-iftalabel>
-              <input
-                pInputText
-                id="cfg-wake-start"
-                [(ngModel)]="wakeStart"
-                placeholder="cursor listen"
+              <p-inputNumber id="cfg-silence-vad" [(ngModel)]="silenceSubmitMs"
+                [min]="500" [max]="30000" [step]="100" suffix=" ms"
                 [disabled]="!isBridgeConnected()" />
-              <label for="cfg-wake-start">Activation phrase</label>
+              <label for="cfg-silence-vad">VAD silence threshold</label>
+            </p-iftalabel>
+          } @else {
+            <p-iftalabel>
+              <input pInputText id="cfg-wake-end" [(ngModel)]="wakeEnd"
+                placeholder="send" [disabled]="!isBridgeConnected()" />
+              <label for="cfg-wake-end">End phrase</label>
+            </p-iftalabel>
+            <p-iftalabel>
+              <p-inputNumber id="cfg-silence-fallback" [(ngModel)]="silenceSubmitMs"
+                [min]="500" [max]="30000" [step]="100" suffix=" ms"
+                [disabled]="!isBridgeConnected()" />
+              <label for="cfg-silence-fallback">Silence fallback</label>
+            </p-iftalabel>
+            @if (phraseConflict()) {
+              <p-message severity="error" variant="simple"
+                text="Wake and end phrases must be different — e.g. listen / send." />
+            }
+          }
+        </p-fieldset>
+
+        <p-fieldset legend="Cursor voice (TTS)">
+          <p-message severity="secondary" variant="simple"
+            text="Controls MCP speak() playback. When disabled, transcripts still appear but nothing is spoken." />
+
+          <div class="cv-cfg-toggle-row">
+            <p-toggleSwitch id="cfg-cursor-voice" [(ngModel)]="cursorVoiceEnabled"
+              [disabled]="!isBridgeConnected()" />
+            <label for="cfg-cursor-voice">Play Cursor voice aloud</label>
+          </div>
+
+          <p-iftalabel>
+            <p-select id="cfg-interrupt-mode" [(ngModel)]="interruptMode"
+              [options]="interruptModeOptions" optionLabel="label" optionValue="value"
+              [disabled]="!isBridgeConnected()" />
+            <label for="cfg-interrupt-mode">Barge-in behaviour</label>
+          </p-iftalabel>
+
+          @if (interruptMode === 'deafen') {
+            <p-iftalabel>
+              <p-inputNumber id="cfg-deafen-factor" [(ngModel)]="interruptDeafenFactor"
+                [min]="0" [max]="1" [step]="0.05" [minFractionDigits]="2"
+                [disabled]="!isBridgeConnected()" />
+              <label for="cfg-deafen-factor">Deafen volume (0 = mute, 1 = full)</label>
+            </p-iftalabel>
+          }
+
+          <p-button label="Save TTS settings" icon="pi pi-volume-up"
+            [loading]="savingTts" [disabled]="!isBridgeConnected()"
+            (onClick)="onSaveTtsSettings()" />
+        </p-fieldset>
+
+        <p-fieldset legend="Browser TTS — this device">
+          <p-message severity="secondary" variant="simple"
+            text="WebKit speechSynthesis options for {{ currentBrowserLabel }}. Saved locally on this phone/browser — server defaults above apply when no profile exists." />
+
+          <p-iftalabel>
+            <p-select id="cfg-browser-voice" [(ngModel)]="browserVoiceUri"
+              [options]="browserVoiceOptions" optionLabel="label" optionValue="value"
+              [filter]="true" filterPlaceholder="Search voices…" />
+            <label for="cfg-browser-voice">Voice</label>
+          </p-iftalabel>
+
+          <p-iftalabel>
+            <p-inputNumber id="cfg-browser-rate" [(ngModel)]="browserTtsRate"
+              [min]="0.5" [max]="2" [step]="0.05" [minFractionDigits]="2" />
+            <label for="cfg-browser-rate">Rate (speed)</label>
+          </p-iftalabel>
+
+          <p-iftalabel>
+            <p-inputNumber id="cfg-browser-pitch" [(ngModel)]="browserTtsPitch"
+              [min]="0" [max]="2" [step]="0.05" [minFractionDigits]="2" />
+            <label for="cfg-browser-pitch">Pitch</label>
+          </p-iftalabel>
+
+          <p-iftalabel>
+            <p-inputNumber id="cfg-browser-volume" [(ngModel)]="browserTtsVolume"
+              [min]="0" [max]="1" [step]="0.05" [minFractionDigits]="2" />
+            <label for="cfg-browser-volume">Volume</label>
+          </p-iftalabel>
+
+          <p-iftalabel>
+            <input pInputText id="cfg-browser-lang" [(ngModel)]="browserTtsLang"
+              placeholder="en-US" />
+            <label for="cfg-browser-lang">Language (BCP-47)</label>
+          </p-iftalabel>
+
+          <div class="cv-cfg-row-actions">
+            <p-button label="Preview" icon="pi pi-play" severity="secondary" [outlined]="true"
+              (onClick)="onPreviewBrowserTts()" />
+            <p-button label="Save for this browser" icon="pi pi-save"
+              (onClick)="onSaveBrowserTtsProfile()" />
+          </div>
+        </p-fieldset>
+
+        @if (browserProfiles.length > 0) {
+          <p-fieldset legend="Saved browser profiles">
+            @for (profile of browserProfiles; track profile.id) {
+              <div class="cv-cfg-browser-profile">
+                <div class="cv-cfg-browser-profile-info">
+                  <strong>{{ profile.label }}</strong>
+                  <span class="cv-cfg-muted">{{ profile.id }}</span>
+                  @if (profile.id === currentBrowserId) {
+                    <p-tag value="current" severity="success" />
+                  }
+                </div>
+                <div class="cv-cfg-row-actions">
+                  <p-button label="Load" icon="pi pi-upload" size="small" severity="secondary"
+                    [outlined]="true" (onClick)="onLoadBrowserProfile(profile)" />
+                  @if (profile.id !== currentBrowserId) {
+                    <p-button label="Remove" icon="pi pi-trash" size="small"
+                      severity="danger" [outlined]="true"
+                      (onClick)="onDeleteBrowserProfile(profile.id)" />
+                  }
+                </div>
+              </div>
+            }
+          </p-fieldset>
+        }
+
+        <p-button label="Save voice settings" icon="pi pi-save"
+          [loading]="savingVoice"
+          [disabled]="!isBridgeConnected() || (!vadEnabled && phraseConflict())"
+          (onClick)="onSaveVoiceSettings()" />
+
+      </p-fluid>
+    </div>
+  }
+
+  <!-- ── Personal ── -->
+  @if (activeSection() === 'personal') {
+    <div class="cv-cfg-detail">
+      <p-fluid>
+        <p-message severity="secondary" variant="simple"
+          text="The voice agent uses this name when addressing you." />
+        <p-fieldset legend="Your name">
+          <p-iftalabel>
+            <input pInputText id="cfg-user-name" [(ngModel)]="userName"
+              placeholder="e.g. Alex" [disabled]="!isBridgeConnected()" />
+            <label for="cfg-user-name">Name (optional)</label>
+          </p-iftalabel>
+        </p-fieldset>
+        <p-button label="Save name" icon="pi pi-user"
+          [loading]="savingUserName"
+          [disabled]="!isBridgeConnected()"
+          (onClick)="onSaveUserName()" />
+      </p-fluid>
+    </div>
+  }
+
+  <!-- ── Projects ── -->
+  @if (activeSection() === 'projects') {
+    <div class="cv-cfg-detail">
+
+      @if (loadingProjects && projects.length === 0) {
+        <div class="cv-cfg-loading"><p-progressSpinner strokeWidth="3" /></div>
+      }
+
+      @if (!loadingProjects || projects.length > 0) {
+
+        <div class="cv-cfg-projects">
+          @for (p of projects; track p.name) {
+
+            @if (editingProject?.name === p.name) {
+              <!-- inline edit form -->
+              <div class="cv-cfg-project-card cv-cfg-project-editing">
+                <p-fluid>
+                  <p-iftalabel>
+                    <input pInputText id="ep-path" [(ngModel)]="editProject.path" placeholder="/absolute/path" />
+                    <label for="ep-path">Path</label>
+                  </p-iftalabel>
+                  <p-iftalabel>
+                    <input pInputText id="ep-desc" [(ngModel)]="editProject.description" placeholder="Short description" />
+                    <label for="ep-desc">Description</label>
+                  </p-iftalabel>
+                  <p-iftalabel>
+                    <input pInputText id="ep-aliases" [(ngModel)]="editProject.aliases" placeholder="alias1, alias2" />
+                    <label for="ep-aliases">Aliases (comma-separated)</label>
+                  </p-iftalabel>
+                  <div class="cv-cfg-toggle-row">
+                    <p-toggleSwitch [(ngModel)]="editProject.enabled" />
+                    <span>Enabled</span>
+                  </div>
+                  <div class="cv-cfg-row-actions">
+                    <p-button label="Save" icon="pi pi-check" size="small"
+                      [loading]="savingEditProject" (onClick)="onSaveEditProject()" />
+                    <p-button label="Cancel" icon="pi pi-times" size="small"
+                      severity="secondary" [outlined]="true" (onClick)="cancelEditProject()" />
+                  </div>
+                </p-fluid>
+              </div>
+            } @else {
+              <!-- project row -->
+              <div class="cv-cfg-project-card" [class.cv-cfg-project-disabled]="!p.enabled">
+                <div class="cv-cfg-project-info">
+                  <div class="cv-cfg-project-name">
+                    <span>{{ p.name }}</span>
+                    @if (!p.enabled) {
+                      <p-tag value="disabled" severity="secondary" />
+                    }
+                    @if (!p.pathExists) {
+                      <p-tag value="path missing" severity="warn" />
+                    }
+                    @if (p.resumeId) {
+                      <p-tag value="session" severity="info" />
+                    }
+                  </div>
+                  <div class="cv-cfg-project-path">{{ p.path }}</div>
+                  @if (p.description) {
+                    <div class="cv-cfg-project-desc">{{ p.description }}</div>
+                  }
+                  @if (p.aliases.length > 0) {
+                    <div class="cv-cfg-project-aliases">
+                      @for (a of p.aliases; track a) { <p-tag [value]="a" severity="secondary" /> }
+                    </div>
+                  }
+                </div>
+                <div class="cv-cfg-project-actions">
+                  <p-button icon="pi pi-search" size="small" severity="secondary" [outlined]="true"
+                    [loading]="pingingProject === p.name"
+                    title="Check if path exists"
+                    (onClick)="onPingProject(p.name)" />
+                  <p-button icon="pi pi-pencil" size="small" severity="secondary" [outlined]="true"
+                    title="Edit project"
+                    (onClick)="startEditProject(p)" />
+                  <p-button icon="pi pi-trash" size="small" severity="danger" [outlined]="true"
+                    title="Remove project"
+                    (onClick)="onDeleteProject(p.name)" />
+                </div>
+              </div>
+            }
+          }
+        </div>
+
+        <!-- Add project form -->
+        @if (showAddProject) {
+          <div class="cv-cfg-project-card cv-cfg-project-editing">
+            <div class="cv-cfg-section-sub-label">New project</div>
+            <p-fluid>
+              <p-iftalabel>
+                <input pInputText id="ap-name" [(ngModel)]="addProject.name"
+                  placeholder="my-project" />
+                <label for="ap-name">Name (slug, e.g. my-project)</label>
+              </p-iftalabel>
+              <p-iftalabel>
+                <input pInputText id="ap-path" [(ngModel)]="addProject.path"
+                  placeholder="/home/user/projects/my-project" />
+                <label for="ap-path">Absolute path</label>
+              </p-iftalabel>
+              <p-iftalabel>
+                <input pInputText id="ap-desc" [(ngModel)]="addProject.description"
+                  placeholder="Short description" />
+                <label for="ap-desc">Description (optional)</label>
+              </p-iftalabel>
+              <p-iftalabel>
+                <input pInputText id="ap-aliases" [(ngModel)]="addProject.aliases"
+                  placeholder="my project, project name" />
+                <label for="ap-aliases">Speech aliases (comma-separated)</label>
+              </p-iftalabel>
+              <div class="cv-cfg-toggle-row">
+                <p-toggleSwitch [(ngModel)]="addProject.enabled" />
+                <span>Enabled</span>
+              </div>
+              <div class="cv-cfg-row-actions">
+                <p-button label="Add project" icon="pi pi-plus" size="small"
+                  [loading]="savingProject" (onClick)="onAddProject()" />
+                <p-button label="Cancel" icon="pi pi-times" size="small"
+                  severity="secondary" [outlined]="true" (onClick)="cancelAddProject()" />
+              </div>
+            </p-fluid>
+          </div>
+        } @else {
+          <div class="cv-cfg-project-add-row">
+            <p-button label="Add project" icon="pi pi-plus"
+              severity="secondary" [outlined]="true"
+              [disabled]="!isBridgeConnected()"
+              (onClick)="openAddProject()" />
+          </div>
+        }
+
+      }
+    </div>
+  }
+
+  <!-- ── AWS Keys ── -->
+  @if (activeSection() === 'keys') {
+    <div class="cv-cfg-detail">
+
+      @if (loadingKeys && keyStatus.length === 0) {
+        <div class="cv-cfg-loading"><p-progressSpinner strokeWidth="3" /></div>
+      }
+
+      @if (!loadingKeys || keyStatus.length > 0) {
+        <p-fluid>
+          <p-message severity="secondary" variant="simple"
+            text="Keys are stored in .env on the bridge — values are never returned to the UI." />
+
+          <div class="cv-cfg-keys-status">
+            @for (key of keyStatus; track key.envVar) {
+              <div class="cv-cfg-key-row">
+                <div class="cv-cfg-key-info">
+                  <div class="cv-cfg-key-label">{{ key.label }}</div>
+                  <div class="cv-cfg-key-var">{{ key.envVar }}</div>
+                </div>
+                <p-tag [value]="keyStatusLabel(key)" [severity]="keySeverity(key)" />
+              </div>
+            }
+          </div>
+
+          <p-divider />
+
+          <div class="cv-cfg-section-sub-label">Update credentials</div>
+
+          @for (key of keyStatus; track key.envVar) {
+            <p-iftalabel>
+              @if (key.secret) {
+                <p-password [id]="'key-' + key.envVar" [(ngModel)]="keyEdits[key.envVar]"
+                  [feedback]="false" [toggleMask]="true"
+                  placeholder="Enter new value (leave blank to keep current)" />
+              } @else {
+                <input pInputText [id]="'key-' + key.envVar" [(ngModel)]="keyEdits[key.envVar]"
+                  placeholder="Enter new value (leave blank to keep current)" />
+              }
+              <label [for]="'key-' + key.envVar">{{ key.label }}</label>
+            </p-iftalabel>
+          }
+
+          <div class="cv-cfg-row-actions">
+            <p-button label="Save keys" icon="pi pi-save"
+              [loading]="savingKeys"
+              [disabled]="!isBridgeConnected()"
+              (onClick)="onSaveKeys()" />
+            <p-button label="Test credentials" icon="pi pi-bolt"
+              severity="secondary" [outlined]="true"
+              [loading]="testingKeys"
+              [disabled]="!isBridgeConnected() || !keysViable"
+              (onClick)="onTestKeys()" />
+          </div>
+
+          @if (keyTestResult) {
+            <p-message
+              [severity]="keyTestResult.ok ? 'success' : 'warn'"
+              variant="simple"
+              [text]="keyTestResult.ok
+                ? 'STS ping successful — credentials valid. ' + keyTestResult.latencyMs + ' ms'
+                : (keyTestResult.error ?? 'Credentials test failed')" />
+          }
+
+        </p-fluid>
+      }
+    </div>
+  }
+
+  <!-- ── LLM & Workflow ── -->
+  @if (activeSection() === 'workflow') {
+    <div class="cv-cfg-detail">
+
+      @if (loadingWorkflow && !workflowData) {
+        <div class="cv-cfg-loading"><p-progressSpinner strokeWidth="3" /></div>
+      }
+
+      @if (workflowData) {
+        <p-fluid>
+
+          <p-fieldset legend="Default workflow">
+            <p-iftalabel>
+              <p-select id="cfg-workflow-default"
+                [options]="workflowOptions" optionLabel="label" optionValue="value"
+                [(ngModel)]="workflowData.default"
+                [disabled]="!isBridgeConnected()" />
+              <label for="cfg-workflow-default">Active workflow</label>
             </p-iftalabel>
           </p-fieldset>
 
-          <p-fieldset legend="Submit">
-            <label class="cv-voice-toggle-row">
-              <input
-                type="checkbox"
-                id="cfg-vad-enabled"
-                [(ngModel)]="vadEnabled"
+          <p-fieldset legend="LLM (Bedrock)">
+            <p-iftalabel>
+              <input pInputText id="cfg-model"
+                [(ngModel)]="workflowData.llmIntelligence.llm.model"
+                placeholder="us.anthropic.claude-sonnet-4-20250514-v1:0"
                 [disabled]="!isBridgeConnected()" />
-              <span>Silero VAD (detect speech end)</span>
-            </label>
-
-            @if (vadEnabled) {
-              <p-tag value="Silero VAD" severity="info" />
-              <p-iftalabel>
-                <input
-                  pInputText
-                  id="cfg-silence-vad"
-                  type="number"
-                  min="500"
-                  max="30000"
-                  step="100"
-                  [(ngModel)]="silenceSubmitMs"
-                  [disabled]="!isBridgeConnected()" />
-                <label for="cfg-silence-vad">VAD silence threshold (ms)</label>
-              </p-iftalabel>
-            } @else {
-              <p-iftalabel>
-                <input
-                  pInputText
-                  id="cfg-wake-end"
-                  [(ngModel)]="wakeEnd"
-                  placeholder="send"
-                  [disabled]="!isBridgeConnected()" />
-                <label for="cfg-wake-end">End wake phrase</label>
-              </p-iftalabel>
-              <p-iftalabel>
-                <input
-                  pInputText
-                  id="cfg-silence-fallback"
-                  type="number"
-                  min="500"
-                  max="30000"
-                  step="100"
-                  [(ngModel)]="silenceSubmitMs"
-                  [disabled]="!isBridgeConnected()" />
-                <label for="cfg-silence-fallback">Silence fallback (ms)</label>
-              </p-iftalabel>
-              @if (phraseConflict()) {
-                <p-message
-                  severity="error"
-                  variant="simple"
-                  text="Wake and end phrases must be different — e.g. listen / send." />
-              }
-            }
+              <label for="cfg-model">Model ID</label>
+            </p-iftalabel>
+            <p-iftalabel>
+              <input pInputText id="cfg-llm-region"
+                [(ngModel)]="workflowData.llmIntelligence.llm.region"
+                placeholder="us-east-1"
+                [disabled]="!isBridgeConnected()" />
+              <label for="cfg-llm-region">Region</label>
+            </p-iftalabel>
+            <p-iftalabel>
+              <p-inputNumber id="cfg-max-tokens"
+                [(ngModel)]="workflowData.llmIntelligence.llm.maxTokens"
+                [min]="256" [max]="8192" [step]="256"
+                [disabled]="!isBridgeConnected()" />
+              <label for="cfg-max-tokens">Max tokens</label>
+            </p-iftalabel>
           </p-fieldset>
 
-          <p-button
-            label="Save voice settings"
-            icon="pi pi-save"
-            [loading]="savingVoice"
-            [disabled]="!isBridgeConnected() || (!vadEnabled && phraseConflict())"
-            (onClick)="onSaveVoiceSettings()" />
+          <p-fieldset legend="Audio (Polly / Transcribe)">
+            <div class="cv-cfg-toggle-row">
+              <p-toggleSwitch id="cfg-prefer-webkit"
+                [(ngModel)]="workflowData.llmIntelligence.audio.preferWebkit"
+                [disabled]="!isBridgeConnected()" />
+              <label for="cfg-prefer-webkit">Prefer WebKit TTS/STT when available</label>
+            </div>
+            <p-iftalabel>
+              <input pInputText id="cfg-polly-voice"
+                [(ngModel)]="workflowData.llmIntelligence.audio.pollyVoiceId"
+                placeholder="Joanna"
+                [disabled]="!isBridgeConnected()" />
+              <label for="cfg-polly-voice">Polly voice ID</label>
+            </p-iftalabel>
+            <p-iftalabel>
+              <p-select id="cfg-polly-engine"
+                [options]="pollyEngineOptions" optionLabel="label" optionValue="value"
+                [(ngModel)]="workflowData.llmIntelligence.audio.pollyEngine"
+                [disabled]="!isBridgeConnected()" />
+              <label for="cfg-polly-engine">Polly engine</label>
+            </p-iftalabel>
+            <p-iftalabel>
+              <input pInputText id="cfg-transcribe-lang"
+                [(ngModel)]="workflowData.llmIntelligence.audio.transcribeLanguageCode"
+                placeholder="en-US"
+                [disabled]="!isBridgeConnected()" />
+              <label for="cfg-transcribe-lang">Transcribe language code</label>
+            </p-iftalabel>
+            <p-iftalabel>
+              <input pInputText id="cfg-audio-region"
+                [(ngModel)]="workflowData.llmIntelligence.audio.region"
+                placeholder="Same as LLM region"
+                [disabled]="!isBridgeConnected()" />
+              <label for="cfg-audio-region">Audio region override (optional)</label>
+            </p-iftalabel>
+          </p-fieldset>
+
+          <p-fieldset legend="Memory">
+            <p-iftalabel>
+              <p-inputNumber id="cfg-max-turns"
+                [(ngModel)]="workflowData.llmIntelligence.memory.maxTurns"
+                [min]="4" [max]="40" [disabled]="!isBridgeConnected()" />
+              <label for="cfg-max-turns">Max turns in context</label>
+            </p-iftalabel>
+            <p-iftalabel>
+              <p-inputNumber id="cfg-keep-turns"
+                [(ngModel)]="workflowData.llmIntelligence.memory.keepTurns"
+                [min]="2" [max]="20" [disabled]="!isBridgeConnected()" />
+              <label for="cfg-keep-turns">Turns kept after compaction</label>
+            </p-iftalabel>
+            <p-iftalabel>
+              <p-inputNumber id="cfg-summary-sentences"
+                [(ngModel)]="workflowData.llmIntelligence.memory.summarySentences"
+                [min]="1" [max]="6" [disabled]="!isBridgeConnected()" />
+              <label for="cfg-summary-sentences">Summary sentences</label>
+            </p-iftalabel>
+            <p-iftalabel>
+              <p-inputNumber id="cfg-read-max"
+                [(ngModel)]="workflowData.llmIntelligence.readOutputMaxChars"
+                [min]="1000" [max]="32768" [step]="1000"
+                [disabled]="!isBridgeConnected()" />
+              <label for="cfg-read-max">Max output chars per read</label>
+            </p-iftalabel>
+          </p-fieldset>
+
+          <p-button label="Save workflow settings" icon="pi pi-save"
+            [loading]="savingWorkflow"
+            [disabled]="!isBridgeConnected()"
+            (onClick)="onSaveWorkflow()" />
+
         </p-fluid>
-      </p-card>
-
-      <div class="cv-config-embed">
-        <cv-connection-tab />
-      </div>
-
+      }
     </div>
-  } @else {
-    <p-card header="config.json">
+  }
+
+  <!-- ── Hosting & Network ── -->
+  @if (activeSection() === 'hosting') {
+    <div class="cv-cfg-detail">
+
+      @if (loadingHosting && !hostingData) {
+        <div class="cv-cfg-loading"><p-progressSpinner strokeWidth="3" /></div>
+      }
+
+      @if (hostingData) {
+        <p-fluid>
+
+          <p-fieldset legend="Run mode">
+            <p-iftalabel>
+              <p-select id="cfg-run-mode"
+                [options]="runModeOptions" optionLabel="label" optionValue="value"
+                [(ngModel)]="hostingData.runMode"
+                [disabled]="!isBridgeConnected()" />
+              <label for="cfg-run-mode">Mode</label>
+            </p-iftalabel>
+          </p-fieldset>
+
+          <p-fieldset legend="Test mode (local dev)">
+            <p-iftalabel>
+              <p-inputNumber id="cfg-test-backend-port"
+                [(ngModel)]="hostingData.runModes.test.backendPort"
+                [min]="1024" [max]="65535"
+                [disabled]="!isBridgeConnected()" />
+              <label for="cfg-test-backend-port">Backend port</label>
+            </p-iftalabel>
+            <p-iftalabel>
+              <p-inputNumber id="cfg-test-web-port"
+                [(ngModel)]="hostingData.runModes.test.webPort"
+                [min]="1024" [max]="65535"
+                [disabled]="!isBridgeConnected()" />
+              <label for="cfg-test-web-port">Angular dev server port</label>
+            </p-iftalabel>
+          </p-fieldset>
+
+          <p-fieldset legend="Serve mode (production)">
+            <p-iftalabel>
+              <p-inputNumber id="cfg-serve-backend-port"
+                [(ngModel)]="hostingData.runModes.serve.backendPort"
+                [min]="1024" [max]="65535"
+                [disabled]="!isBridgeConnected()" />
+              <label for="cfg-serve-backend-port">Backend port</label>
+            </p-iftalabel>
+            <p-iftalabel>
+              <input pInputText id="cfg-public-url"
+                [(ngModel)]="hostingData.runModes.serve.publicBaseUrl"
+                placeholder="https://your-tailscale-hostname:8787"
+                [disabled]="!isBridgeConnected()" />
+              <label for="cfg-public-url">Public base URL (Tailscale / reverse proxy)</label>
+            </p-iftalabel>
+          </p-fieldset>
+
+          <div class="cv-cfg-row-actions">
+            <p-button label="Save hosting settings" icon="pi pi-save"
+              [loading]="savingHosting"
+              [disabled]="!isBridgeConnected()"
+              (onClick)="onSaveHosting()" />
+            <p-button label="Health check" icon="pi pi-heart"
+              severity="secondary" [outlined]="true"
+              [loading]="pingingHealth"
+              (onClick)="onPingHealth()" />
+          </div>
+
+          @if (pingResult) {
+            <p-message
+              [severity]="pingResult.ok ? 'success' : 'warn'"
+              variant="simple"
+              [text]="pingResult.ok
+                ? 'Bridge healthy — ' + pingResult.latencyMs + ' ms'
+                : (pingResult.error ?? 'Health check failed')" />
+          }
+
+        </p-fluid>
+      }
+    </div>
+  }
+
+  <!-- ── Job Settings ── -->
+  @if (activeSection() === 'jobs') {
+    <div class="cv-cfg-detail">
+
+      @if (loadingJobs && !jobsData) {
+        <div class="cv-cfg-loading"><p-progressSpinner strokeWidth="3" /></div>
+      }
+
+      @if (jobsData) {
+        <p-fluid>
+
+          <p-fieldset legend="Execution">
+            <p-iftalabel>
+              <p-select id="cfg-default-mode"
+                [options]="defaultModeOptions" optionLabel="label" optionValue="value"
+                [(ngModel)]="jobsData.defaultMode"
+                [disabled]="!isBridgeConnected()" />
+              <label for="cfg-default-mode">Default agent mode</label>
+            </p-iftalabel>
+            <p-iftalabel>
+              <p-inputNumber id="cfg-max-concurrent"
+                [(ngModel)]="jobsData.maxConcurrentJobs"
+                [min]="1" [max]="4"
+                [disabled]="!isBridgeConnected()" />
+              <label for="cfg-max-concurrent">Max concurrent jobs</label>
+            </p-iftalabel>
+            <p-iftalabel>
+              <p-inputNumber id="cfg-job-timeout"
+                [(ngModel)]="jobsData.jobTimeoutMs"
+                [min]="10000" [step]="60000" suffix=" ms"
+                [disabled]="!isBridgeConnected()" />
+              <label for="cfg-job-timeout">Job timeout</label>
+            </p-iftalabel>
+            <p-iftalabel>
+              <p-inputNumber id="cfg-model-cache-ttl"
+                [(ngModel)]="jobsData.modelCacheTtlMs"
+                [min]="60000" [step]="60000" suffix=" ms"
+                [disabled]="!isBridgeConnected()" />
+              <label for="cfg-model-cache-ttl">Model cache TTL</label>
+            </p-iftalabel>
+          </p-fieldset>
+
+          <p-fieldset legend="Behaviour">
+            <div class="cv-cfg-toggle-row">
+              <p-toggleSwitch id="cfg-plan-first"
+                [(ngModel)]="jobsData.planFirst"
+                [disabled]="!isBridgeConnected()" />
+              <label for="cfg-plan-first">Plan first — always draft a plan before acting</label>
+            </div>
+            <div class="cv-cfg-toggle-row">
+              <p-toggleSwitch id="cfg-ghost-kill"
+                [(ngModel)]="jobsData.ghostKillEnabled"
+                [disabled]="!isBridgeConnected()" />
+              <label for="cfg-ghost-kill">Ghost kill — automatically stop orphaned agents</label>
+            </div>
+          </p-fieldset>
+
+          <p-fieldset legend="Pre-run flags">
+            <p-message severity="secondary" variant="simple"
+              text="Flags passed to cursor-agent before each job run." />
+            <div class="cv-cfg-flags">
+              @for (flag of jobsData.preRunFlags; track flag) {
+                <div class="cv-cfg-flag-chip">
+                  <span>{{ flag }}</span>
+                  <button class="cv-cfg-flag-remove" (click)="onRemoveFlag(flag)"
+                    [disabled]="!isBridgeConnected()" title="Remove flag">
+                    <i class="pi pi-times"></i>
+                  </button>
+                </div>
+              }
+            </div>
+            <div class="cv-cfg-flag-add-row">
+              <input pInputText [(ngModel)]="newPreRunFlag" placeholder="--flag"
+                (keydown.enter)="onAddFlag()"
+                [disabled]="!isBridgeConnected()" />
+              <p-button icon="pi pi-plus" size="small"
+                [disabled]="!isBridgeConnected() || !newPreRunFlag.trim()"
+                (onClick)="onAddFlag()" />
+            </div>
+          </p-fieldset>
+
+          <p-fieldset legend="Logging">
+            <p-iftalabel>
+              <p-select id="cfg-log-level"
+                [options]="logLevelOptions" optionLabel="label" optionValue="value"
+                [(ngModel)]="jobsData.logLevel"
+                [disabled]="!isBridgeConnected()" />
+              <label for="cfg-log-level">Log level</label>
+            </p-iftalabel>
+          </p-fieldset>
+
+          <p-button label="Save job settings" icon="pi pi-save"
+            [loading]="savingJobs"
+            [disabled]="!isBridgeConnected()"
+            (onClick)="onSaveJobs()" />
+
+        </p-fluid>
+      }
+    </div>
+  }
+
+  <!-- ── Narrator ── -->
+  @if (activeSection() === 'narrator') {
+    <div class="cv-cfg-detail">
+
+      @if (loadingNarrator && !narratorData) {
+        <div class="cv-cfg-loading"><p-progressSpinner strokeWidth="3" /></div>
+      }
+
+      @if (narratorData) {
+        <p-fluid>
+          <p-message severity="secondary" variant="simple"
+            text="The narrator pushes periodic status updates to the voice agent while jobs are running." />
+
+          <div class="cv-cfg-toggle-row">
+            <p-toggleSwitch id="cfg-narrator-enabled"
+              [(ngModel)]="narratorData.narratorEnabled"
+              [disabled]="!isBridgeConnected()" />
+            <label for="cfg-narrator-enabled">Enable narrator</label>
+          </div>
+
+          <p-iftalabel>
+            <p-inputNumber id="cfg-narrator-cadence"
+              [(ngModel)]="narratorData.narratorCadenceMs"
+              [min]="5000" [step]="1000" suffix=" ms"
+              [disabled]="!isBridgeConnected() || !narratorData.narratorEnabled" />
+            <label for="cfg-narrator-cadence">Cadence interval</label>
+          </p-iftalabel>
+
+          <p-iftalabel>
+            <p-inputNumber id="cfg-narrator-buffer"
+              [(ngModel)]="narratorData.narratorMaxBufferEvents"
+              [min]="10" [max]="200"
+              [disabled]="!isBridgeConnected() || !narratorData.narratorEnabled" />
+            <label for="cfg-narrator-buffer">Max buffer events</label>
+          </p-iftalabel>
+
+          <p-button label="Save narrator settings" icon="pi pi-save"
+            [loading]="savingNarrator"
+            [disabled]="!isBridgeConnected()"
+            (onClick)="onSaveNarrator()" />
+        </p-fluid>
+      }
+    </div>
+  }
+
+  <!-- ── Database & Sessions ── -->
+  @if (activeSection() === 'database') {
+    <div class="cv-cfg-detail">
+
+      @if (loadingDb && !dbStats) {
+        <div class="cv-cfg-loading"><p-progressSpinner strokeWidth="3" /></div>
+      }
+
+      @if (!loadingDb || dbStats) {
+
+        @if (dbStats) {
+          <p-fieldset legend="Database file">
+            <div class="cv-cfg-db-meta">
+              <div class="cv-cfg-db-meta-row">
+                <span class="cv-cfg-db-meta-label">Path</span>
+                <code class="cv-cfg-db-path">{{ dbStats.dbPath }}</code>
+              </div>
+              <div class="cv-cfg-db-meta-row">
+                <span class="cv-cfg-db-meta-label">Size</span>
+                <span>{{ formatBytes(dbStats.sizeBytes) }}</span>
+              </div>
+            </div>
+          </p-fieldset>
+
+          <p-fieldset legend="Table row counts">
+            <div class="cv-cfg-db-tables">
+              @for (entry of dbTableEntries; track entry.table) {
+                <div class="cv-cfg-db-table-row">
+                  <code>{{ entry.table }}</code>
+                  <p-tag [value]="entry.rows.toString()" severity="secondary" />
+                </div>
+              }
+            </div>
+          </p-fieldset>
+        }
+
+        <p-fieldset legend="Session state">
+          <p-message severity="secondary" variant="simple"
+            text="Session state tracks the active project and model per connection. Clearing it resets all sessions." />
+          <p-button label="Clear all sessions" icon="pi pi-trash"
+            severity="danger" [outlined]="true"
+            [loading]="clearingSessions"
+            [disabled]="!isBridgeConnected()"
+            (onClick)="onClearSessions()" />
+        </p-fieldset>
+
+        @if (auditEntries.length > 0) {
+          <p-fieldset legend="Recent audit log">
+            <div class="cv-cfg-audit-list">
+              @for (entry of auditEntries; track entry.id) {
+                <div class="cv-cfg-audit-row">
+                  <div class="cv-cfg-audit-meta">
+                    <code class="cv-cfg-audit-tool">{{ entry.tool }}</code>
+                    <p-tag [value]="entry.result"
+                      [severity]="entry.result === 'ok' ? 'success' : 'warn'" />
+                  </div>
+                  @if (entry.reason) {
+                    <div class="cv-cfg-audit-reason">{{ entry.reason }}</div>
+                  }
+                  <div class="cv-cfg-audit-time">{{ entry.created_at }}</div>
+                </div>
+              }
+            </div>
+          </p-fieldset>
+        }
+
+      }
+    </div>
+  }
+
+  <!-- ── Debug & Logs ── -->
+  @if (activeSection() === 'debug') {
+    <div class="cv-cfg-detail">
       <p-fluid>
-        <p-message
-          severity="warn"
-          variant="simple"
-          text="Edits here replace the full config.json on the bridge. Invalid JSON or schema errors are rejected. Secrets stay in .env — not in this file." />
+        <p-message severity="warn" variant="simple"
+          text="Edits here replace the full config.json. Invalid JSON or schema errors are rejected. Secrets stay in .env." />
+
+        @if (loadingJson && !rawJson.trim()) {
+          <div class="cv-cfg-loading"><p-progressSpinner strokeWidth="3" /></div>
+        }
+
+        @if (jsonLoadError) {
+          <p-message severity="error" variant="simple" [text]="jsonLoadError" />
+        }
 
         <p-iftalabel>
-          <textarea
-            pTextarea
-            id="cfg-raw-json"
-            class="cv-config-json"
+          <textarea pTextarea id="cfg-raw-json" class="cv-cfg-json"
             [(ngModel)]="rawJson"
             (ngModelChange)="onRawJsonEdit()"
-            [disabled]="loadingJson || !isBridgeConnected()"
-            rows="24"
+            [readonly]="!canUseApi()"
+            rows="22"
             [autoResize]="false"></textarea>
-          <label for="cfg-raw-json">Raw JSON</label>
+          <label for="cfg-raw-json">config.json</label>
         </p-iftalabel>
 
-        <div class="cv-config-json-actions">
-          <p-button
-            label="Reload"
-            icon="pi pi-refresh"
-            severity="secondary"
-            [outlined]="true"
+        <div class="cv-cfg-row-actions">
+          <p-button label="Reload" icon="pi pi-refresh"
+            severity="secondary" [outlined]="true"
             [loading]="loadingJson"
-            [disabled]="!isBridgeConnected()"
+            [disabled]="!canUseApi()"
             (onClick)="loadRawJson()" />
-          <p-button
-            label="Format"
-            icon="pi pi-align-left"
-            severity="secondary"
-            [outlined]="true"
+          <p-button label="Format" icon="pi pi-align-left"
+            severity="secondary" [outlined]="true"
             [disabled]="!rawJson.trim()"
             (onClick)="formatRawJson()" />
-          <p-button
-            label="Save config.json"
-            icon="pi pi-save"
+          <p-button label="Save config.json" icon="pi pi-save"
             [loading]="savingJson"
-            [disabled]="!isBridgeConnected() || !rawJsonDirty"
-            (onClick)="saveRawJson()" />
+            [disabled]="!canUseApi() || !rawJsonDirty"
+            (onClick)="onSaveRawJson()" />
         </div>
       </p-fluid>
-    </p-card>
+    </div>
   }
+
 </div>

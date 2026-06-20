@@ -31,6 +31,7 @@ export class VoiceProvidersService {
     end?: string,
     silenceMs?: number,
     vadEnabled?: boolean,
+    cancel?: string,
   ): Promise<void> {
     await this.mutate('/api/voice/wake-words', {
       method: 'PATCH',
@@ -39,7 +40,22 @@ export class VoiceProvidersService {
         ...(end !== undefined ? { end } : {}),
         ...(silenceMs !== undefined ? { silenceMs } : {}),
         ...(vadEnabled !== undefined ? { vadEnabled } : {}),
+        ...(cancel !== undefined ? { cancel } : {}),
       }),
+    });
+  }
+
+  async updateUserName(userName: string | null): Promise<void> {
+    await this.mutate('/api/voice/user-name', {
+      method: 'PATCH',
+      body: JSON.stringify({ userName }),
+    });
+  }
+
+  async updateVoiceTts(tts: Partial<VoiceSettingsResponse['tts']>): Promise<void> {
+    await this.mutate('/api/voice/tts', {
+      method: 'PATCH',
+      body: JSON.stringify(tts),
     });
   }
 

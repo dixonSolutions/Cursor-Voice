@@ -6,7 +6,7 @@
  */
 
 import type { FastifyInstance } from 'fastify';
-import { getVoiceSettingsView, setWakeWords } from '../voice/voiceSettingsRegistry.js';
+import { getVoiceSettingsView, setWakeWords, setUserName, setVoiceTts } from '../voice/voiceSettingsRegistry.js';
 import { childLogger } from '../log.js';
 
 const log = childLogger('api:voice');
@@ -35,4 +35,29 @@ export async function registerVoiceProviderRoutes(app: FastifyInstance): Promise
       }
     },
   );
+
+  /** PATCH /api/voice/user-name { userName: string | null } */
+  app.patch<{ Body: { userName?: string | null } }>(
+    '/api/voice/user-name',
+    async (req, reply) => {
+      try {
+        return setUserName(req.body);
+      } catch (err) {
+        const { status, message } = handleError(err);
+        log.warn({ err }, 'update userName failed');
+        return reply.code(status).send({ error: message });
+      }
+    },
+  );
+
+  /** PATCH /api/voice/tts — cursor voice, interrupt deafen, WebKit defaults */
+  app.patch('/api/voice/tts', async (req, reply) => {
+    try {
+      return setVoiceTts(req.body);
+    } catch (err) {
+      const { status, message } = handleError(err);
+      log.warn({ err }, 'update voice TTS failed');
+      return reply.code(status).send({ error: message });
+    }
+  });
 }

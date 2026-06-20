@@ -3,8 +3,8 @@
  */
 
 import type { FastifyInstance } from 'fastify';
-import { ConfigFileSchema, reloadConfig } from '../config.js';
-import { readConfigFile, writeConfigFile } from '../state/configFile.js';
+import { ConfigFileSchema, getCachedConfigFile } from '../config.js';
+import { writeConfigFile } from '../state/configFile.js';
 import { childLogger } from '../log.js';
 
 const log = childLogger('configRoute');
@@ -18,10 +18,10 @@ function handleError(err: unknown): { status: number; message: string } {
 }
 
 export async function registerConfigRoutes(app: FastifyInstance): Promise<void> {
-  /** GET /api/config — full config.json (validated). */
+  /** GET /api/config — full config.json (from memory cache). */
   app.get('/api/config', async (_req, reply) => {
     try {
-      return readConfigFile();
+      return getCachedConfigFile();
     } catch (err) {
       const { status, message } = handleError(err);
       return reply.code(status).send({ error: message });
@@ -38,7 +38,6 @@ export async function registerConfigRoutes(app: FastifyInstance): Promise<void> 
         });
       }
       writeConfigFile(parsed.data);
-      reloadConfig();
       log.info('config.json updated via API');
       return { ok: true };
     } catch (err) {

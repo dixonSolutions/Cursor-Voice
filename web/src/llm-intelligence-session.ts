@@ -9,14 +9,14 @@ import {
   captureMicStream,
   createMicProcessingChain,
   getSharedAudioContext,
-  unlockAudioContext,
+  primeTtsPlaybackUnlock,
   connectSilentSink,
   type MicProcessingChain,
 } from './audio.js';
 import { getVoiceAudioMeter } from './voice-audio-meter.js';
 import type { SessionCallbacks, VoiceAgentStatusEvent, VoiceLogLevel, VoiceLogSubcategory } from './voice-session-types.js';
 import { type TurnSubmit, type WakeWords, textContainsWakePhrase } from './wake-words.js';
-import { stopAllTts, TtsPile, type TtsPlayContext } from './tts-fallback.js';
+import { stopAllTts, TtsPile, prepareSpeechSynthesisForPlayback, type TtsPlayContext } from './tts-fallback.js';
 import { snapshotToPayload, summarizeTtsInterrupt, type TtsInterruptSnapshot } from './tts-interrupt.js';
 import { WebkitSttSession } from './webkit-stt.js';
 import { AmazonSttSession } from './amazon-stt.js';
@@ -33,12 +33,25 @@ import { isCrossOriginIsolated } from './cross-origin-isolation.js';
 import { VoskGrammarSpotter, voskPhraseMatches } from './vosk-wake-word.js';
 import { SileroVadDetector } from './silero-vad.js';
 import { TurnSubmitBuffer } from './turn-submit-buffer.js';
+import { playVoiceCueNow } from './sound-effects.js';
+import {
+  resolveBrowserTtsOptions,
+  type WebkitTtsDefaults,
+} from './browser-tts-settings.js';
+
+export interface VoiceTtsSettings {
+  cursorVoiceEnabled: boolean;
+  interruptMode: 'deafen' | 'stop';
+  interruptDeafenFactor: number;
+  webkit: WebkitTtsDefaults;
+}
 
 export interface IntelligenceAuthOk {
   sessionKey: string;
   workflow: string;
   wakeWords: WakeWords;
   turnSubmit: TurnSubmit;
+  tts?: VoiceTtsSettings;
   model: string;
   audio?: IntelligenceAudioConfig;
 }
@@ -51,6 +64,18 @@ export class LlmIntelligenceSession {
   private closed = false;
   private wakeWords: WakeWords = { start: '', end: 'send' };
   private turnSubmit: TurnSubmit = { silenceMs: 1500, vadEnabled: true };
+  private ttsSettings: VoiceTtsSettings = {
+    cursorVoiceEnabled: true,
+    interruptMode: 'deafen',
+    interruptDeafenFactor: 0.2,
+    webkit: { rate: 1.02, pitch: 1, volume: 1, lang: 'en-US' },
+  };
+  private resolvedWebkitTts = resolveBrowserTtsOptions({
+    rate: 1.02,
+    pitch: 1,
+    volume: 1,
+    lang: 'en-US',
+  });
   private voiceActivated = false;
   /** True while STT is buffering audio between Vosk wake and VAD speech-end cut. */
   private capturingUtterance = false;
@@ -148,7 +173,7 @@ export class LlmIntelligenceSession {
 
   async start(): Promise<void> {
     this.cb.onState('connecting');
-    await unlockAudioContext();
+    await primeTtsPlaybackUnlock();
 
     const wsUrl = `${this.bridgeBase.replace(/^http/, 'ws')}/ws/intelligence`;
     this.ws = new WebSocket(wsUrl);
@@ -191,11 +216,12 @@ export class LlmIntelligenceSession {
     this.sttBackend = resolved.stt;
     this.ttsBackend = resolved.tts;
     console.info('[audio] STT:', this.sttBackend, 'TTS:', this.ttsBackend, resolved.sttNote ?? '');
+    const ttsDetail = resolved.ttsNote ?? resolved.sttNote;
     this.voiceLog(
       'pipeline',
       'info',
       `Audio backends: ${this.sttProviderLabel()} · ${this.ttsProviderLabel()}`,
-      resolved.sttNote,
+      ttsDetail,
     );
     this.wsConnected = true;
 
@@ -372,6 +398,18 @@ export class LlmIntelligenceSession {
 
   private bargeInDuringTts(): void {
     if (!this.ttsPile.isActive()) return;
+
+    if (this.ttsSettings.interruptMode === 'deafen') {
+      const applied = this.ttsPile.deafen(this.ttsSettings.interruptDeafenFactor);
+      if (applied) {
+        this.cb.onTtsBargeIn?.(
+          `assistant ducked to ${Math.round(this.ttsSettings.interruptDeafenFactor * 100)}% — still playing`,
+        );
+        this.voiceLog('tts', 'info', 'TTS deafened', 'barge-in');
+      }
+      return;
+    }
+
     const snap = this.ttsPile.interruptWithSnapshot();
     const payload = snapshotToPayload(snap);
     if (payload) {
@@ -424,6 +462,7 @@ export class LlmIntelligenceSession {
     }
     this.stopStartSpotter();
     this.voiceActivated = true;
+    playVoiceCueNow('listening');
     this.cb.onActivated?.(this.wakeWords.start);
     await this.enterCapturePhase();
   }
@@ -453,8 +492,13 @@ export class LlmIntelligenceSession {
   /** Vosk cancel phrase heard during capture — abort current turn without sending. */
   private onCancelDetected(): void {
     if (this.closed || !this.voiceActivated) return;
+    if (this.ttsPile.isDeferredInterrupt()) {
+      this.ttsPile.finishDeferredInterrupt();
+      this.notifySpeakingState(false);
+    }
+    playVoiceCueNow('cancel');
     console.debug('[cancel] turn cancelled by user');
-    this.cb.onSttError?.('Turn cancelled.');
+    this.cb.onTurnCancelled?.(this.wakeWords.cancel?.trim() || 'cancel');
     this.exitCapturePhase();
     this.voiceActivated = false;
     this.capturingUtterance = false;
@@ -672,6 +716,7 @@ export class LlmIntelligenceSession {
       console.debug('[silero-vad] ignored — too soon after wake');
       return;
     }
+    playVoiceCueNow('sent');
     this.vadSpeechEndPending = true;
     this.vadListening = false;
     void this.stopVadDetector();
@@ -731,6 +776,7 @@ export class LlmIntelligenceSession {
       console.debug('[end-phrase] ignored — too soon after wake');
       return;
     }
+    playVoiceCueNow('sent');
     this.endPhrasePending = true;
     this.listeningForEndPhrase = false;
     this.stopEndSpotter();
@@ -819,6 +865,9 @@ export class LlmIntelligenceSession {
     if (!this.capturingUtterance && !this.vadSpeechEndPending && !this.endPhrasePending) {
       return;
     }
+    if (reason === 'silence') {
+      playVoiceCueNow('sent');
+    }
     this.exitCapturePhase();
     this.vadSpeechEndPending = false;
     this.endPhrasePending = false;
@@ -855,6 +904,14 @@ export class LlmIntelligenceSession {
 
   private sendUserTurn(text: string): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+
+    if (this.ttsPile.isDeferredInterrupt()) {
+      const snap = this.ttsPile.finishDeferredInterrupt();
+      const payload = snapshotToPayload(snap);
+      if (payload) this.pendingTtsInterrupt = payload;
+      this.notifySpeakingState(false);
+    }
+
     const payload: Record<string, unknown> = { type: 'user_turn', text };
     if (this.pendingTtsInterrupt) {
       payload['is_interrupt'] = true;
@@ -897,6 +954,11 @@ export class LlmIntelligenceSession {
         this.wakeWords = wake ?? { start: '', end: 'send' };
         const submit = msg['turnSubmit'] as TurnSubmit | undefined;
         this.turnSubmit = submit ?? { silenceMs: 1500, vadEnabled: true };
+        if (msg['tts'] && typeof msg['tts'] === 'object') {
+          this.ttsSettings = msg['tts'] as VoiceTtsSettings;
+          this.resolvedWebkitTts = resolveBrowserTtsOptions(this.ttsSettings.webkit);
+          this.ttsPile.setBaseVolume(this.resolvedWebkitTts.volume);
+        }
         if (msg['audio'] && typeof msg['audio'] === 'object') {
           this.audioConfig = msg['audio'] as IntelligenceAudioConfig;
         }
@@ -906,11 +968,24 @@ export class LlmIntelligenceSession {
 
       case 'speak': {
         const text = typeof msg['text'] === 'string' ? msg['text'] : '';
-        if (text) {
+        if (text && this.ttsSettings.cursorVoiceEnabled) {
           if (!this.ttsPile.isActive()) {
             this.ttsPile.resetHeard();
           }
           this.enqueueSpeak(text);
+        } else if (text) {
+          this.cb.onAssistantTranscript(text);
+        }
+        break;
+      }
+
+      case 'narration': {
+        const text = typeof msg['text'] === 'string' ? msg['text'] : '';
+        if (text && this.ttsSettings.cursorVoiceEnabled) {
+          this.enqueueSpeak(text);
+          this.cb.onAssistantTranscript(text);
+        } else if (text) {
+          this.cb.onAssistantTranscript(text);
         }
         break;
       }
@@ -1012,7 +1087,14 @@ export class LlmIntelligenceSession {
 
   /** Queue speak lines from MCP — piles and plays sequentially. */
   private enqueueSpeak(text: string): void {
+    if (!this.ttsSettings.cursorVoiceEnabled) return;
     this.ttsPile.enqueue(text);
+  }
+
+  /** Refresh per-browser TTS options (call after Config tab saves local profile). */
+  refreshBrowserTtsOptions(): void {
+    this.resolvedWebkitTts = resolveBrowserTtsOptions(this.ttsSettings.webkit);
+    this.ttsPile.setBaseVolume(this.resolvedWebkitTts.volume);
   }
 
   private async playSpeakUtterance(text: string, ctx: TtsPlayContext): Promise<void> {
@@ -1020,19 +1102,27 @@ export class LlmIntelligenceSession {
     this.voiceLog('tts', 'info', `${provider} start`, text.slice(0, 80));
     const wrappedCtx: TtsPlayContext = {
       signal: ctx.signal,
+      baseVolume: ctx.baseVolume,
+      volume: ctx.volume,
       onStart: () => {
         this.voiceLog('tts', 'info', `${provider} playing`, text.slice(0, 80));
         ctx.onStart();
       },
     };
+    const webkitOpts = {
+      rate: this.resolvedWebkitTts.rate,
+      pitch: this.resolvedWebkitTts.pitch,
+      lang: this.resolvedWebkitTts.lang,
+      voiceURI: this.resolvedWebkitTts.voiceURI,
+    };
 
     try {
       if (this.ttsBackend === 'webkit') {
-        await this.playWebkit(text, wrappedCtx);
+        await this.playWebkit(text, wrappedCtx, webkitOpts);
       } else if (this.ttsBackend === 'amazon_polly') {
         await speakAmazonPolly(text, this.bridgeBase, this.appToken, wrappedCtx);
       } else if (canUseWebkitTts()) {
-        await this.playWebkit(text, wrappedCtx);
+        await this.playWebkit(text, wrappedCtx, webkitOpts);
       } else if (this.audioConfig.amazonAvailable) {
         await speakAmazonPolly(text, this.bridgeBase, this.appToken, wrappedCtx);
       } else {
@@ -1063,7 +1153,7 @@ export class LlmIntelligenceSession {
         }
       } else if (canUseWebkitTts()) {
         try {
-          await this.playWebkit(text, wrappedCtx);
+          await this.playWebkit(text, wrappedCtx, webkitOpts);
           if (!ctx.signal.aborted) {
             this.voiceLog('tts', 'info', 'Browser TTS done (fallback)', text.slice(0, 80));
           }
@@ -1076,7 +1166,11 @@ export class LlmIntelligenceSession {
     }
   }
 
-  private playWebkit(text: string, ctx: TtsPlayContext): Promise<void> {
+  private playWebkit(
+    text: string,
+    ctx: TtsPlayContext,
+    opts?: { rate?: number; pitch?: number; lang?: string; voiceURI?: string },
+  ): Promise<void> {
     return new Promise((resolve) => {
       if (typeof window === 'undefined' || !window.speechSynthesis) {
         resolve();
@@ -1088,8 +1182,18 @@ export class LlmIntelligenceSession {
       }
 
       window.speechSynthesis.getVoices();
+      prepareSpeechSynthesisForPlayback();
       const utter = new SpeechSynthesisUtterance(text);
-      utter.rate = 1.02;
+      utter.rate = opts?.rate ?? 1.02;
+      utter.pitch = opts?.pitch ?? 1;
+      utter.lang = opts?.lang ?? 'en-US';
+      if (opts?.voiceURI) {
+        const voice = window.speechSynthesis
+          .getVoices()
+          .find((v) => v.voiceURI === opts.voiceURI);
+        if (voice) utter.voice = voice;
+      }
+      utter.volume = ctx.baseVolume;
 
       const finish = () => {
         ctx.signal.removeEventListener('abort', onAbort);
@@ -1102,6 +1206,16 @@ export class LlmIntelligenceSession {
       };
 
       ctx.signal.addEventListener('abort', onAbort, { once: true });
+
+      const applyVolume = (multiplier: number) => {
+        utter.volume = Math.max(0, Math.min(1, ctx.baseVolume * multiplier));
+      };
+      const origSetVolume = ctx.volume.setVolume.bind(ctx.volume);
+      ctx.volume.setVolume = (multiplier: number) => {
+        origSetVolume(multiplier);
+        applyVolume(multiplier);
+      };
+
       utter.onstart = () => ctx.onStart();
       utter.onend = () => {
         // Cancel after onend to prevent Chrome's ghost-restart loop.

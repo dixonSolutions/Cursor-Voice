@@ -65,7 +65,18 @@ export function webkitSttSkipReason(): string | null {
 
 /** Sync check: WebKit TTS API + secure context. */
 export function canUseWebkitTts(): boolean {
+  if (isIosStandalonePwa()) return false;
   return isLikelySecureVoiceContext() && hasSpeechSynthesisApi();
+}
+
+/** Human-readable reason WebKit TTS was skipped (for session logs). */
+export function webkitTtsSkipReason(): string | null {
+  if (isIosStandalonePwa()) {
+    return 'iOS home-screen PWA — use Amazon Polly for TTS (WebKit TTS unreliable here)';
+  }
+  if (!isLikelySecureVoiceContext()) return 'Not a secure context (need HTTPS)';
+  if (!hasSpeechSynthesisApi()) return 'speechSynthesis API not available';
+  return null;
 }
 
 /**

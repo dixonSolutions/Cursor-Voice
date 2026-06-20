@@ -51,10 +51,28 @@ Transcribe: `POST /api/intelligence/transcribe` (bridge proxies with IAM keys).
 
 | Backend | When used |
 | --- | --- |
-| **WebKit speechSynthesis** | iPhone (preferred) |
-| **Amazon Polly** | Desktop fallback; also `llm_intelligence` transcript fallback |
+| **WebKit speechSynthesis** | iPhone Safari tab (preferred) |
+| **Amazon Polly** | iOS home-screen PWA, desktop fallback; also `llm_intelligence` transcript fallback |
 
 Polly: `POST /api/intelligence/tts` (bridge proxies with IAM keys).
+
+**iOS audio unlock:** Tap the orb runs `primeTtsPlaybackUnlock()` before any network
+prep — resumes `AudioContext` and (on iOS) speaks a silent dummy utterance so later
+`speak()` events from the WebSocket are not blocked by Safari autoplay policy.
+Home-screen PWAs prefer Polly over WebKit TTS when AWS keys are configured.
+
+## UI sound cues
+
+`web/public/sounds/` — MP3 from [Kenney UI Audio](https://kenney.nl/assets/ui-audio) (CC0).
+Regenerate: `bash scripts/prepare-voice-cues.sh`.
+
+| Cue | File | Kenney source | When | Character |
+| --- | --- | --- | --- | --- |
+| **listening** | `listening.mp3` | `rollover4.wav` | Wake phrase (`onActivated`) | Short beep — mic open |
+| **sent** | `sent.mp3` | `click3.wav` | Turn submitted (`onTurnSubmitted`) | Soft boop — message sent |
+| **cancel** | `cancel.mp3` | `switch2.wav` | Cancel phrase (`onTurnCancelled`) | Toggle-off — turn discarded |
+
+Playback: `web/src/sound-effects.ts` via `playVoiceCueNow()` — fired in `llm-intelligence-session.ts` at Vosk/VAD recognition, **before** STT flush. Preload on orb tap.
 
 For **`cursor_native`**, primary TTS comes from MCP `speak()` events pushed over
 `/ws/intelligence`. For **`llm_intelligence`**, orchestrator `speak` tool + optional
@@ -62,21 +80,49 @@ browser TTS fallback (`web/src/tts-fallback.ts`).
 
 ## TTS barge-in
 
-User can say the wake phrase during assistant playback. The client:
+User can say the wake phrase during assistant playback. The client behaviour depends on
+`settings.voice.tts.interruptMode`:
 
-1. Stops TTS and snapshots what was playing (`heard_complete`, `heard_partial`, `not_spoken`)
-2. Opens mic capture for the new request
-3. Sends `tts_interrupt` with the next `user_turn` so Cursor knows what was heard
+| Mode | Behaviour |
+| --- | --- |
+| **`deafen`** (default) | Ducks assistant volume to `interruptDeafenFactor` (0–1). Speech continues in the background while the user captures a new request. Playback stops when the turn is submitted or cancelled. |
+| **`stop`** | Cancels TTS immediately and snapshots what was playing (legacy). |
 
-Cursor receives the snapshot via `next_voice_turn()` → `tts_interrupt`.
+On submit (deafen mode), the client snapshots `heard_complete` / `heard_partial` / `not_spoken`
+and sends `tts_interrupt` with the `user_turn` so Cursor knows what was heard.
 
-**Wake-word echo:** If assistant TTS says the wake phrase aloud, Vosk may hear it
+Set `settings.voice.tts.cursorVoiceEnabled: false` to disable MCP `speak()` playback entirely
+(transcripts still appear in the UI).
+
+Configure in Config tab → Voice & Wake Words, or `PATCH /api/voice/tts`.
+
+### Wake-word echo
 from the speaker. The client ignores that detection when the **current TTS line**
 contains the wake phrase — barge-in stays enabled for real user interrupts.
 
 Full flow, data shapes, and file map: [`17-tts-barge-in-and-wake-echo.md`](./17-tts-barge-in-and-wake-echo.md).
 
 Types: `src/voice/ttsInterrupt.ts`, `web/src/tts-interrupt.ts`.
+
+## Browser TTS options
+
+When the WebKit `speechSynthesis` backend is active, each `SpeechSynthesisUtterance` supports:
+
+| Property | Range | Default | Purpose |
+| --- | --- | --- | --- |
+| `voice` | system voices | — | Timbre / accent (selected by `voiceURI`) |
+| `rate` | 0.1–10 (UI: 0.5–2) | `1.02` | Speaking speed |
+| `pitch` | 0–2 | `1` | Tone |
+| `volume` | 0–1 | `1` | Loudness |
+| `lang` | BCP-47 | `en-US` | Language when no voice is set |
+
+**Server defaults** live in `config.json` → `settings.voice.tts.webkit`.
+
+**Per-device overrides** are stored in PWA `localStorage` (`web/src/browser-tts-settings.ts`)
+keyed by browser + OS (e.g. `safari-ios`, `chrome-macos`). The Config tab lists all saved
+profiles and lets you edit voice/rate/pitch/volume for the current browser.
+
+Preview uses `speechSynthesis.speak()` directly from the Config tab (no bridge round-trip).
 
 ## WebSocket endpoints
 

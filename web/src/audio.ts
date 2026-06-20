@@ -54,6 +54,57 @@ export async function unlockAudioContext(): Promise<void> {
   }
 }
 
+let ttsPlaybackPrimed = false;
+
+function isIosDevice(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent;
+  return (
+    /iPad|iPhone|iPod/.test(ua) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+  );
+}
+
+/**
+ * Prime TTS for async playback — call synchronously inside a user gesture (orb tap)
+ * before any `await`, or iOS Safari blocks later speak() / Audio.play() calls.
+ *
+ * - Web Audio: resume AudioContext (Polly decode path).
+ * - speechSynthesis: silent dummy utterance unlocks programmatic speaks on iOS.
+ */
+export async function primeTtsPlaybackUnlock(): Promise<void> {
+  await unlockAudioContext();
+
+  if (typeof window === 'undefined' || !window.speechSynthesis) return;
+  if (ttsPlaybackPrimed) {
+    window.speechSynthesis.resume();
+    return;
+  }
+
+  window.speechSynthesis.cancel();
+  window.speechSynthesis.resume();
+  window.speechSynthesis.getVoices();
+
+  // iOS Safari requires an in-gesture utterance before async speak() works.
+  if (!isIosDevice()) {
+    ttsPlaybackPrimed = true;
+    return;
+  }
+
+  await new Promise<void>((resolve) => {
+    const utter = new SpeechSynthesisUtterance('\u00a0');
+    utter.volume = 0.01;
+    utter.rate = 10;
+    const done = () => resolve();
+    utter.onend = done;
+    utter.onerror = done;
+    window.speechSynthesis.speak(utter);
+    window.setTimeout(done, 300);
+  });
+
+  ttsPlaybackPrimed = true;
+}
+
 /** Shared AudioContext for mic processing graphs. */
 export function getSharedAudioContext(): AudioContext {
   if (!_audioCtx) {
