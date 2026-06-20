@@ -136,13 +136,13 @@ export class VoiceTabComponent {
     if (!backends) return null;
     const stt =
       backends.stt === 'webkit'
-        ? 'WebKit STT'
+        ? 'Browser STT'
         : backends.stt === 'amazon_transcribe'
           ? 'Amazon Transcribe'
           : 'Text input';
     const tts =
       backends.tts === 'webkit'
-        ? 'WebKit TTS'
+        ? 'Browser TTS'
         : backends.tts === 'amazon_polly'
           ? 'Amazon Polly'
           : 'No TTS';
@@ -246,7 +246,7 @@ export class VoiceTabComponent {
     const start = this.activationPhrase();
     const backends = this.voiceSession.audioBackends();
     if (backends?.stt === 'text_only') {
-      return 'No mic STT — type below. Mic path requires WebKit or Amazon Transcribe.';
+      return 'No mic STT — type below. Mic path requires browser speech recognition or Amazon Transcribe.';
     }
     return `Tap the orb — then say "${start}" to activate. Background noise is filtered.`;
   });

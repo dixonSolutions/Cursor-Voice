@@ -74,7 +74,7 @@ Parallel Agents capability exposed via voice.
 
 | Tool | Purpose |
 | --- | --- |
-| `show_images(images, duration_ms?, caption?)` | Push image carousel to PWA. New batch replaces old. See [`17-image-carousel.md`](./17-image-carousel.md). |
+| `show_images(images, duration_ms?, caption?)` | Push image carousel to PWA. New batch replaces old. See [`18-image-carousel.md`](./18-image-carousel.md). |
 
 ---
 

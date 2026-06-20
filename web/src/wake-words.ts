@@ -28,6 +28,25 @@ export function isStartPhrase(text: string, start: string): boolean {
   return normText.startsWith(`${normPhrase} `);
 }
 
+/** True when text contains the wake phrase as consecutive whole words (e.g. TTS line). */
+export function textContainsWakePhrase(text: string, wake: string): boolean {
+  const normText = normalizeForWakeMatch(text);
+  const normWake = normalizeForWakeMatch(wake);
+  if (!normWake || !normText) return false;
+  if (normText === normWake) return true;
+
+  const wakeWords = normWake.split(' ');
+  const textWords = normText.split(' ');
+  if (textWords.length < wakeWords.length) return false;
+
+  for (let i = 0; i <= textWords.length - wakeWords.length; i++) {
+    if (wakeWords.every((word, j) => textWords[i + j] === word)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /** Remove the wake prefix from an utterance that already matched isStartPhrase. */
 export function stripStartPhrase(text: string, start: string): string {
   const normText = normalizeForWakeMatch(text);

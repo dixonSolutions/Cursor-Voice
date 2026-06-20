@@ -176,7 +176,9 @@ function buildMcpServer(sessionKey: string): McpServer {
       'ask (read-only), debug (instruments and investigates). ' +
       'Set use_worktree: true to run in an isolated git worktree alongside the current worker ' +
       '— this enables true parallel execution without working-tree conflicts. ' +
-      "Speak to confirm the task with the user before spawning. Don't start silently.",
+      'Speak to confirm the task with the user before spawning. Include in instructions that the worker ' +
+      'must produce clear, narratable progress (files, commands, phases) for live voice updates. ' +
+      "Don't start silently.",
     {
       instructions: z.string().min(1).describe("The coding task — use the user's words."),
       mode: z
@@ -714,10 +716,10 @@ function buildMcpServer(sessionKey: string): McpServer {
   server.tool(
     'submit_plan_for_approval',
     'Present a numbered plan to the user and wait for them to approve, reject, or request modifications. ' +
-      'The PWA shows a structured plan card with step-by-step detail. ' +
+      'The PWA shows a structured plan card with step-by-step detail — a core hands-free UX feature. ' +
       'This tool BLOCKS until the user responds or timeout_ms elapses. ' +
       'Always use this before applying significant, multi-file, or irreversible changes. ' +
-      'Do NOT call speak() before this — the PWA card is the notification.',
+      'Speak first: tell the user the plan is on their phone and summarize it in one sentence, then call this tool.',
     {
       title: z.string().min(1).max(200).describe('Short title summarising the plan (e.g. "Refactor auth module").'),
       steps: z

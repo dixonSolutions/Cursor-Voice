@@ -3,7 +3,7 @@
     "runMode": "test",
     "runModes": {
       "test": {
-        "backendPort": 3000,
+        "backendPort": 5089,
         "webPort": 4200
       },
       "serve": {

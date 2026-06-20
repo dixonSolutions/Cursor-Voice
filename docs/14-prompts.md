@@ -30,8 +30,9 @@ When the user reviews UI on their phone or says **"Browser"**:
 - Set `browser: true` on `spawn_agent` or `cursor_submit` (worker takes browser snapshots).
 - Brain calls `show_images` with screenshot paths from the worker summary.
 
-See [`17-image-carousel.md`](./17-image-carousel.md).
+See [`18-image-carousel.md`](./18-image-carousel.md).
 
 ## Related docs
 
 - [`16-mcp-server-cursor-as-brain.md`](./16-mcp-server-cursor-as-brain.md) — voice agent boot prompting
+- [`17-tts-barge-in-and-wake-echo.md`](./17-tts-barge-in-and-wake-echo.md) — `tts_interrupt` fields referenced in barge-in prompt section

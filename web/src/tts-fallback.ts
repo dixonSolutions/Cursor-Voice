@@ -77,6 +77,11 @@ export class TtsPile {
     return this.active || this.draining || this.queue.length > 0;
   }
 
+  /** Line currently playing — used to ignore wake-word echo from assistant TTS. */
+  getCurrentLine(): string | null {
+    return this.currentLine;
+  }
+
   resetHeard(): void {
     this.completedLines.length = 0;
     this.currentLine = null;

@@ -15,7 +15,7 @@ import {
 } from './audio.js';
 import { getVoiceAudioMeter } from './voice-audio-meter.js';
 import type { SessionCallbacks, VoiceAgentStatusEvent, VoiceLogLevel, VoiceLogSubcategory } from './voice-session-types.js';
-import { type TurnSubmit, type WakeWords } from './wake-words.js';
+import { type TurnSubmit, type WakeWords, textContainsWakePhrase } from './wake-words.js';
 import { stopAllTts, TtsPile, type TtsPlayContext } from './tts-fallback.js';
 import { snapshotToPayload, summarizeTtsInterrupt, type TtsInterruptSnapshot } from './tts-interrupt.js';
 import { WebkitSttSession } from './webkit-stt.js';
@@ -30,7 +30,7 @@ import {
 } from './intelligence-audio.js';
 import type { SttGate } from './stt-gate.js';
 import { isCrossOriginIsolated } from './cross-origin-isolation.js';
-import { VoskGrammarSpotter } from './vosk-wake-word.js';
+import { VoskGrammarSpotter, voskPhraseMatches } from './vosk-wake-word.js';
 import { SileroVadDetector } from './silero-vad.js';
 import { TurnSubmitBuffer } from './turn-submit-buffer.js';
 
@@ -334,7 +334,7 @@ export class LlmIntelligenceSession {
     this.stopStartSpotter();
     try {
       this.startSpotter = new VoskGrammarSpotter({
-        onMatch: () => void this.onVoskStartDetected(),
+        onMatch: (_phrase, heard) => void this.onVoskStartDetected(heard),
         onError: (message) => {
           console.warn('[vosk-start]', message);
           this.cb.onSttError?.(`Wake phrase spotter: ${message}`);
@@ -382,10 +382,29 @@ export class LlmIntelligenceSession {
     this.notifySpeakingState(false);
   }
 
-  private async onVoskStartDetected(): Promise<void> {
+  /**
+   * During TTS, ignore wake detections that match the line being spoken — that is
+   * acoustic echo from the assistant saying the wake phrase, not a user barge-in.
+   */
+  private isTtsWakeWordEcho(heard: string): boolean {
+    const wake = this.wakeWords.start.trim();
+    if (!wake || !voskPhraseMatches(heard, wake)) return false;
+
+    const ttsLine = this.ttsPile.getCurrentLine();
+    if (!ttsLine) return false;
+
+    return textContainsWakePhrase(ttsLine, wake);
+  }
+
+  private async onVoskStartDetected(heard: string): Promise<void> {
     if (this.closed) return;
 
     if (this.ttsSpeaking || this.ttsPile.isActive()) {
+      if (this.isTtsWakeWordEcho(heard)) {
+        this.startSpotter?.resetTrigger();
+        this.voiceLog('pipeline', 'debug', 'Wake ignored — TTS echo', heard);
+        return;
+      }
       this.bargeInDuringTts();
     }
 
@@ -553,7 +572,7 @@ export class LlmIntelligenceSession {
         onFinal: (text) => this.onUserText(text),
         onError: (message) => {
           console.warn('[webkit-stt]', message);
-          this.voiceLog('stt', 'error', 'WebKit STT error', message);
+          this.voiceLog('stt', 'error', 'Browser STT error', message);
           this.cb.onSttError?.(message);
           if (this.vadSpeechEndPending || this.endPhrasePending || this.capturingUtterance) {
             this.recoverCaptureError();
@@ -1046,11 +1065,11 @@ export class LlmIntelligenceSession {
         try {
           await this.playWebkit(text, wrappedCtx);
           if (!ctx.signal.aborted) {
-            this.voiceLog('tts', 'info', 'WebKit TTS done (fallback)', text.slice(0, 80));
+            this.voiceLog('tts', 'info', 'Browser TTS done (fallback)', text.slice(0, 80));
           }
         } catch (webkitErr) {
           const webkitMsg = webkitErr instanceof Error ? webkitErr.message : String(webkitErr);
-          this.voiceLog('tts', 'error', 'WebKit TTS fallback error', webkitMsg.slice(0, 120));
+          this.voiceLog('tts', 'error', 'Browser TTS fallback error', webkitMsg.slice(0, 120));
           console.warn('[tts webkit fallback]', webkitErr);
         }
       }
@@ -1114,15 +1133,15 @@ export class LlmIntelligenceSession {
   }
 
   private sttProviderLabel(): string {
-    if (this.sttBackend === 'webkit') return 'WebKit STT';
+    if (this.sttBackend === 'webkit') return 'Browser STT';
     if (this.sttBackend === 'amazon_transcribe') return 'Amazon Transcribe';
     return 'STT';
   }
 
   private ttsProviderLabel(): string {
-    if (this.ttsBackend === 'webkit') return 'WebKit TTS';
+    if (this.ttsBackend === 'webkit') return 'Browser TTS';
     if (this.ttsBackend === 'amazon_polly') return 'Amazon Polly';
-    if (canUseWebkitTts()) return 'WebKit TTS';
+    if (canUseWebkitTts()) return 'Browser TTS';
     if (this.audioConfig.amazonAvailable) return 'Amazon Polly';
     return 'TTS';
   }

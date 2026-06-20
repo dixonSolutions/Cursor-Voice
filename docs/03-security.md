@@ -84,7 +84,7 @@ the long-lived app token, because `<img>` cannot send `Authorization` headers.
 3. **No persistent URLs** — keys are in-memory only; batch cleared on control WS disconnect.
 4. **Size limits** — max 10 images per batch, 4 MB decoded per base64 item.
 
-Full design: [`17-image-carousel.md`](./17-image-carousel.md).
+Full design: [`18-image-carousel.md`](./18-image-carousel.md).
 
 ### Why the prompt string is acceptable model-controlled input
 

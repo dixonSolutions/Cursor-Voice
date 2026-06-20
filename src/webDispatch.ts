@@ -1,8 +1,8 @@
 /**
  * Web traffic dispatch — development proxy vs production static SPA.
  *
- * Development (unified port — see settings.runModes.test.backendPort):
- *   - User opens ONE URL (e.g. http://localhost:8000).
+ * Development (unified port — see settings.runModes.test.backendPort, default 5089):
+ *   - User opens ONE URL (e.g. http://localhost:5089).
  *   - /api/* and /ws/* are handled by the bridge.
  *   - Everything else is proxied to ng serve on webPort (HMR, internal only).
  *
