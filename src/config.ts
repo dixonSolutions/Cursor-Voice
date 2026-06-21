@@ -81,8 +81,12 @@ export const VoiceTtsSchema = z.object({
    * `stop` cancels playback immediately (legacy).
    */
   interruptMode: z.enum(['deafen', 'stop']).default('deafen'),
-  /** Volume multiplier (0–1) while the user is capturing after barge-in (deafen mode). */
+  /** Volume multiplier (0–1) while assistant TTS plays after wake-word barge-in (deafen mode). */
   interruptDeafenFactor: z.number().min(0).max(1).default(0.2),
+  /** Play error earcon on TTS failures, disconnects, and other voice pipeline errors. */
+  errorSoundEnabled: z.boolean().default(true),
+  /** Speak error messages aloud via TTS (independent of cursorVoiceEnabled). */
+  errorSpeakEnabled: z.boolean().default(true),
   /** Server defaults for browser TTS — per-device overrides live in PWA localStorage. */
   webkit: WebkitTtsDefaultsSchema.default({}),
 }).default({});
@@ -254,9 +258,15 @@ function migrateRawConfig(raw: unknown): unknown {
         cursorVoiceEnabled: true,
         interruptMode: 'deafen',
         interruptDeafenFactor: 0.2,
+        errorSoundEnabled: true,
+        errorSpeakEnabled: true,
         webkit: { rate: 1.02, pitch: 1, volume: 1, lang: 'en-US' },
       };
       log.info('Migrated config — added default settings.voice.tts');
+    } else {
+      const tts = voice['tts'] as Record<string, unknown>;
+      if (tts['errorSoundEnabled'] === undefined) tts['errorSoundEnabled'] = true;
+      if (tts['errorSpeakEnabled'] === undefined) tts['errorSpeakEnabled'] = true;
     }
     if (!voice['wakeWords'] || typeof voice['wakeWords'] !== 'object') {
       throw new Error(

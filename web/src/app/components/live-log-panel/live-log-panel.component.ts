@@ -1,4 +1,3 @@
-import type { AfterViewInit, ElementRef, OnDestroy } from '@angular/core';
 import {
   Component,
   ViewChild,
@@ -6,6 +5,10 @@ import {
   computed,
   inject,
   signal,
+  Input,
+  type AfterViewInit,
+  type ElementRef,
+  type OnDestroy,
 } from '@angular/core';
 
 import { Button } from 'primeng/button';
@@ -35,13 +38,14 @@ export class LiveLogPanelComponent implements AfterViewInit, OnDestroy {
 
   @ViewChild('viewport') private viewport?: ElementRef<HTMLDivElement>;
 
+  /** When false, the panel is not rendered (voice tab controls visibility). */
+  @Input() visible = true;
+
   private readonly scrollTop = signal(0);
   private readonly stickToBottom = signal(true);
   private readonly viewportHeightPx = signal(DEFAULT_VIEWPORT_HEIGHT_PX);
   private viewReady = false;
   private resizeObserver?: ResizeObserver;
-
-  protected readonly visible = computed(() => true);
 
   /** Voice + transcript only — bridge/system logs stay in the Logs tab. */
   protected readonly sessionEntries = computed(() =>
@@ -67,7 +71,7 @@ export class LiveLogPanelComponent implements AfterViewInit, OnDestroy {
 
   constructor() {
     afterRenderEffect(() => {
-      if (!this.viewReady || !this.visible()) return;
+      if (!this.viewReady || !this.visible) return;
       const entries = this.sessionEntries();
       if (entries.length === 0 || !this.stickToBottom()) return;
       // Depend on the latest line so every append triggers a post-render scroll.

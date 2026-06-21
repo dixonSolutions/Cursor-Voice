@@ -71,6 +71,28 @@ export class LogService {
     );
   }
 
+  /** Replace voice session lines with persisted history from the server. */
+  loadSessionHistory(
+    entries: Array<{ at: string; level: LogLevel; summary: string; detail?: string }>,
+  ): void {
+    this.clearVoiceSession();
+    if (entries.length === 0) return;
+
+    const historical: LogEntry[] = entries.map((entry) => ({
+      id: _nextId++,
+      at: Date.parse(entry.at) || Date.now(),
+      level: entry.level,
+      category: 'voice',
+      summary: entry.summary,
+      detail: entry.detail,
+    }));
+
+    this.entries.update((list) => {
+      const merged = [...list, ...historical];
+      return merged.length > MAX_ENTRIES ? merged.slice(merged.length - MAX_ENTRIES) : merged;
+    });
+  }
+
   /** Full single-line text for clipboard copy. */
   formatEntryLine(entry: LogEntry): string {
     const tag = entry.subcategory ?? entry.category;

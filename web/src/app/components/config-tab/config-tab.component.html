@@ -140,6 +140,20 @@
             </p-iftalabel>
           }
 
+          <div class="cv-cfg-toggle-row">
+            <p-toggleSwitch id="cfg-error-sound" [(ngModel)]="errorSoundEnabled"
+              [disabled]="!isBridgeConnected()" />
+            <label for="cfg-error-sound">Play error sound on failures</label>
+          </div>
+
+          <div class="cv-cfg-toggle-row">
+            <p-toggleSwitch id="cfg-error-speak" [(ngModel)]="errorSpeakEnabled"
+              [disabled]="!isBridgeConnected()" />
+            <label for="cfg-error-speak">Speak error messages aloud</label>
+          </div>
+          <p-message severity="secondary" variant="simple"
+            text="Turn off spoken errors to hear only the error earcon — useful when you want a quick alert without TTS." />
+
           <p-button label="Save TTS settings" icon="pi pi-volume-up"
             [loading]="savingTts" [disabled]="!isBridgeConnected()"
             (onClick)="onSaveTtsSettings()" />

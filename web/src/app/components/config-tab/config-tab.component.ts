@@ -330,6 +330,8 @@ export class ConfigTabComponent implements OnInit {
   protected cursorVoiceEnabled = true;
   protected interruptMode: 'deafen' | 'stop' = 'deafen';
   protected interruptDeafenFactor = 0.2;
+  protected errorSoundEnabled = true;
+  protected errorSpeakEnabled = true;
   protected webkitRate = 1.02;
   protected webkitPitch = 1;
   protected webkitVolume = 1;
@@ -347,7 +349,7 @@ export class ConfigTabComponent implements OnInit {
   protected readonly currentBrowserId = currentBrowserProfileId();
 
   protected readonly interruptModeOptions = [
-    { label: 'Deafen — duck volume until you submit', value: 'deafen' },
+    { label: 'Deafen — duck while assistant speaks on wake barge-in', value: 'deafen' },
     { label: 'Stop — cancel speech immediately', value: 'stop' },
   ];
 
@@ -402,6 +404,8 @@ export class ConfigTabComponent implements OnInit {
       this.cursorVoiceEnabled = data.tts.cursorVoiceEnabled;
       this.interruptMode = data.tts.interruptMode;
       this.interruptDeafenFactor = data.tts.interruptDeafenFactor;
+      this.errorSoundEnabled = data.tts.errorSoundEnabled ?? true;
+      this.errorSpeakEnabled = data.tts.errorSpeakEnabled ?? true;
       this.webkitRate = data.tts.webkit.rate;
       this.webkitPitch = data.tts.webkit.pitch;
       this.webkitVolume = data.tts.webkit.volume;
@@ -440,6 +444,8 @@ export class ConfigTabComponent implements OnInit {
         cursorVoiceEnabled: this.cursorVoiceEnabled,
         interruptMode: this.interruptMode,
         interruptDeafenFactor: factor,
+        errorSoundEnabled: this.errorSoundEnabled,
+        errorSpeakEnabled: this.errorSpeakEnabled,
         webkit: {
           rate: Number(this.webkitRate),
           pitch: Number(this.webkitPitch),

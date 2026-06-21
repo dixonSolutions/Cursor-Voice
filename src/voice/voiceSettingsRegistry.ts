@@ -61,6 +61,8 @@ const VoiceTtsBodySchema = z.object({
   cursorVoiceEnabled: z.boolean().optional(),
   interruptMode: z.enum(['deafen', 'stop']).optional(),
   interruptDeafenFactor: z.number().min(0).max(1).optional(),
+  errorSoundEnabled: z.boolean().optional(),
+  errorSpeakEnabled: z.boolean().optional(),
   webkit: z
     .object({
       rate: z.number().min(0.1).max(10).optional(),
@@ -123,6 +125,8 @@ export function setVoiceTts(raw: unknown): VoiceSettingsResponse {
       cursorVoiceEnabled: true,
       interruptMode: 'deafen' as const,
       interruptDeafenFactor: 0.2,
+      errorSoundEnabled: true,
+      errorSpeakEnabled: true,
       webkit: { rate: 1.02, pitch: 1, volume: 1, lang: 'en-US' },
     };
     voice.tts = {
@@ -130,6 +134,8 @@ export function setVoiceTts(raw: unknown): VoiceSettingsResponse {
       interruptMode: parsed.data.interruptMode ?? current.interruptMode,
       interruptDeafenFactor:
         parsed.data.interruptDeafenFactor ?? current.interruptDeafenFactor,
+      errorSoundEnabled: parsed.data.errorSoundEnabled ?? current.errorSoundEnabled ?? true,
+      errorSpeakEnabled: parsed.data.errorSpeakEnabled ?? current.errorSpeakEnabled ?? true,
       webkit: {
         ...current.webkit,
         ...(parsed.data.webkit ?? {}),

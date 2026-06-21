@@ -292,6 +292,132 @@ export function listCursorSessionsForProject(
   }));
 }
 
+export type SessionLogLevel = 'info' | 'warn' | 'error';
+
+export interface SessionLogLine {
+  at: string;
+  level: SessionLogLevel;
+  summary: string;
+  detail?: string;
+}
+
+function formatJobEventLine(
+  kind: JobEventKind,
+  payload: string | null,
+  jobPrompt: string,
+): { level: SessionLogLevel; summary: string; detail?: string } | null {
+  let parsed: Record<string, unknown> = {};
+  if (payload) {
+    try {
+      parsed = JSON.parse(payload) as Record<string, unknown>;
+    } catch {
+      parsed = { raw: payload };
+    }
+  }
+
+  switch (kind) {
+    case 'job_started':
+      return { level: 'info', summary: 'Job started', detail: jobPrompt.slice(0, 200) };
+    case 'file_write': {
+      const path = String(parsed['path'] ?? parsed['file'] ?? 'file');
+      return { level: 'info', summary: `Wrote ${path}` };
+    }
+    case 'file_read': {
+      const path = String(parsed['path'] ?? parsed['file'] ?? 'file');
+      return { level: 'info', summary: `Read ${path}` };
+    }
+    case 'shell_run': {
+      const cmd = String(parsed['command'] ?? parsed['cmd'] ?? parsed['shell'] ?? 'command');
+      return { level: 'info', summary: `Ran ${cmd.slice(0, 120)}` };
+    }
+    case 'progress_tick': {
+      const text = String(parsed['text'] ?? parsed['message'] ?? '');
+      return text ? { level: 'info', summary: text.slice(0, 200) } : null;
+    }
+    case 'job_done':
+      return { level: 'info', summary: 'Job finished' };
+    case 'job_error': {
+      const err = String(parsed['message'] ?? parsed['error'] ?? 'Job failed');
+      return { level: 'error', summary: err.slice(0, 200) };
+    }
+    case 'ghost_killed':
+      return { level: 'warn', summary: 'Ghost agent killed' };
+    case 'system_init':
+      return { level: 'info', summary: 'Cursor session initialized' };
+    case 'raw':
+      return payload
+        ? { level: 'info', summary: payload.slice(0, 200) }
+        : null;
+    default: {
+      const label = String(kind).replace(/_/g, ' ');
+      return { level: 'info', summary: label };
+    }
+  }
+}
+
+/**
+ * Persisted job_event history for a cursor session thread (newest jobs first, events chronological).
+ * Used by the Voice tab when the user selects an existing session.
+ */
+export function listSessionEventLog(
+  projectName: string,
+  sessionId: string,
+  limit = 500,
+): SessionLogLine[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT
+         j.prompt AS job_prompt,
+         j.started_at AS job_started_at,
+         e.ts AS event_ts,
+         e.kind AS event_kind,
+         e.payload AS event_payload
+       FROM job j
+       INNER JOIN job_event e ON e.job_id = j.id
+       WHERE j.project = @project
+         AND j.session_id = @sessionId
+       ORDER BY e.id ASC
+       LIMIT @limit`,
+    )
+    .all({ project: projectName, sessionId, limit }) as {
+      job_prompt: string;
+      job_started_at: string;
+      event_ts: string;
+      event_kind: string;
+      event_payload: string | null;
+    }[];
+
+  const lines: SessionLogLine[] = [];
+  let lastJobPrompt = '';
+
+  for (const row of rows) {
+    if (row.job_prompt !== lastJobPrompt) {
+      lastJobPrompt = row.job_prompt;
+      lines.push({
+        at: row.job_started_at,
+        level: 'info',
+        summary: `Prompt: ${row.job_prompt.slice(0, 200)}`,
+      });
+    }
+
+    const formatted = formatJobEventLine(
+      row.event_kind as JobEventKind,
+      row.event_payload,
+      row.job_prompt,
+    );
+    if (!formatted) continue;
+
+    lines.push({
+      at: row.event_ts,
+      level: formatted.level,
+      summary: formatted.summary,
+      detail: formatted.detail,
+    });
+  }
+
+  return lines;
+}
+
 /** True if this session id has been used on a job for the project. */
 export function projectHasCursorSession(projectName: string, sessionId: string): boolean {
   const row = getDb()

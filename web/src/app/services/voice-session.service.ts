@@ -16,7 +16,7 @@ import { cancelTtsFallback, clearTranscriptTts, configureTranscriptTts, schedule
 import { primeTtsPlaybackUnlock } from '../../audio.js';
 import { CallSession, isNativeShell } from '../../native/call-session.js';
 import { SessionKeepAlive } from '../../session-keepalive.js';
-import { preloadVoiceCues } from '../../sound-effects.js';
+import { preloadVoiceCues, playVoiceCueNow } from '../../sound-effects.js';
 import type { SttBackend, TtsBackend } from '../../intelligence-audio.js';
 
 export interface TranscriptEntry {
@@ -58,6 +58,7 @@ export class VoiceSessionService {
   private readonly logs = inject(LogService);
 
   private _session: ActiveSession | null = null;
+  private prepareAbort: AbortController | null = null;
   private readonly keepalive = new SessionKeepAlive();
   private keepaliveWired = false;
   /** Reconnect intelligence session after OS background suspend (not user hang-up). */
@@ -156,24 +157,35 @@ export class VoiceSessionService {
 
     try {
       await this.bridge.setActiveProject(project);
-      await this.bridge.prepareVoiceSession(project, (event) => {
-        this.logs.append(
-          event.level === 'error' ? 'error' : event.level === 'warn' ? 'warn' : 'info',
-          'voice',
-          event.message,
-        );
-      });
+      this.prepareAbort = new AbortController();
+      const prepareSignal = this.prepareAbort.signal;
+      await this.bridge.prepareVoiceSession(
+        project,
+        (event) => {
+          this.logs.append(
+            event.level === 'error' ? 'error' : event.level === 'warn' ? 'warn' : 'info',
+            'voice',
+            event.message,
+          );
+        },
+        prepareSignal,
+      );
       await this.bridge.ensureCursorSessionReady(project);
       if (!this.bridge.settings()) {
         await this.bridge.loadSettings();
       }
     } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        return;
+      }
       const detail = err instanceof Error ? err.message : String(err);
       this.toast.error('Could not prepare voice session', detail);
+      this.notifyVoiceError(detail);
       this.sessionConnecting.set(false);
       this.sessionPrepActive.set(false);
       return;
     } finally {
+      this.prepareAbort = null;
       this.sessionPrepActive.set(false);
     }
 
@@ -204,6 +216,7 @@ export class VoiceSessionService {
       const detail = err instanceof Error ? err.message : String(err);
       this.logs.append('error', 'voice', 'Could not start intelligence session', detail);
       this.toast.error('Could not start voice', detail);
+      this.notifyVoiceError(detail);
       this.stopSession();
     } finally {
       this.sessionConnecting.set(false);
@@ -212,6 +225,8 @@ export class VoiceSessionService {
 
   stopSession(options?: { userInitiated?: boolean; keepKeepalive?: boolean }): void {
     const userInitiated = options?.userInitiated !== false;
+    this.prepareAbort?.abort();
+    this.prepareAbort = null;
     if (userInitiated) {
       this.resumeOnVisible = false;
     }
@@ -327,17 +342,22 @@ export class VoiceSessionService {
           });
         }
         if (s === 'error') {
-          this.toast.error(
-            'Voice connection failed',
-            'Check bridge connection and AWS keys, then tap to talk again.',
-          );
+          const message = 'Voice connection failed — check bridge connection and AWS keys.';
+          this.toast.error('Voice connection failed', message);
+          this.notifyVoiceError(message);
           this.stopSession();
         }
       },
       onUserTranscript: (text) => this.addEntry(text, 'user'),
       onAssistantTranscript: (text) => {
         this.addEntry(text, 'assistant');
-        scheduleTtsFallback(text, () => this._speaking());
+        // MCP speak() already drives TTS via the `speak` WS event. Scheduling fallback
+        // here replays the same line after playback when assistant_transcript follows speak().
+        const cursorVoiceTts =
+          this.voiceProviders.data()?.tts.cursorVoiceEnabled ?? true;
+        if (!cursorVoiceTts) {
+          scheduleTtsFallback(text, () => this._speaking());
+        }
       },
       onSpeaking: (speaking) => {
         if (speaking) cancelTtsFallback();
@@ -394,6 +414,7 @@ export class VoiceSessionService {
         }
         if (reason) {
           this.toast.warn('Voice disconnected', reason);
+          this.notifyVoiceError(reason);
         }
         this.stopSession();
       },
@@ -423,10 +444,12 @@ export class VoiceSessionService {
       onSttError: (message) => {
         this.logs.append('error', 'voice', 'STT error', message);
         this.toast.error('Speech input error', message);
+        this.notifyVoiceError(message);
       },
       onTurnError: (message) => {
         this.logs.append('error', 'voice', 'Request failed', message);
         this.toast.error('Request failed', message);
+        this.notifyVoiceError(message);
       },
       onTurnComplete: () => {
         this.toolActivity.set(null);
@@ -579,5 +602,22 @@ export class VoiceSessionService {
       out: 0,
       active: 0,
     });
+  }
+
+  /** Error earcon + optional spoken alert per voice TTS settings. */
+  private notifyVoiceError(message: string): void {
+    const trimmed = message.trim();
+    if (!trimmed) return;
+
+    const session = this._session;
+    if (session instanceof LlmIntelligenceSession) {
+      session.notifyError(trimmed);
+      return;
+    }
+
+    const tts = this.voiceProviders.data()?.tts;
+    if (tts?.errorSoundEnabled ?? true) {
+      playVoiceCueNow('error', { force: true });
+    }
   }
 }

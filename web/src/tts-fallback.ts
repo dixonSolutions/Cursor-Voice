@@ -112,16 +112,31 @@ export class TtsPile {
   }
 
   /**
-   * Duck assistant speech during user capture — playback continues until submit.
+   * Duck assistant speech on wake-word barge-in while TTS is playing.
+   * Playback continues until submit (snapshot taken in finishDeferredInterrupt).
    * Returns true when deafen was applied (caller should not stop TTS).
    */
   deafen(factor: number): boolean {
     if (!this.isActive()) return false;
     this.deferredInterrupt = true;
-    this.interruptVolume = Math.max(0, Math.min(1, factor));
+    this.applyInterruptVolume(factor);
+    return true;
+  }
+
+  /**
+   * Restore full assistant volume after the user starts speaking their request.
+   * Keeps deferred interrupt state so the heard snapshot is still taken on submit.
+   */
+  restoreInterruptVolume(): void {
+    if (this.interruptVolume === 1) return;
+    this.applyInterruptVolume(1);
+  }
+
+  private applyInterruptVolume(multiplier: number): void {
+    this.interruptVolume = Math.max(0, Math.min(1, multiplier));
     this.currentVolumeControl?.setVolume(this.interruptVolume);
 
-    // WebKit cannot change utter.volume mid-play — restart current line at ducked volume.
+    // WebKit cannot change utter.volume mid-play — restart current line at new volume.
     if (this.currentLine && this.lineStarted) {
       const line = this.currentLine;
       this.lineAbort?.abort();
@@ -130,7 +145,6 @@ export class TtsPile {
       this.lineStarted = false;
       if (!this.draining) void this.drain();
     }
-    return true;
   }
 
   /** Stop deferred interrupt — snapshot what was heard and halt playback. */

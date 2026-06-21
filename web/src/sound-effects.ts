@@ -8,12 +8,13 @@
  */
 import { unlockAudioContext } from './audio.js';
 
-export type VoiceCue = 'listening' | 'sent' | 'cancel';
+export type VoiceCue = 'listening' | 'sent' | 'cancel' | 'error';
 
 const CUE_FILES: Record<VoiceCue, string> = {
   listening: '/sounds/listening.mp3',
   sent: '/sounds/sent.mp3',
   cancel: '/sounds/cancel.mp3',
+  error: '/sounds/error.mp3',
 };
 
 /** HTMLAudio volume cap (files are already boosted in prepare-voice-cues.sh). */

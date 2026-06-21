@@ -22,6 +22,8 @@ export interface VoiceTtsSettings {
   cursorVoiceEnabled: boolean;
   interruptMode: 'deafen' | 'stop';
   interruptDeafenFactor: number;
+  errorSoundEnabled: boolean;
+  errorSpeakEnabled: boolean;
   webkit: WebkitTtsDefaults;
 }
 
