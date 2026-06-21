@@ -42,6 +42,9 @@ import type {
   AwsKeyStatus,
   DbStats,
   HostingSettings,
+  HeartbeatSettings,
+  HeartbeatStatus,
+  HeartbeatEvent,
   JobSettings,
   NarratorSettings,
   WorkflowSettings,
@@ -57,6 +60,7 @@ type SectionId =
   | 'keys'
   | 'workflow'
   | 'hosting'
+  | 'heartbeat'
   | 'jobs'
   | 'narrator'
   | 'database'
@@ -119,6 +123,13 @@ const ALL_SECTIONS: ConfigSection[] = [
     icon: 'pi-server',
     description: 'Run mode, ports, public URL, Tailscale, health check',
     keywords: ['host', 'port', 'url', 'tailscale', 'serve', 'test', 'public', 'network', 'health', 'ping'],
+  },
+  {
+    id: 'heartbeat',
+    label: 'Heartbeat',
+    icon: 'pi-sync',
+    description: 'Auto pull, build, restart, systemd install, deploy trace log',
+    keywords: ['heartbeat', 'update', 'pull', 'build', 'deploy', 'systemd', 'restart', 'host', 'git', 'npm'],
   },
   {
     id: 'jobs',
@@ -228,6 +239,8 @@ export class ConfigTabComponent implements OnInit {
     this.loadingWorkflow = false;
     this.hostingLoadSeq++;
     this.loadingHosting = false;
+    this.heartbeatLoadSeq++;
+    this.loadingHeartbeat = false;
     this.jobsLoadSeq++;
     this.loadingJobs = false;
     this.narratorLoadSeq++;
@@ -302,6 +315,9 @@ export class ConfigTabComponent implements OnInit {
         break;
       case 'hosting':
         await this.loadHosting();
+        break;
+      case 'heartbeat':
+        await this.loadHeartbeat();
         break;
       case 'jobs':
         await this.loadJobs();
@@ -833,6 +849,129 @@ export class ConfigTabComponent implements OnInit {
       }
     } finally {
       this.pingingHealth = false;
+    }
+  }
+
+  // ── Heartbeat section ────────────────────────────────────────────────────
+
+  protected heartbeatData: HeartbeatSettings | null = null;
+  protected heartbeatStatus: HeartbeatStatus | null = null;
+  protected heartbeatEvents: HeartbeatEvent[] = [];
+  protected loadingHeartbeat = false;
+  private heartbeatLoadSeq = 0;
+  protected savingHeartbeat = false;
+  protected runningHeartbeat = false;
+  protected installingHosting = false;
+  protected heartbeatBranch = '';
+  protected heartbeatRepoDir = '';
+
+  private async loadHeartbeat(): Promise<void> {
+    const seq = ++this.heartbeatLoadSeq;
+    this.loadingHeartbeat = true;
+    try {
+      const [res, events] = await Promise.all([
+        this.admin.getHeartbeat(),
+        this.admin.getHeartbeatEvents(40),
+      ]);
+      if (seq !== this.heartbeatLoadSeq) return;
+      this.heartbeatData = structuredClone(res.heartbeat);
+      this.heartbeatStatus = res.status;
+      this.heartbeatEvents = events.entries;
+      this.heartbeatBranch = res.heartbeat.branch ?? '';
+      this.heartbeatRepoDir = res.heartbeat.repoDir ?? '';
+    } catch (err) {
+      if (seq !== this.heartbeatLoadSeq) return;
+      this.toast.error('Could not load heartbeat settings', err instanceof Error ? err.message : String(err));
+    } finally {
+      if (seq === this.heartbeatLoadSeq) {
+        this.loadingHeartbeat = false;
+        this.cdr.markForCheck();
+      }
+    }
+  }
+
+  protected async onSaveHeartbeat(): Promise<void> {
+    if (!this.heartbeatData) return;
+    this.savingHeartbeat = true;
+    try {
+      const patch: Partial<HeartbeatSettings> = {
+        ...this.heartbeatData,
+        branch: this.heartbeatBranch.trim() || undefined,
+        repoDir: this.heartbeatRepoDir.trim() || undefined,
+      };
+      const res = await this.admin.patchHeartbeat(patch);
+      this.heartbeatData = structuredClone(res.heartbeat);
+      this.heartbeatStatus = res.status;
+      this.heartbeatBranch = res.heartbeat.branch ?? '';
+      this.heartbeatRepoDir = res.heartbeat.repoDir ?? '';
+      this.toast.success('Heartbeat settings saved');
+    } catch (err) {
+      this.toast.error('Could not save heartbeat settings', err instanceof Error ? err.message : String(err));
+    } finally {
+      this.savingHeartbeat = false;
+    }
+  }
+
+  protected async onRunHeartbeat(): Promise<void> {
+    this.runningHeartbeat = true;
+    try {
+      const res = await this.admin.runHeartbeat();
+      this.toast.success('Heartbeat started', `Run ${res.runId.slice(0, 8)}…`);
+      window.setTimeout(() => void this.loadHeartbeat(), 3000);
+    } catch (err) {
+      this.toast.error('Could not start heartbeat', err instanceof Error ? err.message : String(err));
+    } finally {
+      this.runningHeartbeat = false;
+    }
+  }
+
+  protected async onInstallHosting(): Promise<void> {
+    this.installingHosting = true;
+    try {
+      const res = await this.admin.installHosting();
+      if (res.ok) {
+        this.toast.success('Install started', res.detail);
+      } else {
+        this.toast.warn('Install failed', res.detail);
+      }
+      await this.loadHeartbeat();
+    } catch (err) {
+      this.toast.error('Install request failed', err instanceof Error ? err.message : String(err));
+    } finally {
+      this.installingHosting = false;
+    }
+  }
+
+  protected heartbeatStatusSeverity(
+    outcome: string | undefined,
+  ): 'success' | 'warn' | 'danger' | 'info' | 'secondary' {
+    switch (outcome) {
+      case 'ok':
+        return 'success';
+      case 'no_changes':
+      case 'skipped':
+        return 'info';
+      case 'error':
+        return 'danger';
+      default:
+        return 'secondary';
+    }
+  }
+
+  protected eventStatusSeverity(
+    status: string,
+  ): 'success' | 'warn' | 'danger' | 'info' | 'secondary' {
+    switch (status) {
+      case 'ok':
+        return 'success';
+      case 'warn':
+        return 'warn';
+      case 'error':
+        return 'danger';
+      case 'skip':
+        return 'info';
+      default:
+        return 'secondary';
     }
   }
 

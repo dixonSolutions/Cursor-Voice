@@ -23,6 +23,10 @@ import { markOrphanedJobs, markOrphanedVoiceAgentRuns } from './state/jobs.js';
 import { killActiveAgent } from './executor/agentSingleton.js';
 import { killVoiceAgent } from './executor/voiceAgent.js';
 import { buildServer, startServer } from './server.js';
+import {
+  startHeartbeatScheduler,
+  stopHeartbeatScheduler,
+} from './heartbeat/index.js';
 
 async function main(): Promise<void> {
   // 1. Config (must be first — everything else depends on it)
@@ -55,6 +59,8 @@ async function main(): Promise<void> {
   const app = await buildServer();
   await startServer(app);
 
+  await startHeartbeatScheduler();
+
   const run = getRunModeInfo(config.settings);
 
   log.info(
@@ -72,6 +78,7 @@ async function main(): Promise<void> {
 
   async function shutdown(signal: string): Promise<void> {
     log.info({ signal }, 'shutdown signal received');
+    stopHeartbeatScheduler();
     killActiveAgent('bridge shutdown');
     killVoiceAgent('bridge shutdown');
     try {

@@ -1081,6 +1081,12 @@ body {
   gap: 0.5rem;
 }
 
+.cv-cfg-heartbeat-status {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
 /* Sub-label within a section */
 .cv-cfg-section-sub-label {
   font-size: 0.8125rem;

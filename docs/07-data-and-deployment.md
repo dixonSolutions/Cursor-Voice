@@ -163,6 +163,12 @@ different ports and can run **side by side** — no `EADDRINUSE` collision.
   (`cursor-voice-watch.path`), then frees the host port (`8787`). Windows: `scripts\stop.ps1`.
 - `npm run start:service` — starts the host service back up, health-checked. Windows: `scripts\start.ps1`.
 
+**Heartbeat** (optional auto-update): configure `settings.heartbeat` in `config.json` or the
+Config tab → **Heartbeat** section. When enabled, the bridge periodically runs git fetch/pull,
+`npm install` (if lockfile changed), `npm run build`, and restarts via `cursor-voice-watch.path`
+or `scripts/restart.sh`. Every step is logged to the `heartbeat_event` SQLite table. See
+[`21-heartbeat-self-hosting.md`](./21-heartbeat-self-hosting.md).
+
 `GET /healthz` returns `runMode`, `backendUrl`, `webUrl`, and `useDevWebServer` for quick sanity checks.
 
 ### Example `config.json`

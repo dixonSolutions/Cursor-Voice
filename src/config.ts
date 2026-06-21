@@ -160,6 +160,25 @@ export const WorkflowSettingsSchema = z.object({
   llmIntelligence: LlmIntelligenceWorkflowSchema.default({}),
 });
 
+// ── Heartbeat (self-hosting / auto-update) ────────────────────────────────────
+
+export const HeartbeatSettingsSchema = z.object({
+  /** Master switch for scheduled heartbeat ticks. Manual runs always allowed. */
+  enabled: z.boolean().default(false),
+  /** Interval between scheduled runs (ms). Minimum 60s. */
+  intervalMs: z.number().int().min(60_000).max(86_400_000).default(900_000),
+  autoPull: z.boolean().default(true),
+  autoInstallDeps: z.boolean().default(true),
+  autoBuild: z.boolean().default(true),
+  autoRestart: z.boolean().default(true),
+  /** When true, abort before pull if the working tree has local changes. */
+  abortOnLocalChanges: z.boolean().default(true),
+  /** Git branch to track (defaults to current branch at runtime). */
+  branch: z.string().min(1).max(128).optional(),
+  /** Repository root (defaults to process working directory). */
+  repoDir: z.string().min(1).optional(),
+});
+
 // ── config.json schema ───────────────────────────────────────────────────────
 
 const SettingsSchema = z.object({
@@ -169,6 +188,8 @@ const SettingsSchema = z.object({
   /** Voice pipeline selection and per-workflow settings. See docs/15-llm-intelligence-workflow.md. */
   workflow: WorkflowSettingsSchema.default({}),
   voice: VoiceSettingsSchema,
+  /** Self-hosting auto-update sector. See docs/21-heartbeat-self-hosting.md. */
+  heartbeat: HeartbeatSettingsSchema.default({}),
   defaultMode: z.enum(['agent', 'plan']).default('agent'),
   maxConcurrentJobs: z.number().int().min(1).max(4).default(1),
   jobTimeoutMs: z.number().int().positive().default(600_000),
@@ -215,6 +236,7 @@ export type VoiceSettings = VoiceSettingsInput;
 export type RunModes = z.infer<typeof RunModesSchema>;
 export type LlmIntelligenceWorkflow = z.infer<typeof LlmIntelligenceWorkflowSchema>;
 export type WorkflowSettings = z.infer<typeof WorkflowSettingsSchema>;
+export type HeartbeatSettings = z.infer<typeof HeartbeatSettingsSchema>;
 export type Settings = Omit<z.infer<typeof SettingsSchema>, 'voice' | 'workflow'> & {
   voice: VoiceSettings;
   workflow: WorkflowSettings;
@@ -293,6 +315,19 @@ function migrateRawConfig(raw: unknown): unknown {
       if (typeof wf['llmIntelligence'] === 'object' && wf['llmIntelligence'] !== null) {
         delete (wf['llmIntelligence'] as Record<string, unknown>)['systemPrompts'];
       }
+    }
+
+    if (!s['heartbeat'] || typeof s['heartbeat'] !== 'object') {
+      s['heartbeat'] = {
+        enabled: false,
+        intervalMs: 900_000,
+        autoPull: true,
+        autoInstallDeps: true,
+        autoBuild: true,
+        autoRestart: true,
+        abortOnLocalChanges: true,
+      };
+      log.info('Migrated config — added default settings.heartbeat');
     }
 
     return raw;

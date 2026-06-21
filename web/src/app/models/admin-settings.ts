@@ -63,6 +63,56 @@ export interface HostingSettings {
   runModes: RunModes;
 }
 
+// ── Heartbeat ───────────────────────────────────────────────────────────────
+
+export interface HeartbeatSettings {
+  enabled: boolean;
+  intervalMs: number;
+  autoPull: boolean;
+  autoInstallDeps: boolean;
+  autoBuild: boolean;
+  autoRestart: boolean;
+  abortOnLocalChanges: boolean;
+  branch?: string;
+  repoDir?: string;
+}
+
+export type HeartbeatOutcome = 'ok' | 'skipped' | 'no_changes' | 'error';
+
+export interface HeartbeatRunResult {
+  runId: string;
+  trigger: 'manual' | 'scheduled';
+  startedAt: string;
+  finishedAt: string;
+  outcome: HeartbeatOutcome;
+  summary: string;
+}
+
+export interface HeartbeatGitSnapshot {
+  repoDir: string;
+  branch: string;
+  dirty: boolean;
+  ahead: number;
+  behind: number;
+  currentCommit: string | null;
+}
+
+export interface HeartbeatStatus {
+  running: boolean;
+  schedulerActive: boolean;
+  lastRun: HeartbeatRunResult | null;
+  git: HeartbeatGitSnapshot | null;
+}
+
+export interface HeartbeatEvent {
+  id: number;
+  run_id: string;
+  ts: string;
+  step: string;
+  status: 'ok' | 'skip' | 'warn' | 'error';
+  detail: string | null;
+}
+
 // ── Jobs ────────────────────────────────────────────────────────────────────
 
 export type DefaultMode = 'agent' | 'plan';

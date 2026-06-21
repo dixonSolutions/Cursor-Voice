@@ -98,6 +98,16 @@ const MIGRATION_SQL = `
     started_at  TEXT NOT NULL DEFAULT (datetime('now')),
     ended_at    TEXT
   );
+
+  -- Heartbeat self-hosting run log (pull / build / restart steps).
+  CREATE TABLE IF NOT EXISTS heartbeat_event (
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id  TEXT NOT NULL,
+    ts      TEXT NOT NULL DEFAULT (datetime('now')),
+    step    TEXT NOT NULL,
+    status  TEXT NOT NULL,
+    detail  TEXT
+  );
 `;
 
 // ── Indexes (performance) ─────────────────────────────────────────────────────
@@ -110,6 +120,8 @@ const INDEX_SQL = `
   CREATE INDEX IF NOT EXISTS idx_audit_tool     ON audit(tool);
   CREATE INDEX IF NOT EXISTS idx_voice_agent_status ON voice_agent_run(status);
   CREATE INDEX IF NOT EXISTS idx_voice_agent_project ON voice_agent_run(project);
+  CREATE INDEX IF NOT EXISTS idx_heartbeat_run ON heartbeat_event(run_id);
+  CREATE INDEX IF NOT EXISTS idx_heartbeat_ts ON heartbeat_event(ts);
 `;
 
 // ── Public API ────────────────────────────────────────────────────────────────

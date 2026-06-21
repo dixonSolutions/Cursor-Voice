@@ -72,7 +72,16 @@
     "narratorMaxBufferEvents": 50,
     "ghostKillEnabled": true,
     "logLevel": "info",
-    "userName": "Alex"
+    "userName": "Alex",
+    "heartbeat": {
+      "enabled": false,
+      "intervalMs": 900000,
+      "autoPull": true,
+      "autoInstallDeps": true,
+      "autoBuild": true,
+      "autoRestart": true,
+      "abortOnLocalChanges": true
+    }
   },
   "projects": [
     {

@@ -10,6 +10,9 @@ import { BridgeService } from './bridge.service';
 import type {
   WorkflowSettings,
   HostingSettings,
+  HeartbeatSettings,
+  HeartbeatStatus,
+  HeartbeatEvent,
   JobSettings,
   NarratorSettings,
   KeysStatus,
@@ -59,6 +62,30 @@ export class AdminService {
 
   patchHosting(patch: Partial<HostingSettings>): Promise<{ ok: boolean } & HostingSettings> {
     return this.patch('/api/admin/hosting', patch);
+  }
+
+  // ── Heartbeat ────────────────────────────────────────────────────────────
+
+  getHeartbeat(): Promise<{ heartbeat: HeartbeatSettings; status: HeartbeatStatus }> {
+    return this.get('/api/admin/heartbeat');
+  }
+
+  patchHeartbeat(
+    patch: Partial<HeartbeatSettings>,
+  ): Promise<{ ok: boolean; heartbeat: HeartbeatSettings; status: HeartbeatStatus }> {
+    return this.patch('/api/admin/heartbeat', patch);
+  }
+
+  runHeartbeat(): Promise<{ ok: boolean; started: boolean; runId: string }> {
+    return this.post('/api/admin/heartbeat/run');
+  }
+
+  getHeartbeatEvents(limit = 50): Promise<{ entries: HeartbeatEvent[] }> {
+    return this.get(`/api/admin/heartbeat/events?limit=${limit}`);
+  }
+
+  installHosting(): Promise<{ ok: boolean; detail: string }> {
+    return this.post('/api/admin/heartbeat/install');
   }
 
   // ── Jobs ─────────────────────────────────────────────────────────────────

@@ -660,6 +660,155 @@
     </div>
   }
 
+  <!-- ── Heartbeat ── -->
+  @if (activeSection() === 'heartbeat') {
+    <div class="cv-cfg-detail">
+
+      @if (loadingHeartbeat && !heartbeatData) {
+        <div class="cv-cfg-loading"><p-progressSpinner strokeWidth="3" /></div>
+      }
+
+      @if (heartbeatData) {
+        <p-fluid>
+
+          <p-fieldset legend="Scheduler">
+            <div class="cv-cfg-toggle-row">
+              <p-toggleSwitch id="cfg-hb-enabled"
+                [(ngModel)]="heartbeatData.enabled"
+                [disabled]="!canUseApi()" />
+              <label for="cfg-hb-enabled">Enable scheduled heartbeat</label>
+            </div>
+            <p-iftalabel>
+              <p-inputNumber id="cfg-hb-interval"
+                [(ngModel)]="heartbeatData.intervalMs"
+                [min]="60000" [step]="60000" suffix=" ms"
+                [disabled]="!canUseApi()" />
+              <label for="cfg-hb-interval">Interval (minimum 60s)</label>
+            </p-iftalabel>
+            <p-message severity="secondary" variant="simple"
+              text="Manual runs are always available. Scheduled ticks are skipped when disabled." />
+          </p-fieldset>
+
+          <p-fieldset legend="Pipeline steps">
+            <div class="cv-cfg-toggle-row">
+              <p-toggleSwitch id="cfg-hb-pull"
+                [(ngModel)]="heartbeatData.autoPull"
+                [disabled]="!canUseApi()" />
+              <label for="cfg-hb-pull">Auto pull latest changes from origin</label>
+            </div>
+            <div class="cv-cfg-toggle-row">
+              <p-toggleSwitch id="cfg-hb-deps"
+                [(ngModel)]="heartbeatData.autoInstallDeps"
+                [disabled]="!canUseApi()" />
+              <label for="cfg-hb-deps">Auto install dependencies when lockfile changes</label>
+            </div>
+            <div class="cv-cfg-toggle-row">
+              <p-toggleSwitch id="cfg-hb-build"
+                [(ngModel)]="heartbeatData.autoBuild"
+                [disabled]="!canUseApi()" />
+              <label for="cfg-hb-build">Auto build (npm run build)</label>
+            </div>
+            <div class="cv-cfg-toggle-row">
+              <p-toggleSwitch id="cfg-hb-restart"
+                [(ngModel)]="heartbeatData.autoRestart"
+                [disabled]="!canUseApi()" />
+              <label for="cfg-hb-restart">Auto restart service after build</label>
+            </div>
+            <div class="cv-cfg-toggle-row">
+              <p-toggleSwitch id="cfg-hb-abort-dirty"
+                [(ngModel)]="heartbeatData.abortOnLocalChanges"
+                [disabled]="!canUseApi()" />
+              <label for="cfg-hb-abort-dirty">Abort when local git changes are detected</label>
+            </div>
+          </p-fieldset>
+
+          <p-fieldset legend="Repository">
+            <p-iftalabel>
+              <input pInputText id="cfg-hb-branch"
+                [(ngModel)]="heartbeatBranch"
+                placeholder="Leave empty for current branch"
+                [disabled]="!canUseApi()" />
+              <label for="cfg-hb-branch">Git branch (optional)</label>
+            </p-iftalabel>
+            <p-iftalabel>
+              <input pInputText id="cfg-hb-repo"
+                [(ngModel)]="heartbeatRepoDir"
+                placeholder="/path/to/cursor-voice"
+                [disabled]="!canUseApi()" />
+              <label for="cfg-hb-repo">Repository directory (optional)</label>
+            </p-iftalabel>
+          </p-fieldset>
+
+          @if (heartbeatStatus) {
+            <p-fieldset legend="Status">
+              <div class="cv-cfg-heartbeat-status">
+                @if (heartbeatStatus.running) {
+                  <p-tag value="Running" severity="info" />
+                } @else {
+                  <p-tag value="Idle" severity="secondary" />
+                }
+                @if (heartbeatStatus.schedulerActive) {
+                  <p-tag value="Scheduler on" severity="success" />
+                } @else {
+                  <p-tag value="Scheduler off" severity="secondary" />
+                }
+                @if (heartbeatStatus.lastRun; as last) {
+                  <p-tag
+                    [value]="'Last: ' + last.outcome"
+                    [severity]="heartbeatStatusSeverity(last.outcome)" />
+                  <p-message severity="secondary" variant="simple" [text]="last.summary" />
+                }
+                @if (heartbeatStatus.git; as git) {
+                  <p-message severity="secondary" variant="simple"
+                    [text]="'Branch ' + git.branch + ' — ahead ' + git.ahead + ', behind ' + git.behind + (git.dirty ? ' (dirty)' : '')" />
+                }
+              </div>
+            </p-fieldset>
+          }
+
+          <div class="cv-cfg-row-actions">
+            <p-button label="Save heartbeat settings" icon="pi pi-save"
+              [loading]="savingHeartbeat"
+              [disabled]="!canUseApi()"
+              (onClick)="onSaveHeartbeat()" />
+            <p-button label="Run now" icon="pi pi-play"
+              severity="secondary" [outlined]="true"
+              [loading]="runningHeartbeat"
+              [disabled]="!canUseApi() || heartbeatStatus?.running"
+              (onClick)="onRunHeartbeat()" />
+            <p-button label="Install hosting (systemd)" icon="pi pi-server"
+              severity="secondary" [outlined]="true"
+              [loading]="installingHosting"
+              [disabled]="!canUseApi()"
+              (onClick)="onInstallHosting()" />
+          </div>
+
+          @if (heartbeatEvents.length > 0) {
+            <p-fieldset legend="Recent events">
+              <div class="cv-cfg-audit-list">
+                @for (entry of heartbeatEvents; track entry.id) {
+                  <div class="cv-cfg-audit-row">
+                    <div class="cv-cfg-audit-meta">
+                      <code class="cv-cfg-audit-tool">{{ entry.step }}</code>
+                      <p-tag
+                        [value]="entry.status"
+                        [severity]="eventStatusSeverity(entry.status)" />
+                      @if (entry.detail) {
+                        <div class="cv-cfg-audit-reason">{{ entry.detail }}</div>
+                      }
+                    </div>
+                    <div class="cv-cfg-audit-time">{{ entry.ts }}</div>
+                  </div>
+                }
+              </div>
+            </p-fieldset>
+          }
+
+        </p-fluid>
+      }
+    </div>
+  }
+
   <!-- ── Job Settings ── -->
   @if (activeSection() === 'jobs') {
     <div class="cv-cfg-detail">
