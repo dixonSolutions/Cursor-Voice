@@ -48,6 +48,8 @@
         "cursorVoiceEnabled": true,
         "interruptMode": "deafen",
         "interruptDeafenFactor": 0.2,
+        "errorSoundEnabled": true,
+        "errorSpeakEnabled": true,
         "webkit": {
           "rate": 1.02,
           "pitch": 1,

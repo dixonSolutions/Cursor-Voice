@@ -18,6 +18,7 @@ import {
 } from '../state/registry.js';
 import {
   listCursorSessionsForProject,
+  listSessionEventLog,
   projectHasCursorSession,
 } from '../state/jobs.js';
 import { handleNewSession } from '../mcp/tools/session.js';
@@ -35,6 +36,12 @@ const SelectBodySchema = z.object({
 
 const NewSessionBodySchema = z.object({
   project: z.string().min(1),
+});
+
+const SessionLogsQuerySchema = z.object({
+  project: z.string().min(1),
+  session_id: z.string().min(1),
+  limit: z.coerce.number().int().min(1).max(1000).optional(),
 });
 
 function resolveProjectOr404(name: string) {
@@ -114,6 +121,39 @@ export async function registerCursorSessionRoutes(app: FastifyInstance): Promise
         project: project.name,
         active_session_id: sessionId,
         message: 'Cursor will continue this thread on the next submit.',
+      };
+    },
+  );
+
+  /** GET /api/cursor-sessions/logs — persisted job_event history for a session thread. */
+  app.get<{ Querystring: { project?: string; session_id?: string; limit?: string } }>(
+    '/api/cursor-sessions/logs',
+    async (req, reply) => {
+      const parsed = SessionLogsQuerySchema.safeParse(req.query);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: parsed.error.message });
+      }
+
+      let project;
+      try {
+        project = resolveProjectOr404(parsed.data.project);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return reply.code(404).send({ error: message });
+      }
+
+      const { session_id: sessionId, limit } = parsed.data;
+      if (!isSessionAllowed(project.name, sessionId)) {
+        return reply.code(400).send({
+          error: `Session "${sessionId}" is not known for project "${project.name}"`,
+        });
+      }
+
+      const entries = listSessionEventLog(project.name, sessionId, limit ?? 500);
+      return {
+        project: project.name,
+        session_id: sessionId,
+        entries,
       };
     },
   );

@@ -40,6 +40,19 @@ export interface CursorSessionsResponse {
   sessions: CursorSessionEntry[];
 }
 
+export interface CursorSessionLogEntry {
+  at: string;
+  level: 'info' | 'warn' | 'error';
+  summary: string;
+  detail?: string;
+}
+
+export interface CursorSessionLogsResponse {
+  project: string;
+  session_id: string;
+  entries: CursorSessionLogEntry[];
+}
+
 export interface VoiceSessionLogEvent {
   phase: string;
   level: 'info' | 'warn' | 'error';
@@ -292,6 +305,14 @@ export class BridgeService {
     return this.apiFetch<CursorSessionsResponse>(`/api/cursor-sessions?${q}`);
   }
 
+  async loadCursorSessionLogs(
+    project: string,
+    sessionId: string,
+  ): Promise<CursorSessionLogsResponse> {
+    const q = new URLSearchParams({ project, session_id: sessionId });
+    return this.apiFetch<CursorSessionLogsResponse>(`/api/cursor-sessions/logs?${q}`);
+  }
+
   async selectCursorSession(project: string, sessionId: string): Promise<void> {
     await this.apiFetch('/api/cursor-sessions/select', {
       method: 'POST',
@@ -347,6 +368,7 @@ export class BridgeService {
   async prepareVoiceSession(
     project: string,
     onLog: (event: VoiceSessionLogEvent) => void,
+    signal?: AbortSignal,
   ): Promise<VoiceSessionPrepareResult> {
     const res = await fetch(`/api/voice-session/prepare`, {
       method: 'POST',
@@ -356,6 +378,7 @@ export class BridgeService {
         Accept: 'text/event-stream',
       },
       body: JSON.stringify({ project }),
+      signal,
     });
 
     if (!res.ok) {
@@ -403,6 +426,10 @@ export class BridgeService {
     };
 
     while (true) {
+      if (signal?.aborted) {
+        await reader.cancel().catch(() => {});
+        throw new DOMException('Voice prepare aborted', 'AbortError');
+      }
       const { done, value } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });

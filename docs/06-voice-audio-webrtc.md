@@ -71,8 +71,13 @@ Regenerate: `bash scripts/prepare-voice-cues.sh`.
 | **listening** | `listening.mp3` | `rollover4.wav` | Wake phrase (`onActivated`) | Short beep — mic open |
 | **sent** | `sent.mp3` | `click3.wav` | Turn submitted (`onTurnSubmitted`) | Soft boop — message sent |
 | **cancel** | `cancel.mp3` | `switch2.wav` | Cancel phrase (`onTurnCancelled`) | Toggle-off — turn discarded |
+| **error** | `error.mp3` | Universfield (Pixabay) | TTS failure, disconnect, STT/turn errors | Error tone — pipeline failure |
 
-Playback: `web/src/sound-effects.ts` via `playVoiceCueNow()` — fired in `llm-intelligence-session.ts` at Vosk/VAD recognition, **before** STT flush. Preload on orb tap.
+Playback: `web/src/sound-effects.ts` via `playVoiceCueNow()` — fired in `llm-intelligence-session.ts` at Vosk/VAD recognition, **before** STT flush. Preload on orb tap. Error cue uses `LlmIntelligenceSession.notifyError()` / `VoiceSessionService.notifyVoiceError()`.
+
+Configure error feedback under **Config → Voice → Cursor voice (TTS)**:
+- `errorSoundEnabled` — play the error earcon (default on)
+- `errorSpeakEnabled` — also speak the error message via TTS, independent of `cursorVoiceEnabled` (default on; turn off for sound-only alerts)
 
 For **`cursor_native`**, primary TTS comes from MCP `speak()` events pushed over
 `/ws/intelligence`. For **`llm_intelligence`**, orchestrator `speak` tool + optional

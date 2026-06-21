@@ -1,12 +1,15 @@
 <p-card header="Voice" styleClass="cv-voice-card">
   <p-fluid class="cv-voice-fluid">
-    <cv-live-log-panel />
+    @if (showSessionLogs()) {
+      <cv-live-log-panel />
+    }
 
     <div
       class="cv-voice-orb-stage"
       [class.cv-voice-orb-stage--session]="
         voiceSession.conversationActive() || voiceSession.sessionConnecting()
-      ">
+      "
+      [class.cv-voice-orb-stage--preparing]="isPreparing()">
       <button
         type="button"
         class="cv-voice-orb-btn"
@@ -23,7 +26,10 @@
             voiceSession.conversationActive() || voiceSession.sessionConnecting()
           " />
       </button>
-      @if (!isLiveSession()) {
+      @if (isPreparing()) {
+        <p class="cv-voice-preparing-label" aria-live="polite">Preparing</p>
+        <p class="cv-voice-preparing-hint">Tap the orb to cancel</p>
+      } @else if (!isLiveSession()) {
         @if (showOrbCaption()) {
           <p class="cv-voice-orb-caption">{{ orbStateLabel() }}</p>
         }
@@ -46,59 +52,63 @@
     </div>
 
     @if (!isLiveSession()) {
-      <details class="cv-voice-setup">
-        <summary class="cv-voice-setup-summary">Project &amp; session</summary>
-        <div class="cv-voice-setup-body">
-          <div class="cv-voice-project-row">
-            <p-iftalabel class="cv-voice-project-col">
-              <p-select
-                inputId="project-select"
-                [options]="projectOptions()"
-                [(ngModel)]="selectedProject"
-                optionLabel="label"
-                optionValue="value"
-                placeholder="Select a project…"
-                [disabled]="projectOptions().length === 0 || !isBridgeConnected()"
-                (onChange)="onProjectChange(selectedProject)"
-                [fluid]="true" />
-              <label for="project-select">Project</label>
-            </p-iftalabel>
+      <p-accordion styleClass="cv-voice-setup-accordion">
+        <p-accordion-panel value="project-session">
+          <p-accordion-header>Project &amp; session</p-accordion-header>
+          <p-accordion-content>
+            <div class="cv-voice-setup-body">
+              <div class="cv-voice-project-row">
+                <p-iftalabel class="cv-voice-project-col">
+                  <p-select
+                    inputId="project-select"
+                    [options]="projectOptions()"
+                    [(ngModel)]="selectedProject"
+                    optionLabel="label"
+                    optionValue="value"
+                    placeholder="Select a project…"
+                    [disabled]="projectOptions().length === 0 || !isBridgeConnected()"
+                    (onChange)="onProjectChange(selectedProject)"
+                    [fluid]="true" />
+                  <label for="project-select">Project</label>
+                </p-iftalabel>
 
-            <p-iftalabel class="cv-voice-session-col">
-              <p-select
-                inputId="session-select"
-                [options]="sessionOptions()"
-                [(ngModel)]="selectedSessionId"
-                optionLabel="label"
-                optionValue="value"
-                placeholder="Cursor session…"
-                [disabled]="!selectedProject || !isBridgeConnected() || loadingSessions()"
-                [loading]="loadingSessions()"
-                [filter]="sessionOptions().length > 6"
-                (ngModelChange)="onSessionChange($event)"
-                [fluid]="true" />
-              <label for="session-select">Cursor session</label>
-            </p-iftalabel>
-          </div>
+                <p-iftalabel class="cv-voice-session-col">
+                  <p-select
+                    inputId="session-select"
+                    [options]="sessionOptions()"
+                    [(ngModel)]="selectedSessionId"
+                    optionLabel="label"
+                    optionValue="value"
+                    placeholder="Cursor session…"
+                    [disabled]="!selectedProject || !isBridgeConnected() || loadingSessions()"
+                    [loading]="loadingSessions() || loadingSessionLogs()"
+                    [filter]="sessionOptions().length > 6"
+                    (ngModelChange)="onSessionChange($event)"
+                    [fluid]="true" />
+                  <label for="session-select">Cursor session</label>
+                </p-iftalabel>
+              </div>
 
-          <p-message severity="secondary" variant="simple" [text]="sessionHint()" />
+              <p-message severity="secondary" variant="simple" [text]="sessionHint()" />
 
-          @if (workflowLabel(); as label) {
-            <div class="cv-voice-summary">
-              <span>Workflow</span>
-              <p-tag [value]="label" severity="info" />
-              @if (audioBackendLabel(); as audio) {
-                <p-tag [value]="audio" severity="secondary" />
+              @if (workflowLabel(); as label) {
+                <div class="cv-voice-summary">
+                  <span>Workflow</span>
+                  <p-tag [value]="label" severity="info" />
+                  @if (audioBackendLabel(); as audio) {
+                    <p-tag [value]="audio" severity="secondary" />
+                  }
+                </div>
+              } @else {
+                <p-message
+                  severity="warn"
+                  variant="simple"
+                  text="Bridge settings not loaded. Check Connection under Config tab." />
               }
             </div>
-          } @else {
-            <p-message
-              severity="warn"
-              variant="simple"
-              text="Bridge settings not loaded. Check Connection under Config tab." />
-          }
-        </div>
-      </details>
+          </p-accordion-content>
+        </p-accordion-panel>
+      </p-accordion>
     }
 
     @if (showTextInput()) {

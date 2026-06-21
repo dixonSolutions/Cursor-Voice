@@ -16,7 +16,13 @@ import {
 import { getVoiceAudioMeter } from './voice-audio-meter.js';
 import type { SessionCallbacks, VoiceAgentStatusEvent, VoiceLogLevel, VoiceLogSubcategory } from './voice-session-types.js';
 import { type TurnSubmit, type WakeWords, textContainsWakePhrase } from './wake-words.js';
-import { stopAllTts, TtsPile, prepareSpeechSynthesisForPlayback, type TtsPlayContext } from './tts-fallback.js';
+import {
+  cancelTtsFallback,
+  stopAllTts,
+  TtsPile,
+  prepareSpeechSynthesisForPlayback,
+  type TtsPlayContext,
+} from './tts-fallback.js';
 import { snapshotToPayload, summarizeTtsInterrupt, type TtsInterruptSnapshot } from './tts-interrupt.js';
 import { WebkitSttSession } from './webkit-stt.js';
 import { AmazonSttSession } from './amazon-stt.js';
@@ -34,6 +40,7 @@ import { VoskGrammarSpotter, voskPhraseMatches } from './vosk-wake-word.js';
 import { SileroVadDetector } from './silero-vad.js';
 import { TurnSubmitBuffer } from './turn-submit-buffer.js';
 import { playVoiceCueNow } from './sound-effects.js';
+import { errorSpeechText } from './error-feedback.js';
 import {
   resolveBrowserTtsOptions,
   type WebkitTtsDefaults,
@@ -43,6 +50,8 @@ export interface VoiceTtsSettings {
   cursorVoiceEnabled: boolean;
   interruptMode: 'deafen' | 'stop';
   interruptDeafenFactor: number;
+  errorSoundEnabled: boolean;
+  errorSpeakEnabled: boolean;
   webkit: WebkitTtsDefaults;
 }
 
@@ -68,6 +77,8 @@ export class LlmIntelligenceSession {
     cursorVoiceEnabled: true,
     interruptMode: 'deafen',
     interruptDeafenFactor: 0.2,
+    errorSoundEnabled: true,
+    errorSpeakEnabled: true,
     webkit: { rate: 1.02, pitch: 1, volume: 1, lang: 'en-US' },
   };
   private resolvedWebkitTts = resolveBrowserTtsOptions({
@@ -111,6 +122,8 @@ export class LlmIntelligenceSession {
   private micMuted = false;
   private lastLoggedSttPartial = '';
   private sharedMicStream: MediaStream | null = null;
+  private lastErrorFeedbackMessage = '';
+  private lastErrorFeedbackAt = 0;
   private ownsSharedMic = false;
   private readonly micTracks = new Set<MediaStreamTrack>();
 
@@ -131,6 +144,9 @@ export class LlmIntelligenceSession {
       this.cb.onSpeaking(active);
       this.notifySpeakingState(active);
       if (!active) {
+        if (this.ttsPile.isDeferredInterrupt()) {
+          this.ttsPile.restoreInterruptVolume();
+        }
         this.ensureWakeListening();
       }
       this.syncCapture();
@@ -396,6 +412,7 @@ export class LlmIntelligenceSession {
     await this.armStartSpotter();
   }
 
+  /** Wake phrase heard while assistant TTS is playing — duck or stop per interruptMode. */
   private bargeInDuringTts(): void {
     if (!this.ttsPile.isActive()) return;
 
@@ -403,9 +420,9 @@ export class LlmIntelligenceSession {
       const applied = this.ttsPile.deafen(this.ttsSettings.interruptDeafenFactor);
       if (applied) {
         this.cb.onTtsBargeIn?.(
-          `assistant ducked to ${Math.round(this.ttsSettings.interruptDeafenFactor * 100)}% — still playing`,
+          `wake barge-in — assistant ducked to ${Math.round(this.ttsSettings.interruptDeafenFactor * 100)}% while speaking`,
         );
-        this.voiceLog('tts', 'info', 'TTS deafened', 'barge-in');
+        this.voiceLog('tts', 'info', 'TTS deafened', 'wake barge-in');
       }
       return;
     }
@@ -691,6 +708,7 @@ export class LlmIntelligenceSession {
       const mic = this.sharedMicStream ?? (await this.ensureSharedMic());
       await this.vadDetector.start(mic, {
         redemptionMs: this.turnSubmit.silenceMs,
+        onSpeechStart: () => this.restoreAssistantVolumeIfDeferredInterrupt(),
         onSpeechEnd: () => this.onVadSpeechEnd(),
         onError: (message) => {
           console.warn('[silero-vad]', message);
@@ -899,7 +917,14 @@ export class LlmIntelligenceSession {
     const trimmed = text.trim();
     if (!trimmed || trimmed === this.lastLoggedSttPartial) return;
     this.lastLoggedSttPartial = trimmed;
+    this.restoreAssistantVolumeIfDeferredInterrupt();
     this.voiceLog('stt', 'info', `${this.sttProviderLabel()} partial`, trimmed.slice(0, 120));
+  }
+
+  /** Full volume once the user speaks — ducking only applies during wake barge-in TTS. */
+  private restoreAssistantVolumeIfDeferredInterrupt(): void {
+    if (!this.ttsPile.isDeferredInterrupt()) return;
+    this.ttsPile.restoreInterruptVolume();
   }
 
   private sendUserTurn(text: string): void {
@@ -969,6 +994,7 @@ export class LlmIntelligenceSession {
       case 'speak': {
         const text = typeof msg['text'] === 'string' ? msg['text'] : '';
         if (text && this.ttsSettings.cursorVoiceEnabled) {
+          cancelTtsFallback();
           if (!this.ttsPile.isActive()) {
             this.ttsPile.resetHeard();
           }
@@ -1097,23 +1123,45 @@ export class LlmIntelligenceSession {
     this.ttsPile.setBaseVolume(this.resolvedWebkitTts.volume);
   }
 
+  /** Error earcon + optional spoken alert (independent of cursorVoiceEnabled). */
+  notifyError(message: string): void {
+    const trimmed = message.trim();
+    if (!trimmed) return;
+
+    const now = Date.now();
+    if (trimmed === this.lastErrorFeedbackMessage && now - this.lastErrorFeedbackAt < 2000) {
+      return;
+    }
+    this.lastErrorFeedbackMessage = trimmed;
+    this.lastErrorFeedbackAt = now;
+
+    if (this.ttsSettings.errorSoundEnabled) {
+      playVoiceCueNow('error', { force: true });
+    }
+    if (this.ttsSettings.errorSpeakEnabled) {
+      this.ttsPile.enqueue(errorSpeechText(trimmed));
+    }
+  }
+
   private async playSpeakUtterance(text: string, ctx: TtsPlayContext): Promise<void> {
     const provider = this.ttsProviderLabel();
     this.voiceLog('tts', 'info', `${provider} start`, text.slice(0, 80));
-    const wrappedCtx: TtsPlayContext = {
-      signal: ctx.signal,
-      baseVolume: ctx.baseVolume,
-      volume: ctx.volume,
-      onStart: () => {
-        this.voiceLog('tts', 'info', `${provider} playing`, text.slice(0, 80));
-        ctx.onStart();
-      },
-    };
     const webkitOpts = {
       rate: this.resolvedWebkitTts.rate,
       pitch: this.resolvedWebkitTts.pitch,
       lang: this.resolvedWebkitTts.lang,
       voiceURI: this.resolvedWebkitTts.voiceURI,
+    };
+    let playbackStarted = false;
+    const wrappedCtx: TtsPlayContext = {
+      signal: ctx.signal,
+      baseVolume: ctx.baseVolume,
+      volume: ctx.volume,
+      onStart: () => {
+        playbackStarted = true;
+        this.voiceLog('tts', 'info', `${provider} playing`, text.slice(0, 80));
+        ctx.onStart();
+      },
     };
 
     try {
@@ -1163,6 +1211,12 @@ export class LlmIntelligenceSession {
           console.warn('[tts webkit fallback]', webkitErr);
         }
       }
+    }
+
+    const hadTtsBackend =
+      this.ttsBackend !== 'none' || canUseWebkitTts() || this.audioConfig.amazonAvailable;
+    if (!playbackStarted && hadTtsBackend && !ctx.signal.aborted) {
+      this.notifyError('Speech playback failed.');
     }
   }
 

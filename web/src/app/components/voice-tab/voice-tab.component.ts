@@ -1,6 +1,7 @@
 import { Component, computed, effect, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 
+import { Accordion, AccordionContent, AccordionHeader, AccordionPanel } from 'primeng/accordion';
 import { Button } from 'primeng/button';
 import { Card } from 'primeng/card';
 import { Fieldset } from 'primeng/fieldset';
@@ -18,6 +19,7 @@ import {
   type CursorSessionEntry,
 } from '../../services/bridge.service';
 import { ToastService } from '../../services/toast.service';
+import { LogService } from '../../services/log.service';
 import { VoiceProvidersService } from '../../services/voice-providers.service';
 import { VoiceSessionService } from '../../services/voice-session.service';
 import { ApprovalPanelComponent } from '../approval-panel/approval-panel.component';
@@ -42,6 +44,10 @@ interface SessionOption {
   standalone: true,
   imports: [
     FormsModule,
+    Accordion,
+    AccordionPanel,
+    AccordionHeader,
+    AccordionContent,
     Button,
     Card,
     Fieldset,
@@ -64,10 +70,13 @@ export class VoiceTabComponent {
   protected readonly voiceSession = inject(VoiceSessionService);
   protected readonly voiceProviders = inject(VoiceProvidersService);
   private readonly toast = inject(ToastService);
+  private readonly logs = inject(LogService);
 
   protected selectedProject: string | null = null;
   protected selectedSessionId: string = NEW_CURSOR_SESSION_ID;
   protected typedMessage = '';
+  protected readonly sessionHistoryLoaded = signal(false);
+  protected readonly loadingSessionLogs = signal(false);
   protected readonly cursorSessions = signal<CursorSessionEntry[]>([]);
   protected readonly activeCursorSessionId = signal<string | null>(null);
   protected readonly loadingSessions = signal(false);
@@ -170,6 +179,19 @@ export class VoiceTabComponent {
       this.voiceSession.conversationActive(),
   );
 
+  /** Large "Preparing" label while MCP setup runs — logs and setup chrome stay hidden. */
+  protected readonly isPreparing = computed(() => this.voiceSession.sessionPrepActive());
+
+  /** Session log panel: existing session history or live call — never during prepare. */
+  protected readonly showSessionLogs = computed(() => {
+    if (this.voiceSession.sessionPrepActive()) return false;
+    return (
+      this.sessionHistoryLoaded() ||
+      this.voiceSession.conversationActive() ||
+      this.voiceSession.sessionConnecting()
+    );
+  });
+
   protected readonly projectOptions = computed<ProjectOption[]>(() =>
     this.bridge.projects().map((p) => ({
       label: p.description ? `${p.name} — ${p.description}` : p.name,
@@ -199,7 +221,12 @@ export class VoiceTabComponent {
   );
 
   protected readonly pttDisabled = computed(() => {
-    if (this.voiceSession.sessionPrepActive()) return true;
+    if (
+      this.voiceSession.sessionPrepActive() ||
+      this.voiceSession.sessionConnecting()
+    ) {
+      return false;
+    }
     return (
       this.bridge.wsStatus() !== 'connected' ||
       !this.bridge.activeProject() ||
@@ -234,9 +261,10 @@ export class VoiceTabComponent {
   );
 
   protected readonly orbStateLabel = computed(() => {
+    if (this.voiceSession.sessionPrepActive()) return 'Preparing…';
     if (this.voiceSession.sessionConnecting()) return 'Connecting…';
     if (!this.voiceSession.conversationActive()) return 'Tap to start';
-    return 'Tap to start';
+    return 'Tap to hang up';
   });
 
   protected readonly pttAriaLabel = computed(() => this.appState.pttLabel());
@@ -302,6 +330,8 @@ export class VoiceTabComponent {
     if (!project) return;
 
     if (next === NEW_CURSOR_SESSION_ID) {
+      this.sessionHistoryLoaded.set(false);
+      this.logs.clearVoiceSession();
       this.bridge.storeCursorSessionPreference(project, NEW_CURSOR_SESSION_ID);
       return;
     }
@@ -310,9 +340,19 @@ export class VoiceTabComponent {
     void this.bridge.selectCursorSession(project, next).catch(() => {
       this.toast.error('Could not select session');
     });
+    void this.loadSessionLogsForSelection(project, next);
   }
 
   protected handlePtt(): void {
+    if (
+      this.voiceSession.sessionPrepActive() ||
+      this.voiceSession.sessionConnecting()
+    ) {
+      this.voiceSession.stopSession();
+      this.toast.info('Cancelled');
+      return;
+    }
+
     const st = this.appState.state();
     if (st === 'idle') {
       void this.voiceSession.startSession();
@@ -402,6 +442,27 @@ export class VoiceTabComponent {
     }
 
     this.selectedSessionId = pick;
+    if (pick !== NEW_CURSOR_SESSION_ID) {
+      void this.loadSessionLogsForSelection(project, pick);
+    } else {
+      this.sessionHistoryLoaded.set(false);
+      this.logs.clearVoiceSession();
+    }
+  }
+
+  private async loadSessionLogsForSelection(project: string, sessionId: string): Promise<void> {
+    if (!this.isBridgeConnected()) return;
+    this.loadingSessionLogs.set(true);
+    try {
+      const data = await this.bridge.loadCursorSessionLogs(project, sessionId);
+      this.logs.loadSessionHistory(data.entries);
+      this.sessionHistoryLoaded.set(true);
+    } catch {
+      this.sessionHistoryLoaded.set(false);
+      this.toast.error('Could not load session logs');
+    } finally {
+      this.loadingSessionLogs.set(false);
+    }
   }
 
   private formatSessionLabel(s: CursorSessionEntry): string {
