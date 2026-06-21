@@ -40,7 +40,7 @@ import { registerCursorSessionRoutes } from './routes/cursorSessions.js';
 import { registerVoiceSessionPrepareRoutes } from './routes/voiceSessionPrepare.js';
 import { registerConfigRoutes } from './routes/config.js';
 import { registerAdminSettingsRoutes } from './routes/adminSettings.js';
-import { registerHeartbeatRoutes } from './routes/heartbeat.js';
+import { registerServeRoutes } from './routes/serve.js';
 import { registerProjectsAdminRoutes } from './routes/projectsAdmin.js';
 import { registerMcpServer } from './mcp/server/index.js';
 import { attachDevWebProxy, registerProductionWeb } from './webDispatch.js';
@@ -235,7 +235,7 @@ export async function buildServer(): Promise<FastifyInstance> {
   await registerCursorSessionRoutes(app);
   await registerVoiceSessionPrepareRoutes(app);
   await registerAdminSettingsRoutes(app);
-  await registerHeartbeatRoutes(app);
+  await registerServeRoutes(app);
   await registerProjectsAdminRoutes(app);
   registerPushRoutes(app);
 

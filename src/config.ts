@@ -160,10 +160,10 @@ export const WorkflowSettingsSchema = z.object({
   llmIntelligence: LlmIntelligenceWorkflowSchema.default({}),
 });
 
-// ── Heartbeat (self-hosting / auto-update) ────────────────────────────────────
+// ── Serve (self-hosting / auto-update) ────────────────────────────────────────
 
-export const HeartbeatSettingsSchema = z.object({
-  /** Master switch for scheduled heartbeat ticks. Manual runs always allowed. */
+export const ServeSettingsSchema = z.object({
+  /** Master switch for scheduled serve ticks. Manual runs always allowed. */
   enabled: z.boolean().default(false),
   /** Interval between scheduled runs (ms). Minimum 60s. */
   intervalMs: z.number().int().min(60_000).max(86_400_000).default(900_000),
@@ -188,8 +188,8 @@ const SettingsSchema = z.object({
   /** Voice pipeline selection and per-workflow settings. See docs/15-llm-intelligence-workflow.md. */
   workflow: WorkflowSettingsSchema.default({}),
   voice: VoiceSettingsSchema,
-  /** Self-hosting auto-update sector. See docs/21-heartbeat-self-hosting.md. */
-  heartbeat: HeartbeatSettingsSchema.default({}),
+  /** Self-hosting auto-update sector. See docs/21-serve-self-hosting.md. */
+  serve: ServeSettingsSchema.default({}),
   defaultMode: z.enum(['agent', 'plan']).default('agent'),
   maxConcurrentJobs: z.number().int().min(1).max(4).default(1),
   jobTimeoutMs: z.number().int().positive().default(600_000),
@@ -236,7 +236,7 @@ export type VoiceSettings = VoiceSettingsInput;
 export type RunModes = z.infer<typeof RunModesSchema>;
 export type LlmIntelligenceWorkflow = z.infer<typeof LlmIntelligenceWorkflowSchema>;
 export type WorkflowSettings = z.infer<typeof WorkflowSettingsSchema>;
-export type HeartbeatSettings = z.infer<typeof HeartbeatSettingsSchema>;
+export type ServeSettings = z.infer<typeof ServeSettingsSchema>;
 export type Settings = Omit<z.infer<typeof SettingsSchema>, 'voice' | 'workflow'> & {
   voice: VoiceSettings;
   workflow: WorkflowSettings;
@@ -317,8 +317,14 @@ function migrateRawConfig(raw: unknown): unknown {
       }
     }
 
-    if (!s['heartbeat'] || typeof s['heartbeat'] !== 'object') {
-      s['heartbeat'] = {
+    if (s['heartbeat'] && typeof s['heartbeat'] === 'object' && !s['serve']) {
+      s['serve'] = s['heartbeat'];
+      delete s['heartbeat'];
+      log.info('Migrated config — renamed settings.heartbeat → settings.serve');
+    }
+
+    if (!s['serve'] || typeof s['serve'] !== 'object') {
+      s['serve'] = {
         enabled: false,
         intervalMs: 900_000,
         autoPull: true,
@@ -327,7 +333,7 @@ function migrateRawConfig(raw: unknown): unknown {
         autoRestart: true,
         abortOnLocalChanges: true,
       };
-      log.info('Migrated config — added default settings.heartbeat');
+      log.info('Migrated config — added default settings.serve');
     }
 
     return raw;

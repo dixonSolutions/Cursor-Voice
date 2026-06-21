@@ -1,29 +1,29 @@
 /**
- * Persisted heartbeat step log — one row per phase of a runHeartbeat() cycle.
+ * Persisted serve step log — one row per phase of a runServe() cycle or manual action.
  */
 
 import { getDb } from './db.js';
 
-export type HeartbeatEventStatus = 'ok' | 'skip' | 'warn' | 'error';
+export type ServeEventStatus = 'ok' | 'skip' | 'warn' | 'error';
 
-export interface HeartbeatEventRow {
+export interface ServeEventRow {
   id: number;
   run_id: string;
   ts: string;
   step: string;
-  status: HeartbeatEventStatus;
+  status: ServeEventStatus;
   detail: string | null;
 }
 
-export function addHeartbeatEvent(params: {
+export function addServeEvent(params: {
   runId: string;
   step: string;
-  status: HeartbeatEventStatus;
+  status: ServeEventStatus;
   detail?: string;
 }): void {
   getDb()
     .prepare(
-      `INSERT INTO heartbeat_event (run_id, step, status, detail)
+      `INSERT INTO serve_event (run_id, step, status, detail)
        VALUES (@runId, @step, @status, @detail)`,
     )
     .run({
@@ -34,14 +34,14 @@ export function addHeartbeatEvent(params: {
     });
 }
 
-export function listHeartbeatEvents(limit = 50): HeartbeatEventRow[] {
+export function listServeEvents(limit = 50): ServeEventRow[] {
   const capped = Math.min(Math.max(limit, 1), 200);
   return getDb()
     .prepare(
       `SELECT id, run_id, ts, step, status, detail
-       FROM heartbeat_event
+       FROM serve_event
        ORDER BY id DESC
        LIMIT ?`,
     )
-    .all(capped) as HeartbeatEventRow[];
+    .all(capped) as ServeEventRow[];
 }

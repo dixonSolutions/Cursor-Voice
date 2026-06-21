@@ -31,7 +31,7 @@ on projects hosted on a home machine.
 | [`18-image-carousel.md`](./18-image-carousel.md) | `show_images` tool, carousel PWA, Browser snapshot workflow | UI review on phone |
 | [`19-mobile-session-keepalive.md`](./19-mobile-session-keepalive.md) | Wake Lock, silent media session, auto-resume on mobile | Screen-off disconnects on phone |
 | [`20-native-callkit-shell.md`](./20-native-callkit-shell.md) | CallKit native app + push notifications | True call-style session + background alerts |
-| [`21-heartbeat-self-hosting.md`](./21-heartbeat-self-hosting.md) | Auto pull/build/restart, systemd install, event log | Self-hosting updates from Config tab |
+| [`21-serve-self-hosting.md`](./21-serve-self-hosting.md) | Serve hub: auto-update, network, manual actions, event log | Self-hosting from Config tab |
 
 ## One-paragraph summary
 

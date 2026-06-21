@@ -321,7 +321,7 @@ export async function registerAdminSettingsRoutes(app: FastifyInstance): Promise
       'audit',
       'voice_agent_run',
       'model_cache',
-      'heartbeat_event',
+      'serve_event',
     ] as const;
     const counts: Record<string, number> = {};
     for (const t of tables) {

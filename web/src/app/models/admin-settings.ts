@@ -63,9 +63,9 @@ export interface HostingSettings {
   runModes: RunModes;
 }
 
-// ── Heartbeat ───────────────────────────────────────────────────────────────
+// ── Serve ───────────────────────────────────────────────────────────────────
 
-export interface HeartbeatSettings {
+export interface ServeSettings {
   enabled: boolean;
   intervalMs: number;
   autoPull: boolean;
@@ -77,18 +77,20 @@ export interface HeartbeatSettings {
   repoDir?: string;
 }
 
-export type HeartbeatOutcome = 'ok' | 'skipped' | 'no_changes' | 'error';
+export type ServeOutcome = 'ok' | 'skipped' | 'no_changes' | 'error';
 
-export interface HeartbeatRunResult {
+export type ServeActionId = 'pull' | 'deps' | 'build' | 'restart' | 'health';
+
+export interface ServeRunResult {
   runId: string;
   trigger: 'manual' | 'scheduled';
   startedAt: string;
   finishedAt: string;
-  outcome: HeartbeatOutcome;
+  outcome: ServeOutcome;
   summary: string;
 }
 
-export interface HeartbeatGitSnapshot {
+export interface ServeGitSnapshot {
   repoDir: string;
   branch: string;
   dirty: boolean;
@@ -97,14 +99,14 @@ export interface HeartbeatGitSnapshot {
   currentCommit: string | null;
 }
 
-export interface HeartbeatStatus {
+export interface ServeStatus {
   running: boolean;
   schedulerActive: boolean;
-  lastRun: HeartbeatRunResult | null;
-  git: HeartbeatGitSnapshot | null;
+  lastRun: ServeRunResult | null;
+  git: ServeGitSnapshot | null;
 }
 
-export interface HeartbeatEvent {
+export interface ServeEvent {
   id: number;
   run_id: string;
   ts: string;

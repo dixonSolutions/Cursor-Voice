@@ -73,7 +73,7 @@
     "ghostKillEnabled": true,
     "logLevel": "info",
     "userName": "Alex",
-    "heartbeat": {
+    "serve": {
       "enabled": false,
       "intervalMs": 900000,
       "autoPull": true,
