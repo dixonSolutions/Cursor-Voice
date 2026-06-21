@@ -99,8 +99,8 @@ const MIGRATION_SQL = `
     ended_at    TEXT
   );
 
-  -- Heartbeat self-hosting run log (pull / build / restart steps).
-  CREATE TABLE IF NOT EXISTS heartbeat_event (
+  -- Serve self-hosting run log (pull / build / restart steps).
+  CREATE TABLE IF NOT EXISTS serve_event (
     id      INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id  TEXT NOT NULL,
     ts      TEXT NOT NULL DEFAULT (datetime('now')),
@@ -120,9 +120,21 @@ const INDEX_SQL = `
   CREATE INDEX IF NOT EXISTS idx_audit_tool     ON audit(tool);
   CREATE INDEX IF NOT EXISTS idx_voice_agent_status ON voice_agent_run(status);
   CREATE INDEX IF NOT EXISTS idx_voice_agent_project ON voice_agent_run(project);
-  CREATE INDEX IF NOT EXISTS idx_heartbeat_run ON heartbeat_event(run_id);
-  CREATE INDEX IF NOT EXISTS idx_heartbeat_ts ON heartbeat_event(ts);
+  CREATE INDEX IF NOT EXISTS idx_serve_run ON serve_event(run_id);
+  CREATE INDEX IF NOT EXISTS idx_serve_ts ON serve_event(ts);
 `;
+
+/** Carry legacy heartbeat_event rows into serve_event on existing databases. */
+function migrateServeEventTable(db: Database.Database): void {
+  const tables = db
+    .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name IN ('heartbeat_event', 'serve_event')`)
+    .all() as Array<{ name: string }>;
+  const names = new Set(tables.map((t) => t.name));
+  if (names.has('heartbeat_event') && !names.has('serve_event')) {
+    db.exec('ALTER TABLE heartbeat_event RENAME TO serve_event');
+    log.info('migrated heartbeat_event → serve_event');
+  }
+}
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -139,6 +151,8 @@ export function getDb(): Database.Database {
   _db = new Database(dbPath);
   _db.pragma('journal_mode = WAL');
   _db.pragma('foreign_keys = ON');
+
+  migrateServeEventTable(_db);
 
   _db.exec(MIGRATION_SQL);
   _db.exec(INDEX_SQL);

@@ -10,9 +10,10 @@ import { BridgeService } from './bridge.service';
 import type {
   WorkflowSettings,
   HostingSettings,
-  HeartbeatSettings,
-  HeartbeatStatus,
-  HeartbeatEvent,
+  ServeSettings,
+  ServeStatus,
+  ServeEvent,
+  ServeActionId,
   JobSettings,
   NarratorSettings,
   KeysStatus,
@@ -64,28 +65,34 @@ export class AdminService {
     return this.patch('/api/admin/hosting', patch);
   }
 
-  // ── Heartbeat ────────────────────────────────────────────────────────────
+  // ── Serve ────────────────────────────────────────────────────────────────
 
-  getHeartbeat(): Promise<{ heartbeat: HeartbeatSettings; status: HeartbeatStatus }> {
-    return this.get('/api/admin/heartbeat');
+  getServe(): Promise<{ serve: ServeSettings; status: ServeStatus }> {
+    return this.get('/api/admin/serve');
   }
 
-  patchHeartbeat(
-    patch: Partial<HeartbeatSettings>,
-  ): Promise<{ ok: boolean; heartbeat: HeartbeatSettings; status: HeartbeatStatus }> {
-    return this.patch('/api/admin/heartbeat', patch);
+  patchServe(
+    patch: Partial<ServeSettings>,
+  ): Promise<{ ok: boolean; serve: ServeSettings; status: ServeStatus }> {
+    return this.patch('/api/admin/serve', patch);
   }
 
-  runHeartbeat(): Promise<{ ok: boolean; started: boolean; runId: string }> {
-    return this.post('/api/admin/heartbeat/run');
+  runServe(): Promise<{ ok: boolean; started: boolean; runId: string }> {
+    return this.post('/api/admin/serve/run');
   }
 
-  getHeartbeatEvents(limit = 50): Promise<{ entries: HeartbeatEvent[] }> {
-    return this.get(`/api/admin/heartbeat/events?limit=${limit}`);
+  serveAction(
+    action: ServeActionId,
+  ): Promise<{ ok: boolean; outcome: string; detail: string; runId: string; status: ServeStatus }> {
+    return this.post('/api/admin/serve/action', { action });
+  }
+
+  getServeEvents(limit = 50): Promise<{ entries: ServeEvent[] }> {
+    return this.get(`/api/admin/serve/events?limit=${limit}`);
   }
 
   installHosting(): Promise<{ ok: boolean; detail: string }> {
-    return this.post('/api/admin/heartbeat/install');
+    return this.post('/api/admin/serve/install');
   }
 
   // ── Jobs ─────────────────────────────────────────────────────────────────
