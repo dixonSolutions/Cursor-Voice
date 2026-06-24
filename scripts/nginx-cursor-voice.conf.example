@@ -1,0 +1,58 @@
+# Cursor Voice — nginx frontend (split-port hosting)
+#
+# Serves the built PWA on webPort (default 5671) and proxies API/WS/MCP to backendPort (default 1234).
+# COOP/COEP headers are required for Vosk wake-word detection (SharedArrayBuffer).
+#
+# Install:
+#   cp scripts/nginx-cursor-voice.conf.example /etc/nginx/sites-available/cursor-voice
+#   sed -i "s|/root/Projects/CursorVoice|$(pwd)|g" /etc/nginx/sites-available/cursor-voice
+#   sed -i 's/listen 5671/listen YOUR_WEB_PORT/' /etc/nginx/sites-available/cursor-voice
+#   ln -sf /etc/nginx/sites-available/cursor-voice /etc/nginx/sites-enabled/cursor-voice
+#   nginx -t && systemctl reload nginx
+
+server {
+    listen 5671;
+    listen [::]:5671;
+    server_name _;
+
+    root /root/Projects/CursorVoice/web/dist;
+    index index.html;
+
+    # Vosk WASM requires cross-origin isolation (document response headers).
+    add_header Cross-Origin-Opener-Policy "same-origin" always;
+    add_header Cross-Origin-Embedder-Policy "require-corp" always;
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:1234;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /ws/ {
+        proxy_pass http://127.0.0.1:1234;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_read_timeout 86400;
+    }
+
+    location /mcp {
+        proxy_pass http://127.0.0.1:1234;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Connection "";
+        proxy_buffering off;
+    }
+
+    location /healthz {
+        proxy_pass http://127.0.0.1:1234;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

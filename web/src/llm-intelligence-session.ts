@@ -35,7 +35,7 @@ import {
   type TtsBackend,
 } from './intelligence-audio.js';
 import type { SttGate } from './stt-gate.js';
-import { isCrossOriginIsolated } from './cross-origin-isolation.js';
+import { isCrossOriginIsolated, wakePhraseCoopError } from './cross-origin-isolation.js';
 import { VoskGrammarSpotter, voskPhraseMatches } from './vosk-wake-word.js';
 import { SileroVadDetector } from './silero-vad.js';
 import { TurnSubmitBuffer } from './turn-submit-buffer.js';
@@ -336,9 +336,7 @@ export class LlmIntelligenceSession {
     await this.ensureSharedMic();
 
     if (!isCrossOriginIsolated()) {
-      this.cb.onSttError?.(
-        'Wake phrase detection needs COOP/COEP — open http://localhost:4200 (ng serve) or the bridge URL. Typed input still works.',
-      );
+      this.cb.onSttError?.(wakePhraseCoopError());
       return;
     }
 

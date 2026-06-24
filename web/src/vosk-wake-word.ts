@@ -6,7 +6,7 @@
 
 import type { Model } from 'vosk-browser';
 import { captureMicStream, getSharedAudioContext, unlockAudioContext, connectSilentSink } from './audio.js';
-import { isCrossOriginIsolated } from './cross-origin-isolation.js';
+import { isCrossOriginIsolated, voskCoopError } from './cross-origin-isolation.js';
 import { loadVoskModel } from './vosk-model-cache.js';
 import { normalizeForWakeMatch } from './wake-words.js';
 
@@ -69,8 +69,7 @@ export class VoskGrammarSpotter {
     if (this.running) return;
 
     if (!isCrossOriginIsolated()) {
-      const message =
-        'Vosk needs COOP/COEP headers — open the app via the bridge URL (not file:// or a cross-origin embed).';
+      const message = voskCoopError();
       this.cb.onError?.(message);
       throw new Error(message);
     }
