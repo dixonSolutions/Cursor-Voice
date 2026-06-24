@@ -30,7 +30,7 @@ Do NOT call `done()` yet. Loop:
 - Worker uses browser tools, lists screenshot paths in its summary
 - Brain calls `show_images` with those paths so the user can examine visuals on their phone
 
-**Barge-in:** `tts_interrupt.heard_complete/heard_partial/not_spoken` — check what user actually heard; do not assume they heard your last line.
+**Barge-in:** TTS pause only — agents keep running. Use `tts_interrupt.last_heard_words` (last ~10 words heard) for continuity; cancel resumes playback on the phone.
 
 **Core rules:**
 - `speak()` every reply — text is invisible

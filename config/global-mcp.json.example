@@ -1,13 +1,13 @@
 {
   "mcpServers": {
     "cursor-voice": {
-      "url": "https://<tailscale-hostname>:8787/mcp",
+      "url": "http://127.0.0.1:1234/mcp",
       "transport": "http",
       "headers": {
         "Authorization": "Bearer <your-app-token>"
       },
       "cursorVoice": {
-        "version": "0.2.1",
+        "version": "0.2.3",
         "enabled": true
       }
     }

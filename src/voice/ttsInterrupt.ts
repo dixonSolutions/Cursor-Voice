@@ -9,6 +9,10 @@ export interface TtsInterruptContext {
   heard_partial: string | null;
   /** speak() lines queued but never started. */
   not_spoken: string[];
+  /** Estimated words heard from the partial line (time-based). */
+  partial_words_estimate?: string | null;
+  /** Last N words the user heard — use this for continuity. */
+  last_heard_words?: string;
 }
 
 export function parseTtsInterrupt(raw: unknown): TtsInterruptContext | undefined {
@@ -22,14 +26,42 @@ export function parseTtsInterrupt(raw: unknown): TtsInterruptContext | undefined
     : [];
   const heard_partial =
     typeof o['heard_partial'] === 'string' ? o['heard_partial'] : null;
-  if (!heard_complete.length && !heard_partial && !not_spoken.length) {
+  const partial_words_estimate =
+    typeof o['partial_words_estimate'] === 'string' ? o['partial_words_estimate'] : null;
+  const last_heard_words =
+    typeof o['last_heard_words'] === 'string' ? o['last_heard_words'] : undefined;
+  if (!heard_complete.length && !heard_partial && !not_spoken.length && !last_heard_words) {
     return undefined;
   }
-  return { heard_complete, heard_partial, not_spoken };
+  const ctx: TtsInterruptContext = {
+    heard_complete,
+    heard_partial,
+    not_spoken,
+    partial_words_estimate,
+    last_heard_words,
+  };
+  if (!ctx.last_heard_words) {
+    ctx.last_heard_words = computeLastHeardWords(ctx, 10);
+  }
+  return ctx;
+}
+
+/** Last N words from completed lines + partial estimate. */
+export function computeLastHeardWords(ctx: TtsInterruptContext, maxWords = 10): string {
+  const chunks = [...ctx.heard_complete];
+  if (ctx.partial_words_estimate?.trim()) {
+    chunks.push(ctx.partial_words_estimate.trim());
+  }
+  const words = chunks.join(' ').split(/\s+/).filter(Boolean);
+  if (words.length === 0) return '';
+  return words.slice(-maxWords).join(' ');
 }
 
 export function summarizeTtsInterrupt(ctx: TtsInterruptContext): string {
   const parts: string[] = [];
+  if (ctx.last_heard_words) {
+    parts.push(`last heard: "${ctx.last_heard_words}"`);
+  }
   if (ctx.heard_complete.length) {
     parts.push(`heard: ${ctx.heard_complete.join(' ')}`);
   }

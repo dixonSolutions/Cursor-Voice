@@ -23,7 +23,12 @@ import {
   prepareSpeechSynthesisForPlayback,
   type TtsPlayContext,
 } from './tts-fallback.js';
-import { snapshotToPayload, summarizeTtsInterrupt, type TtsInterruptSnapshot } from './tts-interrupt.js';
+import {
+  snapshotToPayload,
+  summarizeTtsInterrupt,
+  withLastHeardWords,
+  type TtsInterruptSnapshot,
+} from './tts-interrupt.js';
 import { WebkitSttSession } from './webkit-stt.js';
 import { AmazonSttSession } from './amazon-stt.js';
 import { speakAmazonPolly, stopAmazonTts } from './amazon-tts.js';
@@ -48,7 +53,7 @@ import {
 
 export interface VoiceTtsSettings {
   cursorVoiceEnabled: boolean;
-  interruptMode: 'deafen' | 'stop';
+  interruptMode: 'pause' | 'deafen' | 'stop';
   interruptDeafenFactor: number;
   errorSoundEnabled: boolean;
   errorSpeakEnabled: boolean;
@@ -75,7 +80,7 @@ export class LlmIntelligenceSession {
   private turnSubmit: TurnSubmit = { silenceMs: 1500, vadEnabled: true };
   private ttsSettings: VoiceTtsSettings = {
     cursorVoiceEnabled: true,
-    interruptMode: 'deafen',
+    interruptMode: 'pause',
     interruptDeafenFactor: 0.2,
     errorSoundEnabled: true,
     errorSpeakEnabled: true,
@@ -144,9 +149,6 @@ export class LlmIntelligenceSession {
       this.cb.onSpeaking(active);
       this.notifySpeakingState(active);
       if (!active) {
-        if (this.ttsPile.isDeferredInterrupt()) {
-          this.ttsPile.restoreInterruptVolume();
-        }
         this.ensureWakeListening();
       }
       this.syncCapture();
@@ -410,28 +412,17 @@ export class LlmIntelligenceSession {
     await this.armStartSpotter();
   }
 
-  /** Wake phrase heard while assistant TTS is playing — duck or stop per interruptMode. */
+  /** Wake phrase heard while assistant TTS is playing — pause speech; agent keeps running. */
   private bargeInDuringTts(): void {
-    if (!this.ttsPile.isActive()) return;
+    if (!this.ttsPile.isActive() && !this.ttsPile.isBargeInPaused()) return;
 
-    if (this.ttsSettings.interruptMode === 'deafen') {
-      const applied = this.ttsPile.deafen(this.ttsSettings.interruptDeafenFactor);
-      if (applied) {
-        this.cb.onTtsBargeIn?.(
-          `wake barge-in — assistant ducked to ${Math.round(this.ttsSettings.interruptDeafenFactor * 100)}% while speaking`,
-        );
-        this.voiceLog('tts', 'info', 'TTS deafened', 'wake barge-in');
-      }
-      return;
-    }
-
-    const snap = this.ttsPile.interruptWithSnapshot();
+    const snap = this.ttsPile.pauseForBargeIn();
     const payload = snapshotToPayload(snap);
     if (payload) {
-      this.pendingTtsInterrupt = payload;
-      this.cb.onTtsBargeIn?.(summarizeTtsInterrupt(payload));
+      this.pendingTtsInterrupt = withLastHeardWords(payload);
+      this.cb.onTtsBargeIn?.(summarizeTtsInterrupt(this.pendingTtsInterrupt));
     }
-    this.voiceLog('tts', 'info', 'TTS cancelled', 'barge-in');
+    this.voiceLog('tts', 'info', 'TTS paused', 'wake barge-in — cancel resumes, submit sends last-heard context');
     this.notifySpeakingState(false);
   }
 
@@ -452,7 +443,7 @@ export class LlmIntelligenceSession {
   private async onVoskStartDetected(heard: string): Promise<void> {
     if (this.closed) return;
 
-    if (this.ttsSpeaking || this.ttsPile.isActive()) {
+    if ((this.ttsSpeaking || this.ttsPile.isActive()) && !this.ttsPile.isBargeInPaused()) {
       if (this.isTtsWakeWordEcho(heard)) {
         this.startSpotter?.resetTrigger();
         this.voiceLog('pipeline', 'debug', 'Wake ignored — TTS echo', heard);
@@ -504,12 +495,14 @@ export class LlmIntelligenceSession {
     this.cancelSpotter = null;
   }
 
-  /** Vosk cancel phrase heard during capture — abort current turn without sending. */
+  /** Vosk cancel phrase heard during capture — abort turn; resume paused TTS if any. */
   private onCancelDetected(): void {
     if (this.closed || !this.voiceActivated) return;
-    if (this.ttsPile.isDeferredInterrupt()) {
-      this.ttsPile.finishDeferredInterrupt();
-      this.notifySpeakingState(false);
+    if (this.ttsPile.isBargeInPaused()) {
+      this.ttsPile.resumeAfterBargeInCancel();
+      this.pendingTtsInterrupt = null;
+      this.notifySpeakingState(this.ttsPile.isActive());
+      this.voiceLog('tts', 'info', 'TTS resumed', 'cancel after barge-in');
     }
     playVoiceCueNow('cancel');
     console.debug('[cancel] turn cancelled by user');
@@ -706,7 +699,6 @@ export class LlmIntelligenceSession {
       const mic = this.sharedMicStream ?? (await this.ensureSharedMic());
       await this.vadDetector.start(mic, {
         redemptionMs: this.turnSubmit.silenceMs,
-        onSpeechStart: () => this.restoreAssistantVolumeIfDeferredInterrupt(),
         onSpeechEnd: () => this.onVadSpeechEnd(),
         onError: (message) => {
           console.warn('[silero-vad]', message);
@@ -915,29 +907,23 @@ export class LlmIntelligenceSession {
     const trimmed = text.trim();
     if (!trimmed || trimmed === this.lastLoggedSttPartial) return;
     this.lastLoggedSttPartial = trimmed;
-    this.restoreAssistantVolumeIfDeferredInterrupt();
     this.voiceLog('stt', 'info', `${this.sttProviderLabel()} partial`, trimmed.slice(0, 120));
-  }
-
-  /** Full volume once the user speaks — ducking only applies during wake barge-in TTS. */
-  private restoreAssistantVolumeIfDeferredInterrupt(): void {
-    if (!this.ttsPile.isDeferredInterrupt()) return;
-    this.ttsPile.restoreInterruptVolume();
   }
 
   private sendUserTurn(text: string): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
 
-    if (this.ttsPile.isDeferredInterrupt()) {
-      const snap = this.ttsPile.finishDeferredInterrupt();
+    if (this.ttsPile.isBargeInPaused()) {
+      const snap = this.ttsPile.finalizeBargeInOnSubmit();
       const payload = snapshotToPayload(snap);
-      if (payload) this.pendingTtsInterrupt = payload;
+      if (payload) {
+        this.pendingTtsInterrupt = withLastHeardWords(payload);
+      }
       this.notifySpeakingState(false);
     }
 
     const payload: Record<string, unknown> = { type: 'user_turn', text };
     if (this.pendingTtsInterrupt) {
-      payload['is_interrupt'] = true;
       payload['tts_interrupt'] = this.pendingTtsInterrupt;
       this.pendingTtsInterrupt = null;
     } else if (isInterruptPhrase(text)) {

@@ -340,7 +340,7 @@ export class ConfigTabComponent implements OnInit {
   protected savingVoice = false;
 
   protected cursorVoiceEnabled = true;
-  protected interruptMode: 'deafen' | 'stop' = 'deafen';
+  protected interruptMode: 'pause' | 'deafen' | 'stop' = 'pause';
   protected interruptDeafenFactor = 0.2;
   protected errorSoundEnabled = true;
   protected errorSpeakEnabled = true;
@@ -361,8 +361,9 @@ export class ConfigTabComponent implements OnInit {
   protected readonly currentBrowserId = currentBrowserProfileId();
 
   protected readonly interruptModeOptions = [
-    { label: 'Deafen — duck while assistant speaks on wake barge-in', value: 'deafen' },
-    { label: 'Stop — cancel speech immediately', value: 'stop' },
+    { label: 'Pause — stop speech on wake; cancel resumes', value: 'pause' },
+    { label: 'Deafen (legacy — same as pause)', value: 'deafen' },
+    { label: 'Stop (legacy — same as pause)', value: 'stop' },
   ];
 
   protected readonly phraseConflict = computed(() => {

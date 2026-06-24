@@ -97,7 +97,7 @@ function buildMcpServer(sessionKey: string): McpServer {
     'Wait for and receive the next user utterance. Long-polls up to timeout_ms (default 30 s). ' +
       'Returns { turn: null } on timeout — call again immediately to keep listening. ' +
       'Call done() before next_voice_turn() to re-arm the mic first. ' +
-      'On barge-in, tts_interrupt reports what the user actually heard.',
+      'On TTS barge-in, tts_interrupt.last_heard_words is what the user heard aloud (~10 words). Agents keep running.',
     {
       timeout_ms: z
         .number()

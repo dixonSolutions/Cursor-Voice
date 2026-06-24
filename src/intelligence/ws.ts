@@ -41,7 +41,6 @@ import {
   spawnVoiceAgent,
   isVoiceAgentRunning,
   getActiveVoiceAgent,
-  killVoiceAgent,
   refreshProjectForVoice,
 } from '../executor/voiceAgent.js';
 import { resolveProject, getSessionState } from '../state/registry.js';
@@ -209,7 +208,9 @@ export function registerIntelligenceWebSocket(app: FastifyInstance): void {
             resetTurnSpeakTracking();
 
             const ttsInterrupt = parseTtsInterrupt(msg['tts_interrupt']);
-            const isInterrupt = Boolean(msg['is_interrupt']) || Boolean(ttsInterrupt);
+            const phraseInterrupt = /\b(stop everything|abort|quit)\b/i.test(text);
+            const isInterrupt =
+              Boolean(msg['is_interrupt']) && phraseInterrupt && !ttsInterrupt;
             voiceTurnQueue.enqueue(text, { isInterrupt, ttsInterrupt });
 
             const bridgeSession = getSessionState(sessionKey);
@@ -295,7 +296,7 @@ export function registerIntelligenceWebSocket(app: FastifyInstance): void {
         unregisterTurnDone?.();
         unregisterVoice = null;
         unregisterTurnDone = null;
-        killVoiceAgent('intelligence websocket closed');
+        // Do not kill the voice agent on WS close — user may reconnect; barge-in must not stop Cursor.
         if (relaySession) {
           void getNarrator().setSession(null);
           relaySession = null;

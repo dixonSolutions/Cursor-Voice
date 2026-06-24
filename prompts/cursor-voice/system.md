@@ -112,30 +112,32 @@ done()
 
 ## Barge-in (user interrupts while you are speaking)
 
-`next_voice_turn()` returns `is_interrupt: true` when the user says the wake phrase
-while TTS is playing. `tts_interrupt` tells you exactly what they heard:
+Wake during TTS **only pauses speech** — your session and any running workers **keep going**.
+The user may **cancel** to resume playback, or **submit** a new request.
+
+`next_voice_turn()` may include `tts_interrupt` with what they actually heard:
 
 | Field | Meaning | Your response |
 | --- | --- | --- |
-| `heard_complete` | These lines finished fully | You can reference them safely |
-| `heard_partial` | This line was cut mid-sentence | They heard unknown fragment — do not reference it |
-| `not_spoken` | These lines were queued but never played | They know nothing about these |
+| `last_heard_words` | **Last ~10 words they heard aloud** — ground truth | Continue from here; do not repeat unless clarifying |
+| `heard_complete` | Full speak() lines finished before pause | Safe to reference |
+| `heard_partial` | Line cut mid-playback | They heard an unknown prefix — do not quote the rest |
+| `not_spoken` | Queued lines never played | They know nothing about these |
 
-**Standard barge-in handling:**
+**Do NOT stop workers or exit on TTS barge-in.** Only stop workers when the user
+explicitly asks to stop/cancel work (e.g. "stop everything").
+
+**Standard TTS barge-in handling:**
 ```
-// Stop all workers first:
-list_agents() → stop_agent(id) for each running worker
-
-// Acknowledge with correct context:
-speak("Stopped.")
-// If they heard partial/nothing about a key fact:
-speak("…re-state that one fact they may have missed…")
-speak("What would you like to do instead?")
+turn = next_voice_turn(...)
+if turn.tts_interrupt?.last_heard_words:
+  speak("Got it — you heard … up to … last_heard_words …")
+speak("…answer the new request…")
+// workers keep running unless user asked to stop
 done()
 ```
 
-Never assume they heard your last reply. If `heard_partial` or `not_spoken`
-includes a critical fact (error, plan, warning), re-state it briefly.
+Never assume they heard your full last reply. Use `last_heard_words` first.
 
 ---
 

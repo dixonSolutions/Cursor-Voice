@@ -77,10 +77,10 @@ export const VoiceTtsSchema = z.object({
   /** When false, MCP speak() lines are shown in UI but not played aloud. */
   cursorVoiceEnabled: z.boolean().default(true),
   /**
-   * Barge-in behaviour: `deafen` ducks assistant volume until the user submits;
-   * `stop` cancels playback immediately (legacy).
+   * Barge-in behaviour: `pause` stops TTS on wake (cancel resumes, submit sends last_heard_words).
+   * `deafen` and `stop` are legacy aliases — both map to pause.
    */
-  interruptMode: z.enum(['deafen', 'stop']).default('deafen'),
+  interruptMode: z.enum(['pause', 'deafen', 'stop']).default('pause'),
   /** Volume multiplier (0–1) while assistant TTS plays after wake-word barge-in (deafen mode). */
   interruptDeafenFactor: z.number().min(0).max(1).default(0.2),
   /** Play error earcon on TTS failures, disconnects, and other voice pipeline errors. */
