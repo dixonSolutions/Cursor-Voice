@@ -10,6 +10,8 @@ import type { TtsInterruptSnapshot, TtsPlayContext, TtsPlayFn } from './tts-inte
 
 const SPEAK_PREFIX = /^\[Speak to user\]:\s*/i;
 const MAX_TTS_CHARS = 900;
+/** ~150 wpm — estimate partial-line words heard before barge-in pause. */
+const MS_PER_WORD_ESTIMATE = 400;
 
 let pendingTimer: ReturnType<typeof setTimeout> | null = null;
 let lastSpokenText = '';
@@ -65,8 +67,11 @@ export class TtsPile {
   /** Interrupt ducking — 1 = full volume, lower while user captures after barge-in. */
   private interruptVolume = 1;
   private currentVolumeControl: import('./tts-interrupt.js').TtsVolumeControl | null = null;
-  /** When true, barge-in deferred snapshot until user submits. */
-  private deferredInterrupt = false;
+  /** When true, wake barge-in paused playback — queue saved for cancel-resume. */
+  private bargeInPaused = false;
+  private bargeInResumeQueue: string[] = [];
+  private lineStartedAt = 0;
+  private partialWordsEstimate: string | null = null;
   private baseVolume = 1;
 
   constructor(private readonly playLine: TtsPlayFn) {}
@@ -84,14 +89,16 @@ export class TtsPile {
   }
 
   isActive(): boolean {
-    return this.active || this.draining || this.queue.length > 0;
+    return this.active || this.draining || this.queue.length > 0 || this.bargeInPaused;
   }
 
-  isDeferredInterrupt(): boolean {
-    return this.deferredInterrupt;
+  isBargeInPaused(): boolean {
+    return this.bargeInPaused;
   }
 
-  /** Line currently playing — used to ignore wake-word echo from assistant TTS. */
+  getPartialWordsEstimate(): string | null {
+    return this.partialWordsEstimate;
+  }
   getCurrentLine(): string | null {
     return this.currentLine;
   }
@@ -100,7 +107,10 @@ export class TtsPile {
     this.completedLines.length = 0;
     this.currentLine = null;
     this.lineStarted = false;
-    this.deferredInterrupt = false;
+    this.lineStartedAt = 0;
+    this.partialWordsEstimate = null;
+    this.bargeInPaused = false;
+    this.bargeInResumeQueue = [];
     this.interruptVolume = 1;
   }
 
@@ -112,49 +122,123 @@ export class TtsPile {
   }
 
   /**
-   * Duck assistant speech on wake-word barge-in while TTS is playing.
-   * Playback continues until submit (snapshot taken in finishDeferredInterrupt).
-   * Returns true when deafen was applied (caller should not stop TTS).
+   * Wake barge-in — stop reading aloud but keep the queue for cancel-resume.
+   * Does not clear completed lines (used for last-heard-word context on submit).
    */
-  deafen(factor: number): boolean {
-    if (!this.isActive()) return false;
-    this.deferredInterrupt = true;
-    this.applyInterruptVolume(factor);
-    return true;
+  pauseForBargeIn(): TtsInterruptSnapshot {
+    this.hardStop = true;
+    this.lineAbort?.abort();
+
+    const partialEstimate = this.estimatePartialWordsHeard();
+    this.partialWordsEstimate = partialEstimate;
+
+    const resumeQueue: string[] = [...this.queue];
+    if (this.currentLine) {
+      resumeQueue.unshift(this.currentLine);
+    }
+
+    const heardPartial =
+      this.lineStarted && this.currentLine ? this.currentLine : null;
+
+    const snapshot: TtsInterruptSnapshot = {
+      heard_complete: [...this.completedLines],
+      heard_partial: heardPartial,
+      not_spoken: [...resumeQueue],
+      partial_words_estimate: partialEstimate,
+    };
+
+    this.bargeInPaused = true;
+    this.bargeInResumeQueue = resumeQueue;
+    this.queue.length = 0;
+    this.draining = false;
+    this.currentLine = null;
+    this.lineStarted = false;
+    this.lineStartedAt = 0;
+    this.lineAbort = null;
+    this.interruptVolume = 1;
+    this.currentVolumeControl = null;
+    this.setActive(false);
+
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+    stopAmazonTts();
+
+    return snapshot;
+  }
+
+  /** User said cancel during capture — resume assistant speech from the pause point. */
+  resumeAfterBargeInCancel(): void {
+    if (!this.bargeInPaused) return;
+    this.bargeInPaused = false;
+    this.hardStop = false;
+    this.partialWordsEstimate = null;
+    this.bargeInResumeQueue.forEach((line) => this.queue.push(line));
+    this.bargeInResumeQueue = [];
+    void this.drain();
+  }
+
+  /** User submitted a new turn — discard unsplayed queue and return heard snapshot. */
+  finalizeBargeInOnSubmit(): TtsInterruptSnapshot {
+    const snap = this.buildInterruptSnapshot();
+    this.bargeInPaused = false;
+    this.bargeInResumeQueue = [];
+    this.queue.length = 0;
+    this.draining = false;
+    this.hardStop = false;
+    this.currentLine = null;
+    this.lineStarted = false;
+    this.lineStartedAt = 0;
+    this.lineAbort = null;
+    this.completedLines.length = 0;
+    this.partialWordsEstimate = null;
+    this.setActive(false);
+    return snap;
+  }
+
+  private buildInterruptSnapshot(): TtsInterruptSnapshot {
+    return {
+      heard_complete: [...this.completedLines],
+      heard_partial:
+        this.lineStarted && this.currentLine ? this.currentLine : null,
+      not_spoken: [...this.bargeInResumeQueue],
+      partial_words_estimate: this.partialWordsEstimate,
+    };
+  }
+
+  private estimatePartialWordsHeard(): string | null {
+    if (!this.lineStarted || !this.currentLine) return null;
+    const elapsed = Math.max(0, Date.now() - this.lineStartedAt);
+    const words = this.currentLine.split(/\s+/).filter(Boolean);
+    if (words.length === 0) return null;
+    const count = Math.min(words.length, Math.max(1, Math.floor(elapsed / MS_PER_WORD_ESTIMATE)));
+    return words.slice(0, count).join(' ');
   }
 
   /**
-   * Restore full assistant volume after the user starts speaking their request.
-   * Keeps deferred interrupt state so the heard snapshot is still taken on submit.
+   * @deprecated Use pauseForBargeIn — deafen kept for API compat; maps to pause.
    */
+  deafen(_factor: number): boolean {
+    if (!this.isActive()) return false;
+    this.pauseForBargeIn();
+    return true;
+  }
+
   restoreInterruptVolume(): void {
-    if (this.interruptVolume === 1) return;
-    this.applyInterruptVolume(1);
+    // No-op — pause mode stops audio instead of ducking.
   }
 
-  private applyInterruptVolume(multiplier: number): void {
-    this.interruptVolume = Math.max(0, Math.min(1, multiplier));
-    this.currentVolumeControl?.setVolume(this.interruptVolume);
-
-    // WebKit cannot change utter.volume mid-play — restart current line at new volume.
-    if (this.currentLine && this.lineStarted) {
-      const line = this.currentLine;
-      this.lineAbort?.abort();
-      this.queue.unshift(line);
-      this.currentLine = null;
-      this.lineStarted = false;
-      if (!this.draining) void this.drain();
-    }
-  }
-
-  /** Stop deferred interrupt — snapshot what was heard and halt playback. */
+  /**
+   * @deprecated Use finalizeBargeInOnSubmit.
+   */
   finishDeferredInterrupt(): TtsInterruptSnapshot {
-    this.deferredInterrupt = false;
-    this.interruptVolume = 1;
+    if (this.bargeInPaused) {
+      return this.finalizeBargeInOnSubmit();
+    }
     return this.interruptWithSnapshot();
   }
 
-  /** Stop playback and return what the user had heard so far. */
+  /** Line currently playing — used to ignore wake-word echo from assistant TTS. */
   interruptWithSnapshot(): TtsInterruptSnapshot {
     this.hardStop = true;
     this.lineAbort?.abort();
@@ -177,7 +261,8 @@ export class TtsPile {
     this.currentLine = null;
     this.lineStarted = false;
     this.lineAbort = null;
-    this.deferredInterrupt = false;
+    this.bargeInPaused = false;
+    this.bargeInResumeQueue = [];
     this.interruptVolume = 1;
     this.currentVolumeControl = null;
     this.setActive(false);
@@ -239,6 +324,7 @@ export class TtsPile {
       await this.playLine(line, {
         onStart: () => {
           this.lineStarted = true;
+          this.lineStartedAt = Date.now();
         },
         signal,
         volume: volumeControl,

@@ -31,7 +31,7 @@ import { cursorVoiceRuleBody } from './loadCursorVoicePrompt.js';
 const log = childLogger('mcp:global-setup');
 
 /** Bump when the generated mcp.json shape or defaults change. */
-export const CURSOR_VOICE_MCP_VERSION = '0.2.2';
+export const CURSOR_VOICE_MCP_VERSION = '0.2.3';
 
 export const CURSOR_VOICE_MCP_SERVER_NAME = 'cursor-voice';
 
@@ -104,10 +104,14 @@ function compareVersions(a: string, b: string): number {
   return 0;
 }
 
+/**
+ * MCP URL for cursor-agent's ~/.cursor/mcp.json.
+ * Always loopback — cursor-agent runs on the bridge host; publicBaseUrl is for the PWA only.
+ */
 function resolveMcpBridgeUrl(): string {
   const { settings } = getConfig();
   const run = getRunModeInfo(settings);
-  const base = (run.publicBaseUrl ?? run.backendUrl).replace(/\/$/, '');
+  const base = run.backendUrl.replace(/\/$/, '');
   return `${base}/mcp`;
 }
 

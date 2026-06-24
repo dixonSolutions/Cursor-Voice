@@ -185,13 +185,16 @@ export interface NextVoiceTurnResult {
   /** Turns still buffered after this dequeue. */
   queue_depth: number;
   /**
-   * When the user barged in during TTS: lines fully heard, line cut off mid-playback,
-   * and lines never spoken. Use this — the user did not hear your full last reply.
+   * When the user barged in during TTS: what they heard (especially last_heard_words),
+   * plus lines cut off / not spoken. The Cursor agent keeps running — do not stop workers.
    */
   tts_interrupt?: {
     heard_complete: string[];
     heard_partial: string | null;
     not_spoken: string[];
+    partial_words_estimate?: string | null;
+    /** Last ~10 words the user heard aloud — treat as ground truth for continuity. */
+    last_heard_words?: string;
   };
 }
 
