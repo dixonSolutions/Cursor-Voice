@@ -144,9 +144,11 @@ export async function registerCursorSessionRoutes(app: FastifyInstance): Promise
 
       const { session_id: sessionId, limit } = parsed.data;
       if (!isSessionAllowed(project.name, sessionId)) {
-        return reply.code(400).send({
-          error: `Session "${sessionId}" is not known for project "${project.name}"`,
-        });
+        return {
+          project: project.name,
+          session_id: sessionId,
+          entries: [],
+        };
       }
 
       const entries = listSessionEventLog(project.name, sessionId, limit ?? 500);

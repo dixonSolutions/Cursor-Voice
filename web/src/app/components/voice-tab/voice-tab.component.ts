@@ -394,13 +394,8 @@ export class VoiceTabComponent {
         stored !== NEW_CURSOR_SESSION_ID &&
         !sessions.some((s) => s.session_id === stored)
       ) {
-        sessions.unshift({
-          session_id: stored,
-          last_prompt: 'Saved session',
-          last_status: 'done',
-          last_run_at: new Date().toISOString(),
-          job_count: 0,
-        });
+        // Stale local preference from another host or cleared server DB — drop it.
+        this.bridge.clearStoredCursorSession(project);
       }
 
       this.cursorSessions.set(sessions);
@@ -427,6 +422,10 @@ export class VoiceTabComponent {
     if (activeSessionId) valid.add(activeSessionId);
 
     const stored = this.bridge.getStoredCursorSession(project);
+    if (stored && !valid.has(stored)) {
+      this.bridge.clearStoredCursorSession(project);
+    }
+
     const current =
       this.selectedSessionId && valid.has(this.selectedSessionId)
         ? this.selectedSessionId

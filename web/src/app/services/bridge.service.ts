@@ -343,6 +343,10 @@ export class BridgeService {
     return localStorage.getItem(this._sessionStorageKey(project));
   }
 
+  clearStoredCursorSession(project: string): void {
+    localStorage.removeItem(this._sessionStorageKey(project));
+  }
+
   storeCursorSessionPreference(project: string, sessionId: string): void {
     localStorage.setItem(this._sessionStorageKey(project), sessionId);
   }
@@ -357,8 +361,14 @@ export class BridgeService {
       const created = await this.createNewCursorSession(project);
       return created.active_session_id;
     }
-    await this.selectCursorSession(project, stored);
-    return stored;
+    try {
+      await this.selectCursorSession(project, stored);
+      return stored;
+    } catch {
+      this.clearStoredCursorSession(project);
+      const created = await this.createNewCursorSession(project);
+      return created.active_session_id;
+    }
   }
 
   /**
