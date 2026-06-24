@@ -12,6 +12,7 @@ import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import stripAnsi from 'strip-ansi';
 import { getConfig } from '../config.js';
+import { buildCursorAgentEnv } from './cursorAgent.js';
 import { childLogger } from '../log.js';
 import { cursorVoiceRuleBody } from '../mcp/loadCursorVoicePrompt.js';
 import {
@@ -202,11 +203,7 @@ export function spawnVoiceAgent(
   const child = spawn('cursor-agent', args, {
     cwd: project.path,
     shell: false,
-    env: {
-      ...process.env,
-      OPENAI_API_KEY: undefined,
-      GEMINI_API_KEY: undefined,
-    },
+    env: buildCursorAgentEnv(),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 

@@ -77,8 +77,8 @@ export type OrbColorMode = 'blue' | 'red' | 'green';
         border-radius: 50%;
         background: radial-gradient(
           circle,
-          rgba(59, 130, 246, 0.5) 0%,
-          rgba(37, 99, 235, 0.15) 45%,
+          rgba(124, 58, 237, 0.5) 0%,
+          rgba(109, 40, 217, 0.15) 45%,
           transparent 70%
         );
         filter: blur(18px);
@@ -241,11 +241,11 @@ export class VoiceOrbComponent implements OnDestroy {
       bloomInner = '34, 197, 94';
       bloomOuter = '22, 163, 74';
     } else {
-      highlight = userTalk ? '#e0f2fe' : '#bae6fd';
-      mid = userTalk ? '#38bdf8' : '#60a5fa';
-      deep = userTalk ? '#1d4ed8' : '#1e3a8a';
-      bloomInner = '96, 165, 250';
-      bloomOuter = '37, 99, 235';
+      highlight = userTalk ? '#ede9fe' : '#ddd6fe';
+      mid = userTalk ? '#a78bfa' : '#8b5cf6';
+      deep = userTalk ? '#6d28d9' : '#4c1d95';
+      bloomInner = '167, 139, 250';
+      bloomOuter = '124, 58, 237';
     }
 
     ctx.clearRect(0, 0, w, h);
@@ -254,7 +254,7 @@ export class VoiceOrbComponent implements OnDestroy {
     const bloom = ctx.createRadialGradient(cx, cy, baseR * 0.2, cx, cy, baseR * 1.35);
     bloom.addColorStop(0, `rgba(${bloomInner}, ${0.18 * glow})`);
     bloom.addColorStop(0.55, `rgba(${bloomOuter}, ${0.06 * glow})`);
-    bloom.addColorStop(1, 'rgba(15, 23, 42, 0)');
+    bloom.addColorStop(1, 'rgba(26, 26, 46, 0)');
     ctx.fillStyle = bloom;
     ctx.fillRect(0, 0, w, h);
 
@@ -287,7 +287,7 @@ export class VoiceOrbComponent implements OnDestroy {
       let fillRgb: string;
       if (mode === 'green') fillRgb = '187, 247, 208';
       else if (mode === 'red') fillRgb = '254, 202, 202';
-      else fillRgb = '224, 242, 254';
+      else fillRgb = '237, 233, 254';
 
       ctx.beginPath();
       for (let i = 0; i <= VIZ_BINS; i++) {

@@ -48,6 +48,7 @@ import { registerControlSocket } from './state/controlSocket.js';
 import { registerPushRoutes } from './routes/push.js';
 import { resolveRequest } from './mcp/server/approvalRegistry.js';
 import { getImage, readImageBytes, clearImages } from './mcp/server/imageRegistry.js';
+import { buildCursorAgentEnv } from './executor/cursorAgent.js';
 
 /** Required for vosk-browser SharedArrayBuffer (wake-word WASM). */
 const CROSS_ORIGIN_ISOLATION_HEADERS = {
@@ -64,6 +65,7 @@ async function getCursorAgentVersion(): Promise<string | null> {
   try {
     const { stdout } = await execFileAsync('cursor-agent', ['about', '--format', 'json'], {
       timeout: 5000,
+      env: buildCursorAgentEnv(),
     });
     const parsed = JSON.parse(stdout.trim()) as { cliVersion?: string };
     return parsed.cliVersion ?? null;

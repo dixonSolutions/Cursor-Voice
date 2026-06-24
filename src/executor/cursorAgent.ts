@@ -13,6 +13,7 @@
  */
 
 import { spawn } from 'node:child_process';
+import { homedir } from 'node:os';
 import { createInterface } from 'node:readline';
 import stripAnsi from 'strip-ansi';
 import { getConfig } from '../config.js';
@@ -23,6 +24,16 @@ import { buildAgentPrompt, buildAskPrompt } from './agentPrompt.js';
 import type { StreamJsonEvent } from './watcher.js';
 
 const log = childLogger('cursor-agent');
+
+/** Env for cursor-agent subprocesses — HOME is required by the CLI wrapper (set -u). */
+export function buildCursorAgentEnv(): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    HOME: process.env.HOME ?? homedir(),
+    OPENAI_API_KEY: undefined,
+    GEMINI_API_KEY: undefined,
+  };
+}
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -142,13 +153,7 @@ export function spawnAgent(opts: SpawnOptions): AgentHandle {
   const child = spawn('cursor-agent', args, {
     cwd: opts.project.path,
     shell: false, // SECURITY: never true
-    env: {
-      ...process.env,
-      // Ensure cursor-agent is not given our secrets.
-      // It uses its own ~/.cursor auth — not our API keys.
-      OPENAI_API_KEY: undefined,
-      GEMINI_API_KEY: undefined,
-    },
+    env: buildCursorAgentEnv(),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 

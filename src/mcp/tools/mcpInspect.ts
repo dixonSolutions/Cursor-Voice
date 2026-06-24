@@ -15,6 +15,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import stripAnsi from 'strip-ansi';
+import { buildCursorAgentEnv } from '../../executor/cursorAgent.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -36,7 +37,10 @@ export interface McpListResult {
 export async function handleMcpList(): Promise<McpListResult> {
   let stdout: string;
   try {
-    ({ stdout } = await execFileAsync('cursor-agent', ['mcp', 'list'], { timeout: 10_000 }));
+    ({ stdout } = await execFileAsync('cursor-agent', ['mcp', 'list'], {
+      timeout: 10_000,
+      env: buildCursorAgentEnv(),
+    }));
   } catch {
     return { servers: [] };
   }
@@ -77,7 +81,7 @@ export async function handleMcpTools(args: { server: string }): Promise<McpTools
     ({ stdout } = await execFileAsync(
       'cursor-agent',
       ['mcp', 'list-tools', args.server],
-      { timeout: 10_000 },
+      { timeout: 10_000, env: buildCursorAgentEnv() },
     ));
   } catch (err) {
     throw new Error(`cursor-agent mcp list-tools "${args.server}" failed: ${String(err)}`);

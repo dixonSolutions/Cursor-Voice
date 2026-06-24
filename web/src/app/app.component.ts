@@ -3,7 +3,6 @@ import { Component, computed, effect, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Subscription } from 'rxjs';
 
-import { Avatar } from 'primeng/avatar';
 import { Button } from 'primeng/button';
 import { Dialog } from 'primeng/dialog';
 import { Fluid } from 'primeng/fluid';
@@ -14,6 +13,7 @@ import { Tag } from 'primeng/tag';
 import { Toast } from 'primeng/toast';
 import { Toolbar } from 'primeng/toolbar';
 
+import { BrandLogoComponent } from './components/brand-logo/brand-logo.component';
 import { ConfigTabComponent } from './components/config-tab/config-tab.component';
 import { LogsTabComponent } from './components/logs-tab/logs-tab.component';
 import { VoiceTabComponent } from './components/voice-tab/voice-tab.component';
@@ -42,7 +42,7 @@ interface TabItem {
   standalone: true,
   imports: [
     FormsModule,
-    Avatar,
+    BrandLogoComponent,
     Button,
     Dialog,
     Fluid,

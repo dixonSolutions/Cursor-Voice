@@ -8,6 +8,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import stripAnsi from 'strip-ansi';
+import { buildCursorAgentEnv } from '../../executor/cursorAgent.js';
 import { childLogger } from '../../log.js';
 
 const execFileAsync = promisify(execFile);
@@ -34,6 +35,7 @@ export async function handleCursorAgentInfo(): Promise<AgentInfoResult> {
   try {
     ({ stdout } = await execFileAsync('cursor-agent', ['about', '--format', 'json'], {
       timeout: 10_000,
+      env: buildCursorAgentEnv(),
     }));
   } catch (err) {
     throw new Error(`cursor-agent about failed: ${String(err)}`);
@@ -76,6 +78,7 @@ export async function handleCursorAgentStatus(): Promise<AgentStatusResult> {
   try {
     ({ stdout } = await execFileAsync('cursor-agent', ['status', '--format', 'json'], {
       timeout: 10_000,
+      env: buildCursorAgentEnv(),
     }));
   } catch (err) {
     throw new Error(`cursor-agent status failed: ${String(err)}`);

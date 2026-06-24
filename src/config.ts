@@ -109,6 +109,8 @@ const TestRunModeSchema = z.object({
 
 const ServeRunModeSchema = z.object({
   backendPort: z.number().int().min(1024).max(65535).default(8787),
+  /** Optional public web entry port when frontend is split from the API (e.g. nginx → backend). */
+  webPort: z.number().int().min(1024).max(65535).optional(),
   /** Public HTTPS origin (e.g. Tailscale serve URL). Shown in healthz / setup hints. */
   publicBaseUrl: z.string().url().optional(),
 });

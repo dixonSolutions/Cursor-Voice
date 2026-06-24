@@ -13,7 +13,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import stripAnsi from 'strip-ansi';
-import { spawnAgent } from './cursorAgent.js';
+import { spawnAgent, buildCursorAgentEnv } from './cursorAgent.js';
 import {
   assertAgentAvailable,
   getActiveAgentActivity,
@@ -459,7 +459,10 @@ export interface ModelEntry {
  * Use the model cache helpers in state/models.ts for cached access.
  */
 export async function fetchModelList(): Promise<ModelEntry[]> {
-  const { stdout } = await execFileAsync('cursor-agent', ['models'], { timeout: 10_000 });
+  const { stdout } = await execFileAsync('cursor-agent', ['models'], {
+    timeout: 10_000,
+    env: buildCursorAgentEnv(),
+  });
   return parseModelsOutput(stdout);
 }
 

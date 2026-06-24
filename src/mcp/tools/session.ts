@@ -16,6 +16,7 @@ import {
 import { getLatestJobForProject } from '../../state/jobs.js';
 import { resolveProjectOrThrow } from './project.js';
 import { childLogger } from '../../log.js';
+import { buildCursorAgentEnv } from '../../executor/cursorAgent.js';
 
 const execFileAsync = promisify(execFile);
 const log = childLogger('tool:session');
@@ -45,7 +46,10 @@ export async function handleNewSession(
   // Optionally call create-chat to get a fresh ID up front.
   let newSessionId: string | null = null;
   try {
-    const { stdout } = await execFileAsync('cursor-agent', ['create-chat'], { timeout: 10_000 });
+    const { stdout } = await execFileAsync('cursor-agent', ['create-chat'], {
+      timeout: 10_000,
+      env: buildCursorAgentEnv(),
+    });
     newSessionId = stripAnsi(stdout).trim() || null;
     if (newSessionId) {
       setProjectResumeId(project.name, newSessionId);

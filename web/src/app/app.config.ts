@@ -6,31 +6,31 @@ import { definePreset } from '@primeuix/themes';
 import Aura from '@primeuix/themes/aura';
 
 /**
- * Custom preset: Aura Dark with indigo-500 as primary and slate surfaces.
- * Matches the existing design token palette (docs/06 UX guidance).
+ * Custom preset: Aura Dark with violet primary and slate surfaces.
+ * Matches the Cursor Voice logo palette (#1a1a2e / #7c3aed).
  */
 const CursorVoicePreset = definePreset(Aura, {
   semantic: {
     primary: {
-      50:  '{indigo.50}',
-      100: '{indigo.100}',
-      200: '{indigo.200}',
-      300: '{indigo.300}',
-      400: '{indigo.400}',
-      500: '{indigo.500}',
-      600: '{indigo.600}',
-      700: '{indigo.700}',
-      800: '{indigo.800}',
-      900: '{indigo.900}',
-      950: '{indigo.950}',
+      50:  '{violet.50}',
+      100: '{violet.100}',
+      200: '{violet.200}',
+      300: '{violet.300}',
+      400: '{violet.400}',
+      500: '{violet.500}',
+      600: '{violet.600}',
+      700: '{violet.700}',
+      800: '{violet.800}',
+      900: '{violet.900}',
+      950: '{violet.950}',
     },
     colorScheme: {
       dark: {
         primary: {
-          color:        '{indigo.500}',
+          color:        '{violet.500}',
           contrastColor: '#ffffff',
-          hoverColor:   '{indigo.400}',
-          activeColor:  '{indigo.600}',
+          hoverColor:   '{violet.400}',
+          activeColor:  '{violet.600}',
         },
         surface: {
           0:   '#ffffff',

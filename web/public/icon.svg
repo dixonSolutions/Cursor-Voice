@@ -1,19 +1,22 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Cursor Voice">
-  <!-- Background -->
-  <rect width="512" height="512" rx="96" fill="#0f172a"/>
-  <!-- Outer ring (inactive state colour) -->
-  <circle cx="256" cy="256" r="200" fill="none" stroke="#334155" stroke-width="4"/>
-  <!-- Inner ring (accent) -->
-  <circle cx="256" cy="256" r="168" fill="#1e293b" stroke="#6366f1" stroke-width="3"/>
-  <!-- Microphone body -->
-  <rect x="220" y="136" width="72" height="128" rx="36" fill="#6366f1"/>
-  <!-- Microphone stand arm -->
-  <path d="M176 264 C176 320 176 336 256 336 C336 336 336 320 336 264"
-        fill="none" stroke="#6366f1" stroke-width="12" stroke-linecap="round"/>
-  <!-- Stand pole -->
-  <line x1="256" y1="336" x2="256" y2="376"
-        stroke="#6366f1" stroke-width="12" stroke-linecap="round"/>
-  <!-- Stand base -->
-  <line x1="208" y1="376" x2="304" y2="376"
-        stroke="#6366f1" stroke-width="12" stroke-linecap="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 680" role="img" aria-label="Cursor Voice">
+  <title>Cursor Voice</title>
+  <defs>
+    <clipPath id="roundedClip">
+      <rect x="140" y="140" width="400" height="400" rx="72"/>
+    </clipPath>
+  </defs>
+
+  <rect x="140" y="140" width="400" height="400" rx="72" fill="#1a1a2e"/>
+  <rect x="140" y="420" width="400" height="120" clip-path="url(#roundedClip)" fill="#7c3aed"/>
+  <rect x="140" y="140" width="400" height="400" rx="72" fill="none" stroke="#7c3aed" stroke-width="2" opacity="0.4"/>
+
+  <g clip-path="url(#roundedClip)">
+    <path d="M230 210 L230 400 L280 355 L315 430 L340 418 L305 343 L370 343 Z" transform="translate(4,5)" fill="rgba(0,0,0,0.25)"/>
+    <path d="M230 210 L230 400 L280 355 L315 430 L340 418 L305 343 L370 343 Z" fill="#ffffff"/>
+    <path d="M230 210 L230 400 L280 355 L315 430 L340 418 L305 343 L370 343 Z" fill="none" stroke="#7c3aed" stroke-width="3" stroke-linejoin="round"/>
+  </g>
+
+  <path d="M390 295 Q400 285 400 270 Q400 255 390 245" fill="none" stroke="#ffffff" stroke-width="5" stroke-linecap="round" opacity="0.9"/>
+  <path d="M405 310 Q422 292 422 270 Q422 248 405 230" fill="none" stroke="#a78bfa" stroke-width="5" stroke-linecap="round" opacity="0.75"/>
+  <path d="M420 325 Q444 299 444 270 Q444 241 420 215" fill="none" stroke="#a78bfa" stroke-width="4" stroke-linecap="round" opacity="0.45"/>
 </svg>

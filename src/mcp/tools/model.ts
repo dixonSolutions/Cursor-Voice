@@ -11,6 +11,7 @@ import stripAnsi from 'strip-ansi';
 import { getCachedModels, setModelCache, filterModels, isValidModelId, type ModelEntry } from '../../state/models.js';
 import { setActiveModel } from '../../state/registry.js';
 import { childLogger } from '../../log.js';
+import { buildCursorAgentEnv } from '../../executor/cursorAgent.js';
 import { parseMisroutedExecutionMode } from './questionDetect.js';
 
 const execFileAsync = promisify(execFile);
@@ -113,7 +114,10 @@ export async function handleSetModel(
 // ── Internal ──────────────────────────────────────────────────────────────
 
 async function fetchAndCacheModels(): Promise<ModelEntry[]> {
-  const { stdout } = await execFileAsync('cursor-agent', ['models'], { timeout: 15_000 });
+  const { stdout } = await execFileAsync('cursor-agent', ['models'], {
+    timeout: 15_000,
+    env: buildCursorAgentEnv(),
+  });
   const models = parseModelsOutput(stdout);
   setModelCache(models);
   return models;

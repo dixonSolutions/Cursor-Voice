@@ -247,6 +247,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=${PROJECT_DIR}
+Environment=HOME=${HOME}
 EnvironmentFile=${ENV_FILE}
 ExecStart=${NODE_BIN:-/usr/bin/node} ${PROJECT_DIR}/dist/index.js
 Restart=on-failure

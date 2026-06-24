@@ -1,13 +1,19 @@
 <p-toast position="top-center" />
 
 <p-dialog
-  header="Cursor Voice"
   [visible]="!bridge.hasCredentials()"
   [modal]="true"
   [closable]="false"
   [draggable]="false"
   [resizable]="false"
   [style]="{ width: '92vw', maxWidth: '28rem' }">
+
+  <ng-template pTemplate="header">
+    <div class="cv-dialog-brand">
+      <cv-brand-logo size="lg" />
+      <span>Cursor Voice</span>
+    </div>
+  </ng-template>
 
   <p-fluid>
     <p-message
@@ -40,8 +46,10 @@
       <header class="cv-shell-header">
         <p-toolbar class="cv-topbar">
           <ng-template #start>
-            <p-avatar icon="pi pi-microphone" shape="circle" />
-            <p-tag value="Cursor Voice" severity="secondary" class="cv-brand-tag" />
+            <div class="cv-topbar-brand">
+              <cv-brand-logo size="md" />
+              <p-tag value="Cursor Voice" severity="secondary" class="cv-brand-tag" />
+            </div>
           </ng-template>
 
           <ng-template #center>

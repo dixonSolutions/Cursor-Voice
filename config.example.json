@@ -7,7 +7,8 @@
         "webPort": 4200
       },
       "serve": {
-        "backendPort": 8787,
+        "backendPort": 1234,
+        "webPort": 5671,
         "publicBaseUrl": "https://your-machine.tailnet-name.ts.net"
       }
     },

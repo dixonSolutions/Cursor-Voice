@@ -7,6 +7,7 @@ Wants=network-online.target
 Type=simple
 User=cursorvoice
 WorkingDirectory=/opt/cursor-voice
+Environment=HOME=/home/cursorvoice
 EnvironmentFile=/opt/cursor-voice/.env
 ExecStart=/usr/bin/node /opt/cursor-voice/dist/index.js
 Restart=on-failure
