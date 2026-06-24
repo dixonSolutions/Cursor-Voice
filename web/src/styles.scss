@@ -4,6 +4,7 @@ html,
 body {
   height: 100%;
   margin: 0;
+  overflow: hidden;
 }
 
 body {
@@ -16,7 +17,9 @@ body {
 .cv-shell {
   display: flex;
   flex-direction: column;
-  min-height: 100dvh;
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
   padding-left: env(safe-area-inset-left, 0);
   padding-right: env(safe-area-inset-right, 0);
 }
@@ -48,7 +51,10 @@ body {
   padding-right: max(1rem, env(safe-area-inset-right, 0));
   box-sizing: border-box;
   min-width: 0;
+  min-height: 0;
   overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .cv-main--wide {
@@ -132,8 +138,7 @@ body {
 }
 
 .cv-shell-header {
-  position: sticky;
-  top: 0;
+  flex-shrink: 0;
   z-index: 1200;
   background: var(--p-surface-ground, #0f172a);
   border-bottom: 1px solid rgba(148, 163, 184, 0.12);
@@ -552,10 +557,8 @@ body {
 
   .cv-tabbar {
     display: flex;
-    position: sticky;
-    bottom: 0;
-    z-index: 1200;
     flex-shrink: 0;
+    z-index: 1200;
     align-items: stretch;
     justify-content: space-around;
     gap: 0.25rem;
