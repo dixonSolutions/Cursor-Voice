@@ -101,6 +101,27 @@ else
 fi
 
 # ── 5. Tailscale Serve ────────────────────────────────────────────────────
+TUNNEL_ENV="${HOME}/.config/cursor-voice/tunnel.env"
+SERVE_UPSTREAM_PORT="${PORT}"
+if [[ -f "$TUNNEL_ENV" ]]; then
+  # shellcheck disable=SC1090
+  source "$TUNNEL_ENV"
+  SERVE_UPSTREAM_PORT="${LOCAL_BIND_PORT:-15671}"
+  info "── SSH tunnel (split-host) ──"
+  if systemctl --user is-active --quiet cursor-voice-tunnel.service 2>/dev/null; then
+    pass "cursor-voice-tunnel systemd service is running"
+  else
+    fail "cursor-voice-tunnel systemd service is not running"
+    info "Fix: bash scripts/install-remote-tunnel.sh"
+  fi
+  if curl -sf --max-time 5 "http://127.0.0.1:${SERVE_UPSTREAM_PORT}/healthz" >/dev/null 2>&1; then
+    pass "Tunnel upstream responds on http://127.0.0.1:${SERVE_UPSTREAM_PORT}/healthz"
+  else
+    fail "Tunnel upstream not responding on http://127.0.0.1:${SERVE_UPSTREAM_PORT}/healthz"
+    info "Fix: journalctl --user -u cursor-voice-tunnel -n 30"
+  fi
+fi
+
 SERVE_STATUS="$(tailscale serve status 2>&1 || true)"
 if echo "$SERVE_STATUS" | grep -qi 'no serve config'; then
   fail "Tailscale Serve is not configured (No serve config)"
@@ -112,7 +133,7 @@ if echo "$SERVE_STATUS" | grep -qi 'no serve config'; then
   else
     info "Step 1 — Enable Serve: https://login.tailscale.com/admin/acls (Serve must be allowed)"
   fi
-  info "Step 2 — Then run: tailscale serve --bg ${PORT}"
+  info "Step 2 — Then run: tailscale serve --bg http://127.0.0.1:${SERVE_UPSTREAM_PORT}"
 elif echo "$SERVE_STATUS" | grep -qi 'not enabled on your tailnet'; then
   fail "Tailscale Serve not enabled on your tailnet"
   info "Fix: visit the enable link printed by 'tailscale serve --bg ${PORT}'"
