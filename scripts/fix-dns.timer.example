@@ -1,0 +1,14 @@
+# Re-apply public DNS if the container stub resolver overwrites resolv.conf.
+# Install: sudo bash scripts/install-fix-dns.sh
+#
+[Unit]
+Description=Re-apply container DNS fix
+Requires=fix-dns.service
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

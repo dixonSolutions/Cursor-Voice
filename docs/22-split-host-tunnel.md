@@ -1,28 +1,83 @@
-# Split-host SSH tunnel (Tailscale front door)
+# Split-host: container bridge + Tailscale front door
 
-When Cursor Voice runs on a **remote** machine (VM, incus container, etc.) but
-**Tailscale Serve** runs on your laptop or home PC, you need a persistent SSH
-port forward on the Tailscale machine.
+**Cursor Voice runs in the incus container** (`dev` on the debian host) — bridge,
+nginx, and AWS calls all live there. Your laptop or home PC is **not** the host;
+it only runs the SSH tunnel and Tailscale Serve when you want a stable public URL
+on that machine's MagicDNS name.
 
 ## Topology
 
 ```
 Phone / browser
-  → https://eva.tail14805e.ts.net     (Tailscale Serve on eva)
-  → http://127.0.0.1:15671            (SSH tunnel, local)
-  → ssh -L … borys@remote:5671
-  → nginx :5671 on remote              (PWA + proxy)
-  → cursor-voice :1234                 (bridge API)
+  → https://eva.tail14805e.ts.net     (Tailscale Serve — tunnel machine only)
+  → http://127.0.0.1:15671            (SSH tunnel on tunnel machine)
+  → ssh -L … borys@debian:5671
+  → incus proxy host:5671 → container:5671
+  → nginx :5671 in container           (PWA + /api /ws /mcp proxy)
+  → cursor-voice :1234 in container    (bridge API, Amazon Transcribe/Polly)
 ```
 
-The bridge `publicBaseUrl` stays the Tailscale HTTPS URL. The bridge itself runs
-on the remote host; only the tunnel + Serve live on eva.
+The bridge `publicBaseUrl` is the Tailscale HTTPS URL. All services (bridge,
+nginx, `cursor-agent`, MCP, SQLite) run **inside the container**.
 
-## One-time setup (Tailscale machine — eva)
+---
 
-1. **SSH key auth** to the remote host (passwordless `ssh user@host`).
+## Container setup (where Cursor Voice is hosted)
 
-2. **Install the tunnel service** from this repo:
+Run these **inside the incus container**, e.g. `incus exec dev -- bash`:
+
+1. **Clone / pull** the repo (e.g. `/root/Projects/CursorVoice`).
+
+2. **Fix DNS** — required for Amazon Transcribe/Polly/Bedrock in LXC/incus:
+
+   ```bash
+   sudo bash scripts/install-fix-dns.sh
+   ```
+
+   Installs `fix-dns.service` + a 5-minute timer so `127.0.0.53` stub resolver
+   does not break AWS again.
+
+3. **Configure** `.env` (AWS keys, `APP_TOKEN`) and `config.json` on the container.
+
+4. **Build and enable services:**
+
+   ```bash
+   npm run build
+   systemctl enable --now cursor-voice nginx
+   ```
+
+   See [`scripts/nginx-cursor-voice.conf.example`](../scripts/nginx-cursor-voice.conf.example)
+   and incus proxy `host:5671 → container:5671`.
+
+5. **Verify from inside the container:**
+
+   ```bash
+   curl -s http://127.0.0.1:1234/healthz
+   curl -s http://127.0.0.1:5671/healthz
+   getent hosts transcribestreaming.us-east-1.amazonaws.com
+   ```
+
+### Transcribe failures in the container
+
+If STT logs show `HTTP/2 stream is abnormally aborted`, DNS is almost always the
+cause — not the phone or the tunnel machine:
+
+```bash
+sudo bash scripts/install-fix-dns.sh   # inside container
+systemctl restart cursor-voice
+```
+
+---
+
+## Tunnel machine setup (optional — Tailscale public URL)
+
+Only needed when Tailscale Serve runs on a **different** machine than the
+container (e.g. eva → debian incus). **Do not** install `fix-dns` or
+`cursor-voice` here — only the SSH tunnel.
+
+1. **SSH key auth** to the debian host (`ssh borys@100.118.238.2`).
+
+2. **Install the tunnel service** on the tunnel machine:
 
    ```bash
    cd /path/to/CursorVoice
@@ -32,16 +87,16 @@ on the remote host; only the tunnel + Serve live on eva.
      --local-port 15671
    ```
 
-   This writes `~/.config/cursor-voice/tunnel.env` and enables
+   Writes `~/.config/cursor-voice/tunnel.env` and enables
    `cursor-voice-tunnel.service` (systemd user, `Restart=always`).
 
-3. **Point Tailscale Serve** at the local tunnel port (once per machine):
+3. **Point Tailscale Serve** at the local tunnel port:
 
    ```bash
    tailscale serve --bg http://127.0.0.1:15671
    ```
 
-4. **Verify:**
+4. **Verify from the tunnel machine:**
 
    ```bash
    bash scripts/doctor.sh
@@ -50,21 +105,17 @@ on the remote host; only the tunnel + Serve live on eva.
 
 ## Operations
 
-| Task | Command |
-|------|---------|
-| Status | `systemctl --user status cursor-voice-tunnel` |
-| Logs | `journalctl --user -u cursor-voice-tunnel -f` |
-| Restart | `systemctl --user restart cursor-voice-tunnel` |
-| Reinstall | `bash scripts/install-remote-tunnel.sh` |
+| Where | Task | Command |
+|-------|------|---------|
+| Container | Bridge status | `systemctl status cursor-voice nginx fix-dns` |
+| Container | Bridge logs | `journalctl -u cursor-voice -f` |
+| Container | Redeploy | `git pull && npm run build && systemctl restart cursor-voice nginx` |
+| Tunnel machine | Tunnel status | `systemctl --user status cursor-voice-tunnel` |
+| Tunnel machine | Tunnel logs | `journalctl --user -u cursor-voice-tunnel -f` |
+| Tunnel machine | Restart tunnel | `systemctl --user restart cursor-voice-tunnel` |
 
-Config file: `~/.config/cursor-voice/tunnel.env` (see
+Tunnel config: `~/.config/cursor-voice/tunnel.env` on the **tunnel machine** (see
 [`scripts/remote-tunnel.env.example`](../scripts/remote-tunnel.env.example)).
-
-## Remote host (container)
-
-Split-port nginx + bridge setup is unchanged — see
-[`scripts/nginx-cursor-voice.conf.example`](../scripts/nginx-cursor-voice.conf.example)
-and incus proxy `host5671 → container 5671`.
 
 ## Why the tunnel dies
 
