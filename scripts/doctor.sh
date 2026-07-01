@@ -36,6 +36,27 @@ if [[ -f "$ENV_FILE" ]]; then
   PORT="${PORT:-8787}"
 fi
 
+# Split-host nginx (webPort) vs unified bridge (backendPort) for Tailscale upstream.
+SERVE_WEB_PORT=""
+SERVE_BACKEND_PORT=""
+if [[ -f "${PROJECT_DIR}/config.json" ]]; then
+  read -r SERVE_WEB_PORT SERVE_BACKEND_PORT < <(
+    python3 - <<'PY' "${PROJECT_DIR}/config.json"
+import json, sys
+with open(sys.argv[1]) as f:
+    serve = json.load(f).get("settings", {}).get("runModes", {}).get("serve", {})
+print(serve.get("webPort", ""), serve.get("backendPort", ""))
+PY
+  )
+fi
+BRIDGE_PORT="${SERVE_BACKEND_PORT:-$PORT}"
+SERVE_UPSTREAM_PORT="${PORT}"
+if [[ -n "$SERVE_WEB_PORT" ]] && curl -sf --max-time 8 "http://127.0.0.1:${SERVE_WEB_PORT}/healthz" >/dev/null 2>&1; then
+  SERVE_UPSTREAM_PORT="$SERVE_WEB_PORT"
+elif [[ -n "$BRIDGE_PORT" ]]; then
+  SERVE_UPSTREAM_PORT="$BRIDGE_PORT"
+fi
+
 if systemctl --user is-active --quiet cursor-voice.service 2>/dev/null; then
   pass "systemd service cursor-voice is running"
 else
@@ -43,10 +64,10 @@ else
   info "Fix: bash scripts/restart.sh"
 fi
 
-if curl -sf --max-time 3 "http://127.0.0.1:${PORT}/healthz" >/dev/null 2>&1; then
-  pass "Bridge responds on http://127.0.0.1:${PORT}/healthz"
+if curl -sf --max-time 8 "http://127.0.0.1:${BRIDGE_PORT}/healthz" >/dev/null 2>&1; then
+  pass "Bridge responds on http://127.0.0.1:${BRIDGE_PORT}/healthz"
 else
-  fail "Bridge not responding on http://127.0.0.1:${PORT}/healthz"
+  fail "Bridge not responding on http://127.0.0.1:${BRIDGE_PORT}/healthz"
   info "Fix: journalctl --user -u cursor-voice -n 30"
 fi
 
@@ -102,7 +123,6 @@ fi
 
 # ── 5. Tailscale Serve ────────────────────────────────────────────────────
 TUNNEL_ENV="${HOME}/.config/cursor-voice/tunnel.env"
-SERVE_UPSTREAM_PORT="${PORT}"
 if [[ -f "$TUNNEL_ENV" ]]; then
   # shellcheck disable=SC1090
   source "$TUNNEL_ENV"
@@ -114,12 +134,18 @@ if [[ -f "$TUNNEL_ENV" ]]; then
     fail "cursor-voice-tunnel systemd service is not running"
     info "Fix: bash scripts/install-remote-tunnel.sh"
   fi
-  if curl -sf --max-time 5 "http://127.0.0.1:${SERVE_UPSTREAM_PORT}/healthz" >/dev/null 2>&1; then
+  if curl -sf --max-time 8 "http://127.0.0.1:${SERVE_UPSTREAM_PORT}/healthz" >/dev/null 2>&1; then
     pass "Tunnel upstream responds on http://127.0.0.1:${SERVE_UPSTREAM_PORT}/healthz"
   else
     fail "Tunnel upstream not responding on http://127.0.0.1:${SERVE_UPSTREAM_PORT}/healthz"
     info "Fix: journalctl --user -u cursor-voice-tunnel -n 30"
   fi
+fi
+
+if grep -qE '^[[:space:]]*Port[[:space:]]+443' /etc/ssh/sshd_config 2>/dev/null || \
+   grep -rqE '^[[:space:]]*Port[[:space:]]+443' /etc/ssh/sshd_config.d/ 2>/dev/null; then
+  fail "sshd is configured for port 443 — breaks Tailscale Serve HTTPS on ${TS_HOST:-*.ts.net}"
+  info "Fix: remove 'Port 443' from /etc/ssh/sshd_config (keep Port 22), then: sudo systemctl restart ssh"
 fi
 
 SERVE_STATUS="$(tailscale serve status 2>&1 || true)"
@@ -136,10 +162,16 @@ if echo "$SERVE_STATUS" | grep -qi 'no serve config'; then
   info "Step 2 — Then run: tailscale serve --bg http://127.0.0.1:${SERVE_UPSTREAM_PORT}"
 elif echo "$SERVE_STATUS" | grep -qi 'not enabled on your tailnet'; then
   fail "Tailscale Serve not enabled on your tailnet"
-  info "Fix: visit the enable link printed by 'tailscale serve --bg ${PORT}'"
+  info "Fix: visit the enable link printed by 'tailscale serve --bg ${SERVE_UPSTREAM_PORT}'"
 else
   pass "Tailscale Serve is configured"
   echo "$SERVE_STATUS" | sed 's/^/    /'
+  if ! echo "$SERVE_STATUS" | grep -q "127.0.0.1:${SERVE_UPSTREAM_PORT}"; then
+    fail "Tailscale Serve upstream does not match expected http://127.0.0.1:${SERVE_UPSTREAM_PORT}"
+    info "Fix: tailscale serve --bg http://127.0.0.1:${SERVE_UPSTREAM_PORT}"
+  else
+    pass "Tailscale Serve upstream matches http://127.0.0.1:${SERVE_UPSTREAM_PORT}"
+  fi
 fi
 
 # ── 6. End-to-end HTTPS test ──────────────────────────────────────────────
@@ -170,9 +202,10 @@ else
   echo -e "${RED}${BLD}${FAILURES} check(s) failed.${NC} Fix the items above, then re-run: bash scripts/doctor.sh"
   echo ""
   echo -e "${BLD}Quick fix order:${NC}"
+  echo "  0. Run repair script:   bash scripts/fix-hosting.sh"
   echo "  1. Enable MagicDNS:     https://login.tailscale.com/admin/dns"
   echo "  2. Enable HTTPS certs:  same page → HTTPS Certificates"
-  echo "  3. Enable Serve:        run 'tailscale serve --bg ${PORT}' and follow the link"
+  echo "  3. Enable Serve:        run 'tailscale serve --bg http://127.0.0.1:${SERVE_UPSTREAM_PORT}' and follow the link"
   echo "  4. iPhone must have Tailscale app ON and connected to your tailnet"
 fi
 echo ""

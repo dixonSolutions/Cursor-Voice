@@ -8,6 +8,7 @@ import type { FastifyInstance } from 'fastify';
 import { isAmazonAudioAvailable } from '../intelligence/audio/awsClient.js';
 import { synthesizePollyMp3 } from '../intelligence/audio/polly.js';
 import { transcribePcm16 } from '../intelligence/audio/transcribe.js';
+import { friendlyTranscribeError } from '../intelligence/audio/transcribeErrors.js';
 import { getConfig } from '../config.js';
 import { childLogger } from '../log.js';
 
@@ -79,7 +80,7 @@ export async function registerIntelligenceAudioRoutes(app: FastifyInstance): Pro
         log.info({ pcmBytes: pcm.length, textLen: text.length }, 'transcribe ok');
         return { text };
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
+        const message = friendlyTranscribeError(err);
         log.error({ err, pcmBytes: pcm.length }, 'transcribe failed');
         return reply.code(500).send({ error: message });
       }

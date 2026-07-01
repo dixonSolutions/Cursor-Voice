@@ -60,8 +60,14 @@ const execFileAsync = promisify(execFile);
 const log = childLogger('server');
 
 // ── Health check helpers ──────────────────────────────────────────────────
+//
+// cursor-agent about can take several seconds — never block /healthz on it.
+// Cache the version in the background; liveness checks must stay sub-second.
 
-async function getCursorAgentVersion(): Promise<string | null> {
+let cachedCliVersion: string | null = null;
+let cliVersionRefreshInFlight: Promise<void> | null = null;
+
+async function fetchCursorAgentVersion(): Promise<string | null> {
   try {
     const { stdout } = await execFileAsync('cursor-agent', ['about', '--format', 'json'], {
       timeout: 5000,
@@ -72,6 +78,17 @@ async function getCursorAgentVersion(): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+function refreshCliVersionCache(): void {
+  if (cliVersionRefreshInFlight) return;
+  cliVersionRefreshInFlight = (async () => {
+    try {
+      cachedCliVersion = await fetchCursorAgentVersion();
+    } finally {
+      cliVersionRefreshInFlight = null;
+    }
+  })();
 }
 
 // ── Server factory ────────────────────────────────────────────────────────
@@ -126,7 +143,8 @@ export async function buildServer(): Promise<FastifyInstance> {
   app.get('/healthz', async (_req, _reply) => {
     const db = getDb();
     const projects = listProjects();
-    const cliVersion = await getCursorAgentVersion();
+    refreshCliVersionCache();
+    const cliVersion = cachedCliVersion;
     const { settings } = getConfig();
     const run = getRunModeInfo(settings);
     return {
@@ -436,6 +454,8 @@ export async function buildServer(): Promise<FastifyInstance> {
     },
     'web dispatch configured',
   );
+
+  refreshCliVersionCache();
 
   return app;
 }

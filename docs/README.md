@@ -32,7 +32,7 @@ on projects hosted on a home machine.
 | [`19-mobile-session-keepalive.md`](./19-mobile-session-keepalive.md) | Wake Lock, silent media session, auto-resume on mobile | Screen-off disconnects on phone |
 | [`20-native-callkit-shell.md`](./20-native-callkit-shell.md) | CallKit native app + push notifications | True call-style session + background alerts |
 | [`21-serve-self-hosting.md`](./21-serve-self-hosting.md) | Serve hub: auto-update, network, manual actions, event log | Self-hosting from Config tab |
-| [`22-split-host-tunnel.md`](./22-split-host-tunnel.md) | SSH tunnel + Tailscale Serve when bridge runs on a remote host | Split-host 502 / tunnel down |
+| [`22-split-host-tunnel.md`](./22-split-host-tunnel.md) | Incus container hosting + optional SSH tunnel for Tailscale Serve | Container DNS / tunnel 502 |
 
 ## One-paragraph summary
 

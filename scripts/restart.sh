@@ -147,7 +147,12 @@ else
   warn "Retry: curl ${HEALTHZ}"
 fi
 
-# ── 4. Optional log tail ──────────────────────────────────────────────────
+# ── 4. Tailscale Serve (serve mode / split-host upstream) ─────────────────
+if command -v tailscale &>/dev/null; then
+  bash "${SCRIPT_DIR}/sync-tailscale-serve.sh" || warn "Tailscale Serve sync failed — run: bash scripts/sync-tailscale-serve.sh"
+fi
+
+# ── 5. Optional log tail ──────────────────────────────────────────────────
 if $TAIL_LOGS; then
   echo ""
   info "Tailing logs (Ctrl-C to stop)..."

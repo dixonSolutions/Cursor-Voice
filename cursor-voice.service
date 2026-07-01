@@ -1,7 +1,7 @@
 [Unit]
 Description=Cursor Voice Bridge
-After=network-online.target tailscaled.service
-Wants=network-online.target
+After=network-online.target fix-dns.service tailscaled.service
+Wants=network-online.target fix-dns.service
 
 [Service]
 Type=simple
