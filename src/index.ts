@@ -20,6 +20,7 @@ import { initLogger, getLogger } from './log.js';
 import { getDb, closeDb } from './state/db.js';
 import { reconcileRegistry } from './state/registry.js';
 import { markOrphanedJobs, markOrphanedVoiceAgentRuns } from './state/jobs.js';
+import { isCursorAgentAvailable, resolveCursorAgentPath } from './executor/cursorAgent.js';
 import { killActiveAgent } from './executor/agentSingleton.js';
 import { killVoiceAgent } from './executor/voiceAgent.js';
 import { buildServer, startServer } from './server.js';
@@ -37,6 +38,16 @@ async function main(): Promise<void> {
   const log = getLogger();
 
   log.info('cursor-voice bridge starting');
+
+  const cursorAgentPath = resolveCursorAgentPath();
+  if (isCursorAgentAvailable()) {
+    log.info({ cursorAgentPath }, 'cursor-agent binary resolved');
+  } else {
+    log.warn(
+      { cursorAgentPath },
+      'cursor-agent not found — voice turns will fail until the CLI is installed',
+    );
+  }
 
   // 3. Database + migrations
   getDb();

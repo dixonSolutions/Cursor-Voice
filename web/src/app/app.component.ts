@@ -146,6 +146,15 @@ export class AppComponent implements OnInit, OnDestroy {
     }
 
     this._subs.add(
+      this.bridge.authFailed$.subscribe(() => {
+        this.toast.error(
+          'Invalid app token',
+          'Copy APP_TOKEN from the bridge .env file exactly — no extra spaces.',
+        );
+      }),
+    );
+
+    this._subs.add(
       this.bridge.narration$.subscribe((event) => {
         this.voiceSession.injectNarration(event.text);
         if (event.kind === 'job_started') {

@@ -100,7 +100,7 @@ export function parseWsAuthMessage(raw: string): string | null {
       'token' in parsed &&
       typeof (parsed as Record<string, unknown>)['token'] === 'string'
     ) {
-      return (parsed as { token: string }).token;
+      return (parsed as { token: string }).token.trim();
     }
   } catch {
     // Fall through — treat as bare token string
