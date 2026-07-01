@@ -307,10 +307,10 @@ else
     warn "Could not run 'sudo tailscale set --operator=\$USER' — you may need to run it manually."
   fi
 
-  info "Configuring: tailscale serve --bg http://127.0.0.1:${ACTUAL_PORT}"
-  tailscale serve --bg "http://127.0.0.1:${ACTUAL_PORT}" \
+  info "Configuring Tailscale Serve (HTTPS → local upstream)..."
+  bash "${SCRIPT_DIR}/sync-tailscale-serve.sh" \
     && ok "tailscale serve configured." \
-    || warn "tailscale serve failed — run manually: tailscale serve --bg http://127.0.0.1:${ACTUAL_PORT}"
+    || warn "tailscale serve failed — run manually: bash scripts/sync-tailscale-serve.sh"
 
   # Detect Tailscale hostname and patch config.json
   TS_HOST="$(tailscale status --json 2>/dev/null \

@@ -291,8 +291,16 @@ async function stepInstallDeps(
       recordStep(runId, 'npm_install', 'error', detail);
       return { outcome: 'error', detail: 'npm install failed' };
     }
+    // Native modules (better-sqlite3) must match the Node binary used by systemd.
+    const rebuild = await runCommand(repoDir, 'npm', ['rebuild']);
+    if (rebuild.code !== 0) {
+      const detail = rebuild.stderr.slice(0, 500) || `exit ${rebuild.code}`;
+      recordStep(runId, 'npm_rebuild', 'error', detail);
+      return { outcome: 'error', detail: 'npm rebuild failed' };
+    }
+    recordStep(runId, 'npm_rebuild', 'ok');
     recordStep(runId, 'npm_install', 'ok', force ? 'manual' : 'lockfile changed');
-    return { outcome: 'ok', detail: 'Dependencies installed' };
+    return { outcome: 'ok', detail: 'Dependencies installed and rebuilt' };
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     recordStep(runId, 'npm_install', 'error', detail);
