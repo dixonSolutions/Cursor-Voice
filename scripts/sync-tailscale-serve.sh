@@ -40,7 +40,23 @@ PY
 fi
 
 UPSTREAM_PORT="${SERVE_BACKEND_PORT:-$PORT}"
-if [[ -n "$SERVE_WEB_PORT" ]] && curl -sf --max-time 5 "http://127.0.0.1:${SERVE_WEB_PORT}/healthz" >/dev/null 2>&1; then
+
+# Unified hosting (default): bridge serves PWA + API + WS on backendPort with COOP/COEP.
+# Only use nginx webPort when explicitly enabled — nginx often serves stale web/dist
+# while proxying API/WS to the live bridge, which breaks the PWA.
+USE_NGINX_FRONT="${CURSOR_VOICE_NGINX_FRONT:-}"
+if [[ -z "$USE_NGINX_FRONT" && -f "${PROJECT_DIR}/config.json" ]]; then
+  USE_NGINX_FRONT="$(python3 - <<'PY' "${PROJECT_DIR}/config.json"
+import json, sys
+with open(sys.argv[1]) as f:
+    serve = json.load(f).get("settings", {}).get("runModes", {}).get("serve", {})
+print("1" if serve.get("nginxFrontend") else "0")
+PY
+  )"
+fi
+
+if [[ "$USE_NGINX_FRONT" == "1" && -n "$SERVE_WEB_PORT" ]] && \
+   curl -sf --max-time 5 "http://127.0.0.1:${SERVE_WEB_PORT}/healthz" >/dev/null 2>&1; then
   UPSTREAM_PORT="$SERVE_WEB_PORT"
 fi
 
