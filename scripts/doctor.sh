@@ -50,11 +50,20 @@ PY
   )
 fi
 BRIDGE_PORT="${SERVE_BACKEND_PORT:-$PORT}"
-SERVE_UPSTREAM_PORT="${PORT}"
-if [[ -n "$SERVE_WEB_PORT" ]] && curl -sf --max-time 8 "http://127.0.0.1:${SERVE_WEB_PORT}/healthz" >/dev/null 2>&1; then
+SERVE_UPSTREAM_PORT="${BRIDGE_PORT}"
+USE_NGINX_FRONT="${CURSOR_VOICE_NGINX_FRONT:-0}"
+if [[ -f "${PROJECT_DIR}/config.json" ]]; then
+  USE_NGINX_FRONT="$(python3 - <<'PY' "${PROJECT_DIR}/config.json"
+import json, sys
+with open(sys.argv[1]) as f:
+    serve = json.load(f).get("settings", {}).get("runModes", {}).get("serve", {})
+print("1" if serve.get("nginxFrontend") else "0")
+PY
+  )"
+fi
+if [[ "$USE_NGINX_FRONT" == "1" && -n "$SERVE_WEB_PORT" ]] && \
+   curl -sf --max-time 8 "http://127.0.0.1:${SERVE_WEB_PORT}/healthz" >/dev/null 2>&1; then
   SERVE_UPSTREAM_PORT="$SERVE_WEB_PORT"
-elif [[ -n "$BRIDGE_PORT" ]]; then
-  SERVE_UPSTREAM_PORT="$BRIDGE_PORT"
 fi
 
 if systemctl --user is-active --quiet cursor-voice.service 2>/dev/null; then

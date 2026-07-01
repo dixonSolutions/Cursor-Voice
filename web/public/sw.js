@@ -11,7 +11,7 @@
  * Cache is versioned — bump CACHE_NAME when deploying a new build.
  */
 
-const CACHE_NAME = 'cursor-voice-v3';
+const CACHE_NAME = 'cursor-voice-v4';
 const VOSK_CACHE_NAME = 'cursor-voice-vosk-v1';
 const VOSK_MODEL_PATH = '/vosk/model.tar.gz';
 
