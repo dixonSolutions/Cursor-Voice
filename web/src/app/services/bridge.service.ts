@@ -153,6 +153,9 @@ export class BridgeService {
   /** Emits when the bridge pushes a narration event. AppComponent routes to voice session. */
   readonly narration$ = new Subject<NarrationEvent>();
 
+  /** Emits when the bridge rejects the app token (WebSocket close 4001). */
+  readonly authFailed$ = new Subject<void>();
+
   // ── Approval push observable ───────────────────────────────────────────
 
   /** Emits when the bridge pushes a user_input_request or plan_approval_request. */
@@ -179,17 +182,19 @@ export class BridgeService {
   // ── Credential management ──────────────────────────────────────────────
 
   loadCredentials(): void {
-    const token = localStorage.getItem('cv_token');
+    const token = localStorage.getItem('cv_token')?.trim();
     // Migrate: remove any stored base URL — app and API are on the same origin now.
     localStorage.removeItem('cv_bridge');
     if (token) {
       this._appToken = token;
+      localStorage.setItem('cv_token', token);
       this.hasCredentials.set(true);
     }
   }
 
   saveCredentials(token: string): void {
-    this._appToken = token;
+    this._appToken = token.trim();
+    if (!this._appToken) return;
     localStorage.setItem('cv_token', this._appToken);
     localStorage.removeItem('cv_bridge');
     this.hasCredentials.set(true);
@@ -213,6 +218,11 @@ export class BridgeService {
 
   connect(): void {
     if (this._ws?.readyState === WebSocket.OPEN) return;
+    if (!this._appToken) {
+      this.wsStatus.set('disconnected');
+      this.hasCredentials.set(false);
+      return;
+    }
 
     this._autoReconnect = true;
     this.wsStatus.set('connecting');
@@ -231,8 +241,9 @@ export class BridgeService {
       this._ws = null;
 
       if (ev.code === 4001) {
-        this.wsStatus.set('error');
-        this._rejectAllPending('Bridge WebSocket disconnected');
+        this._autoReconnect = false;
+        this._rejectAllPending('Invalid app token');
+        this.authFailed$.next();
         this.clearCredentials();
         return;
       }

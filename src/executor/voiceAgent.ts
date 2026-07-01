@@ -12,7 +12,12 @@ import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import stripAnsi from 'strip-ansi';
 import { getConfig } from '../config.js';
-import { buildCursorAgentEnv } from './cursorAgent.js';
+import {
+  attachCursorAgentSpawnGuard,
+  buildCursorAgentEnv,
+  cursorAgentSpawnErrorMessage,
+  resolveCursorAgentPath,
+} from './cursorAgent.js';
 import { childLogger } from '../log.js';
 import { cursorVoiceRuleBody } from '../mcp/loadCursorVoicePrompt.js';
 import {
@@ -200,15 +205,20 @@ export function spawnVoiceAgent(
   );
   log.debug({ args: args.slice(0, -1) }, 'voice agent args');
 
-  const child = spawn('cursor-agent', args, {
+  const agentBin = resolveCursorAgentPath();
+  const child = spawn(agentBin, args, {
     cwd: project.path,
     shell: false,
     env: buildCursorAgentEnv(),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
+  attachCursorAgentSpawnGuard(child, { runId, project: project.name });
+
   const pid = child.pid;
-  if (!pid) throw new Error('cursor-agent failed to spawn (no pid)');
+  if (!pid) {
+    throw new Error(agentBin === 'cursor-agent' ? cursorAgentSpawnErrorMessage() : 'cursor-agent failed to spawn (no pid)');
+  }
 
   updateVoiceAgentRun(runId, { pid });
 

@@ -12,8 +12,10 @@
  *   - Session IDs captured from structured output, not TTY scraping.
  */
 
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import stripAnsi from 'strip-ansi';
 import { getConfig } from '../config.js';
@@ -33,6 +35,57 @@ export function buildCursorAgentEnv(): NodeJS.ProcessEnv {
     OPENAI_API_KEY: undefined,
     GEMINI_API_KEY: undefined,
   };
+}
+
+let cachedCursorAgentPath: string | null = null;
+
+/** Resolve cursor-agent binary — systemd user units often have a minimal PATH. */
+export function resolveCursorAgentPath(): string {
+  if (cachedCursorAgentPath && existsSync(cachedCursorAgentPath)) {
+    return cachedCursorAgentPath;
+  }
+
+  const fromEnv = process.env.CURSOR_AGENT_PATH?.trim();
+  if (fromEnv && existsSync(fromEnv)) {
+    cachedCursorAgentPath = fromEnv;
+    return fromEnv;
+  }
+
+  const home = homedir();
+  for (const candidate of [
+    join(home, '.local/bin/cursor-agent'),
+    join(home, '.cursor/bin/cursor-agent'),
+    '/usr/local/bin/cursor-agent',
+  ]) {
+    if (existsSync(candidate)) {
+      cachedCursorAgentPath = candidate;
+      return candidate;
+    }
+  }
+
+  return 'cursor-agent';
+}
+
+export function isCursorAgentAvailable(): boolean {
+  const path = resolveCursorAgentPath();
+  return path !== 'cursor-agent' || existsSync(path);
+}
+
+/** Prevent spawn ENOENT/EACCES from becoming an uncaught exception (crashes the bridge). */
+export function attachCursorAgentSpawnGuard(
+  child: ChildProcess,
+  context?: Record<string, unknown>,
+): void {
+  child.on('error', (err) => {
+    log.error({ err, ...context }, 'cursor-agent process error');
+  });
+}
+
+export function cursorAgentSpawnErrorMessage(): string {
+  return (
+    'cursor-agent not found — install the Cursor CLI (cursor-agent on PATH) ' +
+    'or set CURSOR_AGENT_PATH in .env'
+  );
 }
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -150,15 +203,20 @@ export function spawnAgent(opts: SpawnOptions): AgentHandle {
   );
   log.debug({ args }, 'cursor-agent args');
 
-  const child = spawn('cursor-agent', args, {
+  const agentBin = resolveCursorAgentPath();
+  const child = spawn(agentBin, args, {
     cwd: opts.project.path,
     shell: false, // SECURITY: never true
     env: buildCursorAgentEnv(),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
+  attachCursorAgentSpawnGuard(child, { project: opts.project.name, mode: opts.mode ?? 'agent' });
+
   const pid = child.pid;
-  if (!pid) throw new Error('cursor-agent failed to spawn (no pid)');
+  if (!pid) {
+    throw new Error(agentBin === 'cursor-agent' ? cursorAgentSpawnErrorMessage() : 'cursor-agent failed to spawn (no pid)');
+  }
 
   const eventListeners: Array<(event: StreamJsonEvent) => void> = [];
 
